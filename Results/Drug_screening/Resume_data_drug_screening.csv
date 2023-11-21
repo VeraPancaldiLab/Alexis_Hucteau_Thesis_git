@@ -1,0 +1,28 @@
+Molm13			BEATAML			Marseille data		
+WT/ IDH1	WT/IDH2	IDH1/IDH2	WT/IDH1	WT/IDH2	IDH1/IDH2	IDH1/IDHwt	IDH2/wt	IDH2(HB)/IDH1
+AGI-5198	AraC	AC-4-130	AKT Inhibitor X	Vargetef	JNK Inhibitor II	Arsenic	Arsenic	Carfilzomib
+Alisertib	Azacitidine	AGI-5198	JNK Inhibitor II	PHA-665752	Vargetef	Clofarabine	AT9283	Clofarabine
+AraC	Birinapant	Alisertib	PD173955	Neratinib (HKI-272)	GW-2580	Navitoclax	Entinostat	Daunorubicine
+Birinapant	Bleomycine	AT9283	Ibrutinib (PCI-32765)	Volasertib (BI-6727)	CYT387	Selinexor	Gilteritinib	Entinostat
+BKM120	Carfilzomib	Azacitidine	PHA-665752	Linifanib (ABT-869)	Doramapimod (BIRB 796)		GSK126	Everolimus
+Bleomycine	Clofarabine	BKM120	Tofacitinib (CP-690550)	Venetoclax	GSK-1838705A		Navitoclax	Gilteritinib
+Cladribine	Dasatinib	Bleomycine	Midostaurin	JQ1	Lenvatinib		Selinexor	GSK126
+Clofarabine	Dexamethasone	Cyclopamine	Selumetinib (AZD6244)	OTX-015	OTX-015		Selinexor	Luminespib 
+Decitabine	EPZ5676	Dasatinib	CYT387	Ibrutinib (PCI-32765)	Masitinib (AB-1010)			Selinexor
+Dexamethasone	Hydroxychloroquine	Decitabine	Linifanib (ABT-869)	Lenvatinib				Venetoclax 
+Etoposide	Lapatinib	EPZ5676	RAF265 (CHIR-265)	PD173955				
+Everolimus	Luminespid	Etoposide	PRT062607	AKT Inhibitor IV				
+Idelalisib	Nelarabine	Everolimus		Vandetanib (ZD6474)				
+Masitinib	Olaparid	Idasanutlin		AKT Inhibitor X				
+Metformin		Luminespid		Tofacitinib (CP-690550)				
+Navitoclax		Masitinib		GW-2580				
+Nelarabine		Midostaurin		JNK Inhibitor II				
+Nutlin 3		Navitoclax		Bortezomib (Velcade)				
+Olaparid		Seliciclib		Doramapimod (BIRB 796)				
+Prima1		Temsirolimus		GSK-1838705A				
+Regorafenib		Tretinoin		Lenalidomide				
+Seliciclib		Venetoclax						
+Temsirolimus		VX680						
+Tretinoin								
+Venetoclax								
+Volasertib								

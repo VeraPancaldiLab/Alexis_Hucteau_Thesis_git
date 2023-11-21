@@ -1,0 +1,5 @@
+~/GitHub/Thesis_paper/Results/Multi_layer_1/DATA/DNA_methylation_Cluster.edges;DNA_methylation;~/GitHub/Thesis_paper/Results/Multi_layer_1/DATA/Cluster_layout.txt
+~/GitHub/Thesis_paper/Results/Multi_layer_1/DATA/GRN_Cluster.edges;GRN;~/GitHub/Thesis_paper/Results/Multi_layer_1/DATA/Cluster_layout.txt
+~/GitHub/Thesis_paper/Results/Multi_layer_1/DATA/fPPI_Cluster.edges;fPPI;~/GitHub/Thesis_paper/Results/Multi_layer_1/DATA/Cluster_layout.txt
+~/GitHub/Thesis_paper/Results/Multi_layer_1/DATA/Gene_reaction_Cluster.edges;Gene_reaction;~/GitHub/Thesis_paper/Results/Multi_layer_1/DATA/Cluster_layout.txt
+~/GitHub/Thesis_paper/Results/Multi_layer_1/DATA/Metabolism_Cluster.edges;Metabolism;~/GitHub/Thesis_paper/Results/Multi_layer_1/DATA/Cluster_layout.txt

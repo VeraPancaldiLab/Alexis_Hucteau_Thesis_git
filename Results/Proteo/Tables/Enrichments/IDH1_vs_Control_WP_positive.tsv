@@ -1,0 +1,179 @@
+	ID	Description	GeneRatio	BgRatio	pvalue	geneID	Count
+WP411	WP411	mRNA processing	6/72	126/8701	0.000585608514465685	11129/10978/9128/9410/6429/6431	6
+WP3865	WP3865	Novel intracellular components of RIG-I-like receptor pathway	3/72	60/8701	0.0132744627719178	10521/57506/22938	3
+WP4686	WP4686	Leucine, isoleucine and valine metabolism	2/72	24/8701	0.0165706429671289	197322/64087	2
+WP4549	WP4549	Fragile X syndrome	4/72	122/8701	0.0182037657002222	27161/7915/1374/5163	4
+WP4655	WP4655	Cytosolic DNA-sensing pathway	3/72	74/8701	0.0231713412549479	57506/9533/10623	3
+WP5351	WP5351	Kleefstra syndrome	2/72	29/8701	0.0237380133798126	57492/9070	2
+WP4022	WP4022	Pyrimidine metabolism	3/72	84/8701	0.0321346655147344	129607/9533/10623	3
+WP477	WP477	Cytoplasmic ribosomal proteins	3/72	88/8701	0.0361596908102711	6141/6144/3921	3
+WP4844	WP4844	Influence of laminopathies on Wnt signaling	2/72	37/8701	0.0373291664680102	27161/860	2
+WP138	WP138	Androgen receptor signaling pathway	3/72	91/8701	0.0393413796488711	10524/8554/860	3
+WP4290	WP4290	Metabolic reprogramming in colon cancer	2/72	42/8701	0.0470066441562275	5471/29920	2
+WP2332	WP2332	Interleukin-11 signaling pathway	2/72	44/8701	0.051108165185468	8554/860	2
+WP585	WP585	Interferon type I signaling pathways	2/72	54/8701	0.0733740719614014	1398/8554	2
+WP4324	WP4324	Mitochondrial complex I assembly model OXPHOS system	2/72	56/8701	0.0781451998179797	55572/55471	2
+WP3934	WP3934	Leptin and adiponectin	1/72	10/8701	0.0797745324861533	1374	1
+WP5050	WP5050	TCA cycle in senescence	1/72	10/8701	0.0797745324861533	5163	1
+WP5187	WP5187	mRNA vaccine activation of dendritic cell and induction of IFN-1	1/72	10/8701	0.0797745324861533	57506	1
+WP4879	WP4879	Overlap between signal transduction pathways contributing to LMNA laminopathies	2/72	57/8701	0.0805667813351831	27161/860	2
+WP4157	WP4157	GABA metabolism (aka GHB)	1/72	11/8701	0.0873980779539933	7915	1
+WP1425	WP1425	Bone morphogenic protein signaling and regulation	1/72	12/8701	0.0949593366867101	860	1
+WP229	WP229	Irinotecan pathway	1/72	12/8701	0.0949593366867101	4363	1
+WP2290	WP2290	RalA downstream regulated genes	1/72	12/8701	0.0949593366867101	5898	1
+WP5191	WP5191	Resolvin E1 and resolvin D1 signaling pathways promoting inflammation resolution	1/72	12/8701	0.0949593366867101	5163	1
+WP3892	WP3892	Development of pulmonary dendritic cells and macrophage subsets	1/72	13/8701	0.102458810476394	860	1
+WP5171	WP5171	Leukotriene metabolic pathway	1/72	13/8701	0.102458810476394	4363	1
+WP5314	WP5314	Lactate shuttle in glial cells	1/72	13/8701	0.102458810476394	760	1
+WP1982	WP1982	Sterol regulatory element-binding proteins (SREBP) signaling	2/72	71/8701	0.116678103471501	84532/1595	2
+WP197	WP197	Cholesterol biosynthesis pathway	1/72	15/8701	0.117274390500072	1595	1
+WP2853	WP2853	Endoderm differentiation	3/72	145/8701	0.118274922284796	9425/8554/23168	3
+WP4673	WP4673	Male infertility	3/72	145/8701	0.118274922284796	27161/2876/23369	3
+WP4255	WP4255	Non-small cell lung cancer	2/72	72/8701	0.119395525621616	1643/5163	2
+WP4216	WP4216	Chromosomal and microsatellite instability in colorectal cancer 	2/72	73/8701	0.122128866623976	1643/5898	2
+WP4705	WP4705	Pathways of nucleic acid metabolism and innate immune sensing	1/72	16/8701	0.12459148051665	57506	1
+WP4921	WP4921	Mitochondrial complex III assembly	1/72	16/8701	0.12459148051665	90624	1
+WP368	WP368	Mitochondrial long chain fatty acid beta-oxidation	1/72	17/8701	0.13184875321703	1374	1
+WP3859	WP3859	TGF-beta signaling in thyroid cells for epithelial-mesenchymal transition	1/72	17/8701	0.13184875321703	860	1
+WP5188	WP5188	Retinol metabolism	1/72	17/8701	0.13184875321703	112724	1
+WP5193	WP5193	Cholesterol synthesis disorders	1/72	18/8701	0.139046690776723	1595	1
+WP100	WP100	Glutathione metabolism	1/72	19/8701	0.146185771539601	2876	1
+WP4707	WP4707	Aspirin and miRNAs	1/72	19/8701	0.146185771539601	5163	1
+WP5123	WP5123	Mitochondrial fatty acid oxidation disorders	1/72	19/8701	0.146185771539601	1374	1
+WP3640	WP3640	Imatinib and chronic myeloid leukemia	1/72	20/8701	0.153266470047911	4839	1
+WP4206	WP4206	Hereditary leiomyomatosis and renal cell carcinoma pathway	1/72	20/8701	0.153266470047911	5163	1
+WP4760	WP4760	PKC-gamma calcium signaling pathway in ataxia	1/72	22/8701	0.167254599640117	5163	1
+WP5111	WP5111	Familial hyperlipidemia type 4	1/72	22/8701	0.167254599640117	84532	1
+WP5194	WP5194	Synthesis of ceramides and 1-deoxyceramides	1/72	22/8701	0.167254599640117	29956	1
+WP4263	WP4263	Pancreatic adenocarcinoma pathway	2/72	89/8701	0.16768628820165	1643/5898	2
+WP4197	WP4197	Immune response to tuberculosis	1/72	23/8701	0.174162961067229	8554	1
+WP4224	WP4224	Purine metabolism and related disorders	1/72	23/8701	0.174162961067229	5471	1
+WP4288	WP4288	MTHFR deficiency	1/72	24/8701	0.181014800984625	55471	1
+WP3668	WP3668	Hypothesized pathways in pathogenesis of cardiovascular disease	1/72	25/8701	0.187810575368525	860	1
+WP4725	WP4725	Sphingolipid metabolism overview	1/72	25/8701	0.187810575368525	29956	1
+WP4963	WP4963	p53 transcriptional gene network	2/72	96/8701	0.188450461368928	1643/2876	2
+WP4754	WP4754	IL-18 signaling pathway	4/72	273/8701	0.189320554284598	1374/56257/23787/860	4
+WP2878	WP2878	PPAR-alpha pathway	1/72	26/8701	0.194550736568787	1374	1
+WP4726	WP4726	Sphingolipid metabolism: integrated pathway	1/72	26/8701	0.194550736568787	29956	1
+WP581	WP581	EPO receptor signaling	1/72	26/8701	0.194550736568787	5163	1
+WP5064	WP5064	7-oxo-C and 7-beta-HC pathways	1/72	27/8701	0.201235733337323	55856	1
+WP5183	WP5183	SARS-CoV-2 mitochondrial chronic oxidative stress and endothelial dysfunction	1/72	27/8701	0.201235733337323	57506	1
+WP5287	WP5287	17q12 copy number variation syndrome	2/72	101/8701	0.203495568070404	51755/54475	2
+WP2583	WP2583	T cell receptor and co-stimulatory signaling	1/72	28/8701	0.207866010856312	5163	1
+WP5121	WP5121	Sphingolipid metabolism in senescence	1/72	28/8701	0.207866010856312	29956	1
+WP1422	WP1422	Sphingolipid pathway	1/72	30/8701	0.220964171193405	29956	1
+WP4321	WP4321	Thermogenesis	2/72	108/8701	0.224776826112153	57492/1374	2
+WP3982	WP3982	miRNA regulation of p53 pathway in prostate cancer	1/72	31/8701	0.227432926778006	1643	1
+WP4204	WP4204	Tumor suppressor activity of SMARCB1	1/72	31/8701	0.227432926778006	57492	1
+WP430	WP430	Statin inhibition of cholesterol production	1/72	31/8701	0.227432926778006	84532	1
+WP4752	WP4752	Base excision repair	1/72	31/8701	0.227432926778006	4350	1
+WP4868	WP4868	Type I interferon induction and signaling during SARS-CoV-2 infection	1/72	31/8701	0.227432926778006	57506	1
+WP4912	WP4912	SARS coronavirus and innate immunity	1/72	31/8701	0.227432926778006	57506	1
+WP2263	WP2263	Androgen receptor network in prostate cancer	2/72	110/8701	0.230892119223539	57492/1398	2
+WP5366	WP5366	NF1 copy number variation syndrome 	2/72	110/8701	0.230892119223539	57506/10988	2
+WP2839	WP2839	Hair follicle development: organogenesis - part 2 of 3	1/72	32/8701	0.233848708700957	860	1
+WP3844	WP3844	PI3K-AKT-mTOR signaling pathway and therapeutic opportunities in prostate cancer	1/72	32/8701	0.233848708700957	5163	1
+WP5312	WP5312	Metabolic pathways of fibroblasts	1/72	32/8701	0.233848708700957	5033	1
+WP3998	WP3998	Prader-Willi and Angelman syndrome	2/72	111/8701	0.233954260752841	2733/55706	2
+WP5380	WP5380	5q35 copy number variation	2/72	111/8701	0.233954260752841	51491/23567	2
+WP408	WP408	Oxidative stress response	1/72	33/8701	0.240211944711284	2876	1
+WP4786	WP4786	Type I collagen synthesis in the context of osteogenesis imperfecta	1/72	33/8701	0.240211944711284	5033	1
+WP4880	WP4880	Host-pathogen interaction of human coronaviruses - interferon induction	1/72	33/8701	0.240211944711284	57506	1
+WP5038	WP5038	Mitochondrial immune response to SARS-CoV-2	1/72	33/8701	0.240211944711284	57506	1
+WP4659	WP4659	Gastrin signaling pathway	2/72	115/8701	0.246226923886925	1398/10524	2
+WP143	WP143	Fatty acid beta-oxidation	1/72	34/8701	0.246523059152999	1374	1
+WP1601	WP1601	Fluoropyrimidine activity	1/72	34/8701	0.246523059152999	5471	1
+WP313	WP313	Hepatocyte growth factor receptor signaling	1/72	34/8701	0.246523059152999	1398	1
+WP3971	WP3971	OSX and miRNAs in tooth development	1/72	34/8701	0.246523059152999	860	1
+WP5202	WP5202	Alstrom syndrome	1/72	34/8701	0.246523059152999	6811	1
+WP3850	WP3850	Factors and pathways affecting insulin-like growth factor (IGF1)-Akt signaling	1/72	36/8701	0.258990603841637	5163	1
+WP5333	WP5333	Enterocyte cholesterol metabolism	1/72	36/8701	0.258990603841637	1595	1
+WP4946	WP4946	DNA repair pathways, full network	2/72	120/8701	0.261603960221873	1643/4350	2
+WP2447	WP2447	Amyotrophic lateral sclerosis (ALS)	1/72	38/8701	0.271254670428653	2876	1
+WP4871	WP4871	Kisspeptin/kisspeptin receptor system in the ovary	1/72	39/8701	0.277311424870433	5163	1
+WP4148	WP4148	Splicing factor NOVA regulated synaptic proteins	1/72	42/8701	0.295185416811375	22938	1
+WP4753	WP4753	Nucleotide excision repair	1/72	44/8701	0.306858491261054	1643	1
+WP3878	WP3878	ATM signaling in development and disease 	1/72	45/8701	0.312623327651167	10524	1
+WP4566	WP4566	Translation inhibitors in chronically activated PDGFRA cells	1/72	46/8701	0.318340878530223	5163	1
+WP4718	WP4718	Cholesterol metabolism with Bloch and Kandutsch-Russell pathways	1/72	47/8701	0.324011526334478	1595	1
+WP4312	WP4312	Rett syndrome causing genes	1/72	48/8701	0.329635650450946	1398	1
+WP5300	WP5300	TROP2 regulatory signaling	1/72	49/8701	0.33521362724137	4363	1
+WP5373	WP5373	Role of hypoxia, angiogenesis, and FGF pathway in OA chondrocyte hypertrophy	1/72	50/8701	0.340745830065991	860	1
+WP4545	WP4545	Oxysterols derived from cholesterol	1/72	51/8701	0.346232629307148	55856	1
+WP4666	WP4666	Hepatitis B infection	2/72	151/8701	0.356315232869087	1643/57506	2
+WP51	WP51	Regulation of actin cytoskeleton	2/72	151/8701	0.356315232869087	1398/10163	2
+WP5144	WP5144	NRP1-triggered signaling pathways in pancreatic cancer 	1/72	54/8701	0.362424265174982	1105	1
+WP3959	WP3959	DNA IR-double strand breaks and cellular response via ATM	1/72	55/8701	0.367733095163117	10524	1
+WP560	WP560	TGF-beta receptor signaling	1/72	55/8701	0.367733095163117	860	1
+WP4917	WP4917	Proximal tubule transport	1/72	57/8701	0.378220321557665	760	1
+WP706	WP706	Sudden infant death syndrome (SIDS) susceptibility pathways	2/72	160/8701	0.383157944983045	1374/6670	2
+WP2023	WP2023	Cell differentiation - expanded index	1/72	59/8701	0.388535975777924	860	1
+WP304	WP304	Kit receptor signaling pathway	1/72	59/8701	0.388535975777924	1398	1
+WP4205	WP4205	MET in type 1 papillary renal cell carcinoma	1/72	59/8701	0.388535975777924	1398	1
+WP4816	WP4816	TGF-beta receptor signaling in skeletal dysplasias	1/72	59/8701	0.388535975777924	860	1
+WP5323	WP5323	Fatty Acids and Lipoproteins Transport in Hepatocytes	4/72	382/8701	0.389681871631424	1374/1595/57488/10163	4
+WP437	WP437	EGF/EGFR signaling pathway	2/72	163/8701	0.392005246745938	1398/5898	2
+WP61	WP61	Notch signaling pathway	1/72	61/8701	0.39868282586762	22938	1
+WP3863	WP3863	T-cell antigen receptor (TCR) pathway during Staphylococcus aureus infection	1/72	62/8701	0.403693802318723	5163	1
+WP3945	WP3945	TYROBP causal network in microglia	1/72	62/8701	0.403693802318723	2876	1
+WP5180	WP5180	DYRK1A involvement regarding cell proliferation in brain development	1/72	62/8701	0.403693802318723	10238	1
+WP4155	WP4155	Endometrial cancer	1/72	63/8701	0.408663595840317	1643	1
+WP474	WP474	Endochondral ossification	1/72	63/8701	0.408663595840317	860	1
+WP4808	WP4808	Endochondral ossification with skeletal dysplasias	1/72	63/8701	0.408663595840317	860	1
+WP5222	WP5222	2q13 copy number variation syndrome	1/72	63/8701	0.408663595840317	9533	1
+WP5362	WP5362	TAR syndrome	1/72	63/8701	0.408663595840317	10623	1
+WP43	WP43	Oxidation by cytochrome P450	1/72	64/8701	0.41359254016765	1595	1
+WP2369	WP2369	Histone modifications	1/72	65/8701	0.418480966369795	4297	1
+WP3680	WP3680	Physico-chemical features and toxicity-associated pathways	1/72	66/8701	0.423329202870649	2876	1
+WP5039	WP5039	SARS-CoV-2 innate immunity evasion and cell-specific immune response	1/72	66/8701	0.423329202870649	57506	1
+WP1403	WP1403	AMP-activated protein kinase signaling	1/72	67/8701	0.428137575469759	1374	1
+WP2525	WP2525	Trans-sulfuration, one-carbon metabolism and related pathways	1/72	68/8701	0.432906407362992	2876	1
+WP3303	WP3303	RAC1/PAK1/p38/MMP2 pathway	1/72	68/8701	0.432906407362992	1398	1
+WP3942	WP3942	PPAR signaling pathway	1/72	68/8701	0.432906407362992	1374	1
+WP4685	WP4685	Melanoma	1/72	68/8701	0.432906407362992	1643	1
+WP176	WP176	Folate metabolism	1/72	69/8701	0.437636019163046	2876	1
+WP707	WP707	DNA damage response	1/72	69/8701	0.437636019163046	1643	1
+WP5304	WP5304	Cholesterol metabolism	1/72	72/8701	0.451592701809765	1595	1
+WP3584	WP3584	MECP2 and associated Rett syndrome	1/72	73/8701	0.456168588409568	6670	1
+WP5356	WP5356	Disturbed pathways in Duchenne Muscular Dystrophy	1/72	74/8701	0.460706819938834	292	1
+WP4341	WP4341	Non-genomic actions of 1,25 dihydroxyvitamin D3	1/72	75/8701	0.465207701933086	6670	1
+WP5114	WP5114	Nucleotide excision repair in xeroderma pigmentosum 	1/72	75/8701	0.465207701933086	1643	1
+WP4656	WP4656	Joubert syndrome	1/72	76/8701	0.469671537483841	10524	1
+WP5205	WP5205	Clock-controlled autophagy in bone metabolism	1/72	80/8701	0.487162392617141	860	1
+WP3594	WP3594	Circadian rhythm genes	2/72	201/8701	0.498550471062176	1374/4297	2
+WP5094	WP5094	Orexin receptor pathway	2/72	201/8701	0.498550471062176	5163/860	2
+WP15	WP15	Selenium micronutrient network	1/72	86/8701	0.512337309403148	2876	1
+WP69	WP69	T-cell receptor signaling pathway	1/72	90/8701	0.528439435507484	1398	1
+WP3925	WP3925	Amino acid metabolism	1/72	91/8701	0.532382341168088	84532	1
+WP5355	WP5355	Metabolic Epileptic Disorders	1/72	91/8701	0.532382341168088	292	1
+WP4352	WP4352	Ciliary landscape	2/72	215/8701	0.534799252798566	10238/5393	2
+WP673	WP673	ErbB signaling pathway	1/72	92/8701	0.536292732740202	1398	1
+WP5115	WP5115	Network map of SARS-CoV-2 signaling pathway	2/72	218/8701	0.542336229192147	57506/8554	2
+WP4658	WP4658	Small cell lung cancer	1/72	96/8701	0.55161441391444	1643	1
+WP23	WP23	B cell receptor signaling pathway	1/72	97/8701	0.55536615850458	1398	1
+WP1530	WP1530	miRNA regulation of DNA damage response	1/72	98/8701	0.559086943789061	1643	1
+WP185	WP185	Integrin-mediated cell adhesion	1/72	102/8701	0.573665499785987	1398	1
+WP111	WP111	Electron transport chain: OXPHOS system in mitochondria	1/72	105/8701	0.584286487767566	292	1
+WP5329	WP5329	Cholesterol biosynthesis pathway in hepatocytes	1/72	111/8701	0.604751762301099	1595	1
+WP710	WP710	DNA damage response (only ATM dependent)	1/72	111/8701	0.604751762301099	5163	1
+WP5345	WP5345	1p36 copy number variation syndrome	1/72	112/8701	0.608064669532103	56257	1
+WP5322	WP5322	CKAP4 signaling pathway map	1/72	116/8701	0.621044663950769	64083	1
+WP4787	WP4787	Osteoblast differentiation and related diseases	1/72	119/8701	0.630500593972251	860	1
+WP3915	WP3915	Angiopoietin-like protein 8 regulatory pathway	1/72	132/8701	0.668858230909497	1398	1
+WP4630	WP4630	Measles virus infection	1/72	136/8701	0.679850160185895	57506	1
+WP5413	WP5413	IL-24 Signaling pathway	2/72	291/8701	0.699729540322389	4363/2876	2
+WP5224	WP5224	2q37 copy number variation syndrome	1/72	145/8701	0.703283556635704	51540	1
+WP2857	WP2857	Mesodermal commitment pathway	1/72	154/8701	0.725023834132112	8554	1
+WP4262	WP4262	Breast cancer pathway	1/72	155/8701	0.727340235669784	1643	1
+WP481	WP481	Insulin signaling	1/72	160/8701	0.738636708054347	1398	1
+WP3929	WP3929	Chemokine signaling pathway	1/72	166/8701	0.751584568610051	1398	1
+WP5316	WP5316	Primary ovarian insufficiency	1/72	174/8701	0.767869094543016	26284	1
+WP4223	WP4223	Ras signaling	1/72	184/8701	0.786751039384483	5898	1
+WP702	WP702	Metapathway biotransformation Phase I and II	1/72	185/8701	0.788553778044142	1595	1
+WP306	WP306	Focal adhesion	1/72	199/8701	0.812268857541874	1398	1
+WP382	WP382	MAPK signaling pathway	1/72	247/8701	0.875332543444729	1398	1
+WP3888	WP3888	VEGFA-VEGFR2 signaling	2/72	432/8701	0.87931891501132	1398/2876	2
+WP5124	WP5124	Alzheimer's disease	1/72	263/8701	0.891290702453715	292	1
+WP2882	WP2882	Nuclear receptors meta-pathway	1/72	314/8701	0.929871435708498	1374	1
+WP2059	WP2059	Alzheimer's disease and miRNA effects	1/72	328/8701	0.937851214142839	292	1
+WP5087	WP5087	Pleural mesothelioma	1/72	440/8701	0.976528811086494	5163	1

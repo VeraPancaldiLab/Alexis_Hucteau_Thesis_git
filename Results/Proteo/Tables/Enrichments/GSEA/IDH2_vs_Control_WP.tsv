@@ -1,0 +1,10 @@
+	ID	Description	setSize	enrichmentScore	NES	pvalue	rank	leading_edge	core_enrichment
+WP5115	WP5115	Network map of SARS-CoV-2 signaling pathway	6	0.727101817225402	1.56540360518068	0.0159569703865391	65	tags=67%, list=24%, signal=52%	1051/1522/3122/7535
+WP231	WP231	TNF-alpha signaling pathway	3	-0.807407407407407	-1.50526719584526	0.0242313530654888	56	tags=100%, list=21%, signal=80%	10131/2752
+WP5323	WP5323	Fatty Acids and Lipoproteins Transport in Hepatocytes	13	0.579280526436256	1.48961607311176	0.0278350515463918	82	tags=62%, list=30%, signal=45%	5869/4864/55911/6653/1892/10654/2181/9522
+WP410	WP410	Exercise-induced circadian regulation	2	0.900369003690037	1.42376272606335	0.0444444444444444	29	tags=100%, list=11%, signal=90%	1051/5813
+WP3613	WP3613	Photodynamic therapy-induced unfolded protein response	3	0.788803974413863	1.41665556069568	0.0482398956975228	5	tags=33%, list=2%, signal=33%	10130
+WP4786	WP4786	Type I collagen synthesis in the context of osteogenesis imperfecta	4	-0.71003717472119	-1.47480357626659	0.0491446215876443	83	tags=100%, list=30%, signal=71%	5479/79709/5033
+WP4301	WP4301	Inhibition of exosome biogenesis and secretion by Manumycin A in CRPC cells	2	0.866308000308947	1.3699017126038	0.0725925925925926	2	tags=50%, list=1%, signal=50%	5869
+WP5345	WP5345	1p36 copy number variation syndrome	3	0.757481686754971	1.36040217655338	0.0730117340286832	16	tags=33%, list=6%, signal=32%	55052
+WP4352	WP4352	Ciliary landscape	9	0.571799413190899	1.34619325136447	0.096529284164859	89	tags=78%, list=33%, signal=54%	7328/1892/2720/10238/10982/2181/10128

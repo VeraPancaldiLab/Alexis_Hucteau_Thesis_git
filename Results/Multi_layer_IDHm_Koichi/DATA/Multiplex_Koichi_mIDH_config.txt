@@ -1,0 +1,5 @@
+~/GitHub/Thesis_paper/Results/Multi_layer_IDHm_Koichi/DATA/DNA_methylation_Koichi_mIDH.edges;DNA_methylation;~/GitHub/Thesis_paper/Results/Multi_layer_IDHm_Koichi/DATA/Koichi_mIDH_layout.txt
+~/GitHub/Thesis_paper/Results/Multi_layer_IDHm_Koichi/DATA/GRN_Koichi_mIDH.edges;GRN;~/GitHub/Thesis_paper/Results/Multi_layer_IDHm_Koichi/DATA/Koichi_mIDH_layout.txt
+~/GitHub/Thesis_paper/Results/Multi_layer_IDHm_Koichi/DATA/fPPI_Koichi_mIDH.edges;fPPI;~/GitHub/Thesis_paper/Results/Multi_layer_IDHm_Koichi/DATA/Koichi_mIDH_layout.txt
+~/GitHub/Thesis_paper/Results/Multi_layer_IDHm_Koichi/DATA/Gene_reaction_Koichi_mIDH.edges;Gene_reaction;~/GitHub/Thesis_paper/Results/Multi_layer_IDHm_Koichi/DATA/Koichi_mIDH_layout.txt
+~/GitHub/Thesis_paper/Results/Multi_layer_IDHm_Koichi/DATA/Metabolism_Koichi_mIDH.edges;Metabolism;~/GitHub/Thesis_paper/Results/Multi_layer_IDHm_Koichi/DATA/Koichi_mIDH_layout.txt

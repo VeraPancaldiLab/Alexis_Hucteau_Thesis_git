@@ -1,0 +1,423 @@
+compound name	compound synonyms	target or activity of compound	gene symbol of protein target	status	tested concentrations	max conc for AUC
+1,9-pyrazoloanthrone	anthrapyrazolone, pyrazolanthrone, pyrazolanthrone, pyrazoleanthrone, SP 6001...	inhibitor of Jun N-terminal kinase (JNK) 1/2/3	MAPK10;MAPK8;MAPK9	probe	0.00200 - 66.0 uM	66
+16-beta-bromoandrosterone	16alpha bromoepiandrosterone, BRD4142, BRD-K98404142	dehydroepiandrosterone (DHEA) analog		probe	0.00110 - 37.0 uM	37
+1S,3R-RSL-3	BRD-K23853216	synthetic lethal with HRAS in engineered cells; inhibitor of GPX4	GPX4	probe	0.00100 - 33.0 uM	33
+3-Cl-AHPC	BRD-A09890259	binder of nuclear receptor SHP	NR0B2	probe	0.00200 - 66.0 uM	66
+8,9-dihydropiplartine	GP_70, BRD-K26531177	analog of the natural product piperlongumine		probe	0.0100 - 330 uM	330
+A-804598	BRD-K76894955	inhibitor of purinergic receptor P2X	P2RX7	probe	0.00200 - 66.0 uM	66
+AA-COCF3	AACOCF3, AA-COCF3, arachidonyl trifluoromethyl ketone, BRD-K07303502	inhibitor of cytosolic phospholipase A2; inhibitor of fatty acid amide hydrolase	FAAH;PLA2G4A;PLA2G4B;PLA2G4C;PLA2G4D	probe	0.00100 - 270 uM	270
+abiraterone	Abiraterone, CB-7598, Zytiga, BRD-K50071428	"inhibitor of 17 alpha-hydroxylase and C17,20 lyase"""	CYP17A1	approved	0.000510 - 17.0 uM	17
+ABT-199	venetoclax, BRD-K62391742	inhibitor of BCL2	BCL2	experimental	0.00200 - 66.0 uM	66
+ABT-737	ABT-737, BRD-K56301217	"inhibitor of BCL2, BCL-xL, and BCL-W"""	BCL2;BCL2L1;BCL2L2	experimental	0.00110 - 37.0 uM	37
+AC55649	AC-55649, AC55649, BRD-K93176058	agonist of retinoic acid receptor beta	RARB	probe	0.00100 - 33.0 uM	33
+adavosertib	MK-1775, MK 1775, MK1775, AZD1775, BRD6913, BRD-K54256913	inhibitor of WEE1	WEE1	experimental	0.00100 - 33.0 uM	33
+afatinib	BIBW2992, Afatinib, Tovok, BRD-K66175015	inhibitor of EGFR and HER2	EGFR;ERBB2	experimental	0.00200 - 66.0 uM	66
+AGK-2	AGK2, BRD-K32536677	inhibitor of sirtuin 2	SIRT2	probe	0.00100 - 33.0 uM	33
+alisertib	MLN8237, alisertib, BRD-K75295174	inhibitor of aurora kinases A and B	AURKA;AURKB	experimental	0.00200 - 66.0 uM	66
+alvocidib	flavopiridol, BRD-K68682020	inhibitor of cyclin-dependent kinases	CDK1;CDK2;CDK4;CDK6	experimental	0.00200 - 66.0 uM	66
+AM-580	AM-580, BRD-K06854232	agonist of retinoic acid receptor alpha	RARA	probe	0.0160 - 530 uM	530
+apicidin	BRD-K64606589	"inhibitor of HDAC1, HDAC2, HDAC3, HDAC6, and HDAC8"""	HDAC1;HDAC2;HDAC3;HDAC6;HDAC8	probe	0.00100 - 33.0 uM	33
+AT-406	BRD-K83030136	SMAC mimetic; inhibitor of inhibitor of apoptosis proteins (IAPs)	XIAP	probe	0.00200 - 66.0 uM	66
+AT7867	BRD-K12040459	inhibitor of AKT1/2/3 and S6K	AKT1;AKT2;AKT3;RPS6KB2	probe	0.00200 - 66.0 uM	66
+austocystin D	austocystin D, BRD-K25987073	natural product; inducer of DNA damage		probe	0.00110 - 37.0 uM	37
+avicin D	BRD-A15100685	natural product		probe	0.00200 - 66.0 uM	66
+avrainvillamide	avrainvillamide, BRD-K10466330	natural product; inhibitor of nucleophosmin	NPM1	probe	0.00100 - 33.0 uM	33
+axitinib	AG013736, Inlyta, BRD-K29905972	"inhibitor of VEGFRs, c-KIT, and PDGFR alpha and beta"""	FLT1;FLT3;KDR;KIT;PDGFRA;PDGFRB	approved	0.00200 - 66.0 uM	66
+AZ-3146	AZ3146, BRD-K59146805	inhibitor of TTK protein kinase	TTK	probe	0.00200 - 66.0 uM	66
+azacitidine	azacitidine, 5-aza-CR, 5-azacytidine, 5-AZC, 5-AZCR, 5AC, 5-AC, AZACITIDINE, ...	inhibitor of DNA methyltransferase	DNMT1	approved	0.00200 - 66.0 uM	66
+AZD1480	BRD-K65928735	inhibitor of Janus kinases 1 and 2	JAK1;JAK2	experimental	0.00200 - 66.0 uM	66
+AZD4547	BRD-K28392481	inhibitor of fibroblast growth factor receptors	FGFR1;FGFR2;FGFR3	experimental	0.00200 - 66.0 uM	66
+AZD6482	BRD-K58772419	inhibitor of PI3K catalytic subunits beta and delta	PIK3CB;PIK3CD	experimental	0.00200 - 66.0 uM	66
+AZD7545	AZD-7545, AZD7545, BRD-K52836380	inhibitor of pyruvate dehydrogenase kinase 2	PDK2	probe	0.00230 - 74.0 uM	74
+AZD7762	AZD 7762, BRD-K86525559	inhibitor of checkpoint kinases 1 and 2	CHEK1;CHEK2	experimental	0.00200 - 66.0 uM	66
+AZD8055	BRD-K69932463	inhibitor of mTOR	MTOR	experimental	0.00200 - 66.0 uM	66
+B02	BO2, BRD-K10882151	inhibitor of RAD51	RAD51	probe	0.00410 - 130 uM	130
+bafilomycin A1	bafilomycin A1, bafilomycin, BRD-K86787118	inhibitor of the vacuolar-type H+-ATPase	ATP6V0A1	probe	0.0000100 - 0.330 uM	0.33
+barasertib	AZD1152-HQPA, Barasertib, barasertib-HQPA, BRD-K63923597	inhibitor of aurora kinase B	AURKB	experimental	0.00200 - 66.0 uM	66
+bardoxolone methyl	CDDO-methyl ester, CDDO-Me, BRD-K59437938	electrophilic inducer of the NFE2L2-KEAP1 pathway		experimental	0.00200 - 66.0 uM	66
+Bax channel blocker	BAX-channel-blocker, Bax channel blocker, BRD3547, BRD-A18763547, BRD-K01826533	inhibitor of BAX-mediated mitochondrial cytochrome c release	BAX	probe	0.00100 - 33.0 uM	33
+BCL-LZH-4	BRD-A68258842	"inhibitor of BCL2, BCL-xL, and MCL1"""		probe	0.00200 - 66.0 uM	66
+BEC	bec, BEC chloride, BRD2571, BRD-K53792571	inhibitor of arginase I and II	ARG1;ARG2	probe	0.00810 - 270 uM	270
+belinostat	PXD101, PXD-101, belinostat, BRD-K17743125	"inhibitor of HDAC1, HDAC2, HDAC3, HDAC6, and HDAC8"""	HDAC1;HDAC2;HDAC3;HDAC6;HDAC8	experimental	0.00200 - 66.0 uM	66
+bendamustine	bendamustine, bendamustine hydrochloride, Levact, Ribomustin, Treakisym, Treanda, BRD-K17068645	DNA alkylator		approved	0.00200 - 66.0 uM	66
+betulinic acid	Betulinic acid, betulinic acid, mairin, betulinic-acid, BRD-K45401373	natural product; inhibitor of specificity protein 1 transcription factor in cells		probe	0.00200 - 66.0 uM	66
+bexarotene	bexarotene, Targretin, BRD-K92441787	inhibitor of retinoid X receptors	RXRA;RXRB;RXRG	approved	0.00200 - 66.0 uM	66
+BI-2536	BI 2536, BRD-K64890080	inhibitor of polo-like kinase 1 (PLK1)	PLK1	experimental	0.00100 - 33.0 uM	33
+BIBR1532	BIBR-1532, BRD-K04623885	inhibitor of telomerase reverse transcriptase	TERT	probe	0.00810 - 270 uM	270
+birinapant	TL-32711, BRD-K18589165	SMAC mimetic; inhibitor of inhibitor of apoptosis proteins (IAPs)	DIABLO;XIAP	experimental	0.00200 - 66.0 uM	66
+BIX-01294	BIX01294, BIX 01294, BIX-01294, BRD-K26818574	inhibitor of G9a histone methyltransferase	EHMT2	probe	0.00100 - 33.0 uM	33
+blebbistatin	blebbistatin, blebbistatin-(+/-), blebbistatin, BRD-A75817871	inhibitor of myosin II ATPases	MYH1;MYH2	probe	0.00410 - 130 uM	130
+bleomycin A2	bleomycin A2, bleomycin sulfate, bleomycin, Bleomycin, Blenoxane, BRD-A42083487, BRD-K01825699	inducer of DNA damage		approved	0.00200 - 66.0 uM	66
+BMS-195614	BRD-K45935533	antagonist of retinoic acid receptors	RARA;RARB;RARG	probe	0.00200 - 66.0 uM	66
+BMS-270394	BRD-K04905989	antagonist of retinoic acid receptor gamma	RARG	probe	0.00200 - 66.0 uM	66
+BMS-345541	BRD-K13566078	inhibitor of IKK-2	IKBKB	probe	0.00200 - 66.0 uM	66
+BMS-536924	BMS-536924, BRD-K34581968	inhibitor of insulin-like growth factor 1 receptor (IGF1R) and insulin receptor (INSR)	IGF1R;INSR	probe	0.00110 - 37.0 uM	37
+BMS-754807	BRD-K13049116	inhibitor of insulin-like growth factor 1 receptor and insulin receptor	IGF1R	probe	0.00100 - 33.0 uM	33
+bortezomib	MLN-341, PS-341, Bortezomib, MG-341, Velcade, BRD-K88510285	inhibitor of 26S proteasome	PSMB1;PSMB2;PSMB5;PSMD1;PSMD2	approved	0.00000400 - 0.130 uM	0.13
+bosutinib	SKI-606, Bosulif, BRD-K90746395	inhibitor of SRC and ABL1	ABL1;SRC	approved	0.00200 - 66.0 uM	66
+BRD-A02303741		inhibitor of histone methyltransferases	DOT1L	probe	0.00170 - 55.0 uM	55
+BRD-A05715709		putative inhibitor of IDH1 R132H	IDH1	probe	0.00200 - 66.0 uM	66
+BRD-A71883111		putative inhibitor of IDH1 R132H	IDH1	probe	0.00100 - 33.0 uM	33
+BRD-A86708339		screening hit		probe	0.00200 - 66.0 uM	66
+BRD-A94377914		"inhibitor of HDAC1, HDAC2, HDAC3, HDAC6, and HDAC8"""	HDAC1;HDAC2;HDAC3;HDAC6;HDAC8	probe	0.00100 - 33.0 uM	33
+BRD-K01737880		screening hit		probe	0.00200 - 66.0 uM	66
+BRD-K01825520	BRD-A52530402	inhibitor of HMG-CoA reductase	HMGCR	approved	0.00200 - 66.0 uM	66
+BRD-K02251932		product of diversity oriented synthesis		transcriptionally active	0.00200 - 66.0 uM	66
+BRD-K02492147		product of diversity oriented synthesis		transcriptionally active	0.00200 - 66.0 uM	66
+BRD-K04800985		product of diversity oriented synthesis		transcriptionally active	0.00200 - 67.0 uM	67
+BRD-K09344309		screening hit		probe	0.00100 - 33.0 uM	33
+BRD-K09587429		product of diversity oriented synthesis		transcriptionally active	0.00200 - 66.0 uM	66
+BRD-K11533227		inhibitor of HDAC1 and HDAC2	HDAC1;HDAC2	probe	0.00200 - 66.0 uM	66
+BRD-K13999467		product of diversity oriented synthesis		transcriptionally active	0.00200 - 67.0 uM	67
+BRD-K14844214		product of diversity oriented synthesis		transcriptionally active	0.00200 - 66.0 uM	66
+BRD-K16147474		product of diversity oriented synthesis		transcriptionally active	0.00200 - 66.0 uM	66
+BRD-K17060750		product of diversity oriented synthesis		transcriptionally active	0.00200 - 67.0 uM	67
+BRD-K19103580		product of diversity oriented synthesis		transcriptionally active	0.00200 - 66.0 uM	66
+BRD-K24690302		inhibitor of HDAC1	HDAC1	probe	0.00200 - 66.0 uM	66
+BRD-K27224038		product of diversity oriented synthesis		transcriptionally active	0.00200 - 66.0 uM	66
+BRD-K27986637		product of diversity oriented synthesis; screening hit		probe	0.00200 - 66.0 uM	66
+BRD-K29086754		product of diversity oriented synthesis		transcriptionally active	0.00200 - 66.0 uM	66
+BRD-K29313308		inhibitor of HDAC3	HDAC3	probe	0.00200 - 66.0 uM	66
+BRD-K30019337		product of diversity oriented synthesis		transcriptionally active	0.00200 - 66.0 uM	66
+BRD-K30748066		inhibitor of CDK9	CDK9	probe	0.00200 - 66.0 uM	66
+BRD-K33199242		product of diversity oriented synthesis		transcriptionally active	0.00200 - 67.0 uM	67
+BRD-K33514849		screening hit		probe	0.00100 - 34.0 uM	34
+BRD-K34099515		screening hit		probe	0.00200 - 66.0 uM	66
+BRD-K34222889		analog of the natural product piperlongumine		probe	0.00170 - 66.0 uM	66
+BRD-K34485477		product of diversity oriented synthesis		transcriptionally active	0.00100 - 33.0 uM	33
+BRD-K35604418		inhibitor of MCL1	MCL1	probe	0.00200 - 270 uM	270
+BRD-K37390332		product of diversity oriented synthesis		transcriptionally active	0.00100 - 33.0 uM	33
+BRD-K41334119		product of diversity oriented synthesis		transcriptionally active	0.00200 - 66.0 uM	66
+BRD-K41597374		product of diversity oriented synthesis		transcriptionally active	0.00200 - 67.0 uM	67
+BRD-K42260513		inhibitor of enhancer of zeste polycomb repressive complex 2 subunit	EZH2	probe	0.00200 - 66.0 uM	66
+BRD-K44224150		product of diversity oriented synthesis		transcriptionally active	0.00100 - 34.0 uM	34
+BRD-K45681478		product of diversity oriented synthesis; screening hit		probe	0.00200 - 66.0 uM	66
+BRD-K48334597		product of diversity oriented synthesis		transcriptionally active	0.00200 - 66.0 uM	66
+BRD-K48477130		screening hit		probe	0.00200 - 66.0 uM	66
+BRD-K49290616		product of diversity oriented synthesis		transcriptionally active	0.00200 - 66.0 uM	66
+BRD-K50799972		product of diversity oriented synthesis		transcriptionally active	0.00200 - 66.0 uM	66
+BRD-K51490254		inhibitor of HDAC6 and HDAC8	HDAC6;HDAC8	probe	0.00200 - 66.0 uM	66
+BRD-K51831558		inhibitor of enhancer of zeste polycomb repressive complex 2 subunit	EZH2	probe	0.00200 - 66.0 uM	66
+BRD-K52037352		product of diversity oriented synthesis		transcriptionally active	0.00200 - 66.0 uM	66
+BRD-K55116708		product of diversity oriented synthesis; inhibitor of leukemic stem cells		probe	0.00200 - 66.0 uM	66
+BRD-K61166597		inhibitor of HDAC1 and HDAC2		probe	0.00200 - 66.0 uM	66
+BRD-K63431240		product of diversity oriented synthesis; screening hit		probe	0.000910 - 66.0 uM	66
+BRD-K64610608		product of diversity oriented synthesis; screening hit		probe	0.00100 - 33.0 uM	33
+BRD-K66453893		product of diversity oriented synthesis		transcriptionally active	0.00200 - 66.0 uM	66
+BRD-K66532283		inhibitor of HDAC1 and HDAC2	HDAC1;HDAC2	probe	0.00200 - 66.0 uM	66
+BRD-K71781559		screening hit		probe	0.00200 - 66.0 uM	66
+BRD-K75293299		product of diversity oriented synthesis		transcriptionally active	0.00200 - 66.0 uM	66
+BRD-K78574327		product of diversity oriented synthesis		transcriptionally active	0.00200 - 66.0 uM	66
+BRD-K80183349		inhibitor of HDAC1 and HDAC2	HDAC1;HDAC2	probe	0.00200 - 66.0 uM	66
+BRD-K84807411		product of diversity oriented synthesis		transcriptionally active	0.00200 - 66.0 uM	66
+BRD-K85133207		inhibitor of HDAC1	HDAC1	probe	0.00200 - 66.0 uM	66
+BRD-K86535717		product of diversity oriented synthesis		transcriptionally active	0.00200 - 66.0 uM	66
+BRD-K90370028		screening hit		probe	0.00100 - 33.0 uM	33
+BRD-K92856060		screening hit		probe	0.00100 - 33.0 uM	33
+BRD-K96431673		product of diversity oriented synthesis		transcriptionally active	0.00200 - 66.0 uM	66
+BRD-K96970199		product of diversity oriented synthesis		transcriptionally active	0.00200 - 66.0 uM	66
+BRD-K97651142		aphrocallistin derivative		probe	0.00200 - 66.0 uM	66
+BRD-K99006945		screening hit		probe	0.00200 - 66.0 uM	66
+BRD-M00053801		inhibitor of BCL2	BCL2	probe	0.00200 - 66.0 uM	66
+BRD1378	BRD-K94991378	inducer of ROS		probe	0.00250 - 83.0 uM	83
+BRD1812	BRD-K73261812	screening hit		probe	0.00200 - 66.0 uM	66
+BRD1835	BRD-K62801835	product of diversity oriented synthesis; screening hit	EZH2	probe	0.00410 - 130 uM	130
+BRD4132	BRD-K86574132	screening hit		probe	0.00490 - 160 uM	160
+BRD5468	BRD-K71935468	inducer of ROS		probe	0.00250 - 83.0 uM	83
+BRD6340	BRD-K35716340	screening hit		probe	0.00100 - 33.0 uM	33
+BRD8899	BRD-K22828899	inhibitor of serine/threonine kinasase STK33	STK33	probe	0.00100 - 33.0 uM	33
+BRD8958	BRD-K68548958	inhibitor of E1A binding protein p300	EP300	probe	0.00200 - 66.0 uM	66
+BRD9647	BRD-K05649647	screening hit		probe	0.00100 - 33.0 uM	33
+BRD9876	BRD-K89329876	screening hit		probe	0.00410 - 130 uM	130
+brefeldin A	brefeldin A, BRD-A31107743	modulator of ADP-ribosylation factor 1; inhibitor of protein translocation from ER to Golgi	ARF1	probe	0.00110 - 37.0 uM	37
+brivanib	BMS-582664, BRD-K28428262	inhibitor of VEGFR 1/2	FLT1;KDR	experimental	0.00200 - 66.0 uM	66
+BYL-719	alpelisib, BRD-K54997624	inhibitor of PI3K catalytic subunit alpha	PIK3CA	experimental	0.00200 - 66.0 uM	66
+C6-ceramide	BRD-K08608874	inhibitor of glucosylceramide synthase; activator of MAP kinase (ERK); stimulator of protein phosphatase 2A	MAPK1;PPP2CA;UGCG	probe	0.00200 - 66.0 uM	66
+cabozantinib	cabozantinib s-malate, BMS-907351, XL184, cabozantinib, Cabozantinib, Cometriq, BRD-K51544265	"inhibitor of c-MET, VEGFR2/3, and RET"""	FLT3;KDR;MET;RET	approved	0.00200 - 66.0 uM	66
+CAL-101	idelalisib, BRD-K60866521	inhibitor of PI3K catalytic subunit delta	PIK3CD	experimental	0.00200 - 66.0 uM	66
+canertinib	Canertinib, CI-1033, PD-183805, PD183805, canertinib, BRD-K50168500	inhibitor of EGFR and HER2	EGFR;ERBB2	experimental	0.00200 - 66.0 uM	66
+carboplatin	carboplatin, carboplatin, carboplatin, CARBOPLATIN, CBDCA, Carboplatin, JM 8,...			MISSING	0.00200 - 66.0 uM	66
+CAY10576	CAY10576, IKK-3 inhibitor IX, BRD-K51781482	inhibitor of IKK-epsilon	IKBKE	probe	0.00200 - 66.0 uM	66
+CAY10594	BRD2457, BRD-K61662457	inhibitor of phospholipase D2	PLD2	probe	0.00200 - 66.0 uM	66
+CAY10618	BRD-K83289131	inhibitor of nicotinamide phosphoribosyltransferase	NAMPT	probe	0.00100 - 33.0 uM	33
+CBB-1007	BRD-K84754008	inhibitor of lysine-specific demethylase 1A (LSD1)	KDM1A	probe	0.00200 - 66.0 uM	66
+CCT036477	BRD7170, BRD-A22997170	inhibitor of WNT signaling by blocking beta-catenin transcription		probe	0.00100 - 33.0 uM	33
+CD-1530	CD-1530, BRD-K25737009	agonist of retinoic acid receptor gamma	RARG	probe	0.00410 - 130 uM	130
+CD-437	CD437, CD-437, AHPN, BRD-K28907958	agonist of retinoic acid receptor gamma	RARG	probe	0.00110 - 37.0 uM	37
+cediranib	AZD2171, cediranib, BRD-K86930074	inhibitor of VEGFRs	FLT1;FLT4;KDR	experimental	0.00200 - 66.0 uM	66
+ceranib-2	BRD-K31514534	inhibitor of ceramidase activity	ACER1;ACER2;ACER3;ASAH1;ASAH2;ASAH2B	probe	0.00200 - 66.0 uM	66
+cerulenin	cerulinen, BRD-K52075040	inhibitor of fatty acid synthase; inhibitor of HMG-CoA synthase	FASN;HMGCS1	probe	0.00450 - 150 uM	150
+Ch-55	CH55, BRD-K71487808	agonist of retinoid acid receptors	RARA;RARB;RARG	probe	0.00200 - 66.0 uM	66
+CHIR-99021	CHIR-99021, CT99021, BRD-K16189898	inhibitor of GSK3 beta	GSK3B	probe	0.00240 - 80.0 uM	80
+chlorambucil	chlorambucil, chlorambucil, CBL, Cbl348, CHL, chlorambucil, chlorambucilum, c...	DNA alkylator		approved	0.00810 - 270 uM	270
+Compound 23 citrate	BRD2618, BRD-K67112618	analog of natural product cortistatin		probe	0.00100 - 33.0 uM	33
+Compound 7d-cis	BRD9047, BRD-K61829047	inhibitor of CRM1-mediated nucleocytoplasmic transport	XPO1	probe	0.00100 - 33.0 uM	33
+CR-1-31B	BRD-K23547378	silvestrol analog; inhibits translation by modulating the eIF4F complex	EIF4A2;EIF4E;EIF4G1	probe	0.00100 - 33.0 uM	33
+crizotinib	PF-02341066, crizotinib, PF-2341066, Crizotinib, Xalkori, BRD-K78431006	inhibitor of c-MET and ALK	ALK;MET	approved	0.00200 - 66.0 uM	66
+cucurbitacin I	BRD-A28105619	natural product; modulator of NFKB1 and STAT3 signaling		probe	0.00100 - 33.0 uM	33
+curcumin	C.I. 75300, C.I. natural yellow 3, CI 75300, CI natural yellow 3, CU, cucurmi...	natural product; modulator of ROS; modulator of NF-kappa-B signaling		experimental	0.00510 - 170 uM	170
+cyanoquinoline 11	Cyanoquinoline, 11, BRD-K00088062	inhibitor of MAP3K8; inhibitor of phosphorylated EGFR in cells	MAP3K8	experimental	0.00410 - 130 uM	130
+cyclophosphamide	cyclophosphamide, cyclophosphamide, cyclophosphamide, cyclophosphamide, ciclo...	DNA alkylator		approved	0.00410 - 130 uM	130
+cytarabine	cytarabine hydrochloride, cytarabine, cytarabine, cytarabine, cytarabine hydr...	inducer of DNA damage		approved	0.00200 - 66.0 uM	66
+cytochalasin B	cytochalasin b, cytochalasin_B, cytochalasin B, BRD-K26664453	inhibitor of actin polymerization		probe	0.00100 - 33.0 uM	33
+dabrafenib	dabrafenib mesylate, GSK2118436, Tafinlar, BRD-K09951645	inhibitor of BRAF	BRAF	experimental	0.00200 - 66.0 uM	66
+dacarbazine	BRD-K35520305	DNA alkylator		approved	0.00200 - 66.0 uM	66
+dactolisib	NVP-BEZ235, BEZ235, BRD-K12184916	inhibitor of PI3K and mTOR kinase activity	MTOR;PIK3CA;PIK3CB;PIK3CD;PIK3CG	experimental	0.000510 - 17.0 uM	17
+daporinad	FK866, daporinad, APO866, FK-866, BRD0667, BRD-K58550667	inhibitor of nicotinamide phosphoribosyltransferase	NAMPT	experimental	0.00000790 - 2.00 uM	2
+darinaparsin	BRD-K35723520	inducer of ROS; inhibitor of microtubule assembly		experimental	0.00100 - 33.0 uM	33
+dasatinib	BMS-354825, Dasatinib, BMS354825, Sprycel, BRD-K49328571	"inhibitor of SRC, YES1, EPHA2, c-KIT, and LCK"""	EPHA2;KIT;LCK;SRC;YES1	approved	0.00200 - 66.0 uM	66
+DBeQ	BRD-K59204667	inhibitor of p97 in cells	VCP	probe	0.00200 - 66.0 uM	66
+decitabine	decitabine, BRD-K79254416	inhibitor of DNA methyltransferase	DNMT1	approved	0.00200 - 66.0 uM	66
+dexamethasone	Decadron, dexamethasone, BRD-A35108200	agonist of glucocorticoid receptor	NR3C1	approved	0.00100 - 33.0 uM	33
+dinaciclib	SCH-727965, dinaciclib, BRD-K13662825	inhibitor of cyclin-dependent kinases	CDK1;CDK2;CDK5;CDK9	experimental	0.00200 - 66.0 uM	66
+DNMDP	compound 1B, BRD-A42556028, BRD-K01825500	screening hit		probe	0.00200 - 66.0 uM	66
+docetaxel	docetaxel, Docetaxel, BRD-A05821830	inhibitor of microtubule assembly		approved	0.00200 - 66.0 uM	66
+doramapimod	BIRB-796, BIRB 796, doramapimod, Doramapimod, BRD-K74065929	inhibitor of p38 MAPK	MAPK11;MAPK11;MAPK14	probe	0.00200 - 66.0 uM	66
+doxorubicin	doxorubicin, doxorubicin, doxorubicin, doxorubicin hydrochloride, adriblastin...	inhibitor of topoisomerase II	TOP2A	approved	0.00200 - 66.0 uM	66
+ELCPK	BRD-K44847641	screening hit		probe	0.0000120 - 0.400 uM	0.4
+elocalcitol	BXL-628, BXL 628, BRD-A04287157	agonist of vitamin D receptor	VDR	experimental	0.00200 - 66.0 uM	66
+entinostat	MS-275, MS 27-275, MS-27-275, MS-275, MS275, entinostat, BRD-K77908580	"inhibitor of HDAC1, HDAC2, HDAC3, HDAC6, and HDAC8"""	HDAC1;HDAC2;HDAC3;HDAC6;HDAC8	experimental	0.00200 - 66.0 uM	66
+epigallocatechin-3-monogallate	(-)-epigallocatechol gallate, EGCG, EPIGALLOCATECHIN-3-MONOGALLATE, epigalloc...	natural product		probe	0.00900 - 300 uM	300
+erastin	BRD-A25004090	modulator of voltage-dependent anion channels; inhibitor of solute carrier SLC7A11	SLC7A11;VDAC1;VDAC2	probe	0.00200 - 66.0 uM	66
+erlotinib	NSC718781, CP-358774, Erlotinib Hydrochloride, NSC 718781, OSI-774, Tarceva, BRD-K70401845	inhibitor of EGFR and HER2	EGFR;ERBB2	approved	0.00200 - 66.0 uM	66
+etomoxir	BRD-K81335284	inhibitor of carnitine palmitoyltransferase	CPT1A	experimental	0.00900 - 300 uM	300
+etoposide	etoposide, etoposide, etoposide, etoposide, trans-etoposide, VP 16213, VP-16,...	inhibitor of topoisomerase II	TOP2A	approved	0.000860 - 28.0 uM	28
+ETP-46464	BRD-K24556407	inhibitor of serine/threonine-protein kinase ATR	ATM;ATR	probe	0.00200 - 66.0 uM	66
+EX-527	EX-527, SEN0014196, BRD-K76964878	inhibitor of sirtuin 1	SIRT1	experimental	0.00240 - 80.0 uM	80
+fedratinib	TG-101348, SAR302503, TG-101348, TG-101348, BRD-K12502280	inhibitor of Janus kinase 2	JAK2	experimental	0.00110 - 37.0 uM	37
+FGIN-1-27	FGIN-1-27, N,N-Dihexyl-2-(4-fluorophenyl)indole-3-acetamide[FGIN-1-27], BRD-K09778810	activator of peripheral benzodiazepine receptor/translocator protein	TSPO	probe	0.00100 - 33.0 uM	33
+fingolimod	FTY720, fingolimod, Gilenya, BRD-K88025533	inhibitor of sphingosine 1-phosphate receptor	S1PR1	approved	0.00200 - 66.0 uM	66
+fluorouracil	fluorouracil, fluorouracil, fluorouracil, fluorouracil, 5-FU, FU, 5-fluoroura...	pyrimidine analog; inhibitor of thymidylate synthase	TYMS	approved	0.00410 - 130 uM	130
+foretinib	GSK1363089, XL880, EXEL-2880, GSK089, EXEL-288, foretinib, BRD-K03449891	inhibitor of MET and VEGFR2	KDR;MET	experimental	0.00200 - 66.0 uM	66
+FQI-1	BRD-A91658086	inhibitor of LSF1-mediated transcription		probe	0.00100 - 33.0 uM	33
+FQI-2	BRD-K35498412	inhibitor of LSF1-mediated transcription		probe	0.00100 - 33.0 uM	33
+FSC231	BRD-K24784241	inhibitor of PDZ domain of protein interacting with PRKCA 1 (PICK1)	PICK1	probe	0.00810 - 270 uM	270
+fulvestrant	Faslodex, BRD-A85667082	antagonist of the estrogen receptor	ESR1;GPER1	approved	0.00200 - 66.0 uM	66
+fumonisin B1	BRD-A63646118	inhibitor of ceramide synthase	CERS1;CERS2;CERS3;CERS4;CERS5;CERS6	probe	0.0150 - 500 uM	500
+GANT-61	BRD-K09485525	inhibitor of hedgehog signaling pathway		probe	0.00200 - 66.0 uM	66
+GDC-0879	BRD-K67578145	inhibitor of BRAF	BRAF	probe	0.00200 - 66.0 uM	66
+GDC-0941	BRD-K52911425	inhibitor of PI3K kinase activity	PIK3CA;PIK3CB;PIK3CD;PIK3CG	experimental	0.00200 - 66.0 uM	66
+gefitinib	gefitinib, gefitinib, ZD1839, ZD-1839, Gefitinib, Iressa, Irressat, BRD-K64052750	inhibitor of EGFR and AKT1	AKT1;EGFR	approved	0.00200 - 66.0 uM	66
+gemcitabine	Gemcitabine Hydrochloride, gemcitabine, Gemcitabine, Gemzar, Tabicad, gemcitabine, BRD-K15108141	"inhibitor of DNA replication; inhibitor of ribonucleotide reductase, thymidylate synthetase, and cytidine monophosphate (UMP-CMP) kinase """	CMPK1;RRM1;TYMS	approved	0.00100 - 33.0 uM	33
+glutaminase inhibitor 968	968, AG-690/36107028, BRD-A43210826	inhibitor of glutaminase	GLS	probe	0.00200 - 66.0 uM	66
+GMX1778	GMX-1778, CHS-828, GMX-1778, GMX-1778, BRD-K47335880	inhibitor of nicotinamide phosphoribosyltransferase	NAMPT	experimental	0.00000870 - 0.300 uM	0.3
+gossypol	GOSSYPOL-ACETIC ACID COMPLEX, acetic acid gossypol, gossypol, GOSSYPOL, gossy	inhibitor of lactate dehydrogenase; inhibitor of BCL2 family members	BCL2;BCL2L1;LDHA;LDHB;LDHC	experimental	0.00110 - 37.0 uM	37
+GSK-3 inhibitor IX	6-bromoindirubin-3-oxime, GSK-3 inhibitor IX, 6BIO, BIO, GSK-3-inhibitor-IX, BRD-K04923131	inhibitor of JAK/STAT signaling		probe	0.00200 - 66.0 uM	66
+GSK-J4	BRD-K98203492	inhibitor of lysine-specific demethylases	KDM6A;KDM6B	probe	0.00200 - 66.0 uM	66
+GSK1059615	BRD-K06750613	inhibitor of PI3K and mTOR kinase activity	MTOR;PIK3CA;PIK3CB;PIK3CD;PIK3CG	experimental	0.00100 - 33.0 uM	33
+GSK2636771	BRD-K49215523	inhibitor of PI3K catalytic subunit beta	PIK3CB	experimental	0.00200 - 66.0 uM	66
+GSK4112	BRD-K78667050	antagonist of Rev-ErbAalpha	NR1D1	probe	0.00200 - 66.0 uM	66
+GSK461364	BRD-K92428232	inhibitor of polo-like kinase 1 (PLK1)	PLK1	experimental	0.00200 - 66.0 uM	66
+GSK525762A	I-BET-762, BRD-K08109215	inhibitor of bromodomain (BRD) and extra-C terminal domain (BET) proteins	BRD2;BRD3;BRD4	probe	0.00200 - 66.0 uM	66
+GW-405833	GW405833, GW-405833, L-768,242, BRD-K10705233	partial agonist of cannabinoid receptor 2	CNR2	probe	0.00410 - 130 uM	130
+GW-843682X	BRD-K90382497	inhibitor of PLK1 and PLK3	PLK1;PLK3	probe	0.00100 - 33.0 uM	33
+HBX-41108	BRD-K50501969	inhibitor of the deubiquitinase activity of USP7	USP7	probe	0.00200 - 66.0 uM	66
+HC-067047	BRD-K03391209	inhibitor of cation channel TRPV4	TRPV4	probe	0.00200 - 66.0 uM	66
+HLI 373	DPD, HLI-373, DPD, BRD-K17349619	inhibitor of MDM2	MDM2	probe	0.00100 - 33.0 uM	33
+HMN-214	BRD-K70511574	inhibitor of polo-like kinase 1 (PLK1)	PLK1	probe	0.00200 - 66.0 uM	66
+hyperforin	BRD-A30032852	agonist of calcium-permeable ion channels	TRPC6	experimental	0.00200 - 66.0 uM	66
+I-BET151	GSK1210151A, I-BET151, BRD-K36363294	inhibitor of bromodomain (BRD) and extra-C terminal domain (BET) proteins	BRD2;BRD3;BRD4	probe	0.00200 - 66.0 uM	66
+ibrutinib	ibrutinib, BRD-K70301465	inhibitor of Bruton's tyrosine kinase	BTK	experimental	0.00200 - 66.0 uM	66
+IC-87114	BRD-K75430629	inhibitor of PI3K catalytic subunit delta	PIK3CD	probe	0.00200 - 66.0 uM	66
+ifosfamide	ifosfamide, ifosfamide, ifosfamide, ifosfamide, iphosphamide, iphosphamid, if...	DNA alkylator		approved	0.00200 - 66.0 uM	66
+imatinib	imatinib, STI-571, STI571, Glivec, Imatinib, Gleevec, BRD-K92723993	inhibitor of BCR-ABL1 and c-KIT	ABL1;BCR;KIT	approved	0.00200 - 66.0 uM	66
+importazole	BRD-A02481876	inhibitor of importin	KPNB1	probe	0.00610 - 200 uM	200
+indisulam	indisulam, E7070, indisulam, BRD-K17610631	inhibitor of carbonic anhydrase isoform IX	CA9	experimental	0.00100 - 33.0 uM	33
+IPR-456	BRD-A76527075	inhibitor of the interaction of urokinase receptor with binding partners	PLAUR	probe	0.00200 - 66.0 uM	66
+isoevodiamine	evodiamine, BRD-A68631409	natural product		probe	0.00100 - 33.0 uM	33
+isoliquiritigenin	GU 17, isoliquiritigenin, BRD-K33583600	natural product		probe	0.00100 - 33.0 uM	33
+isonicotinohydroxamic acid	M 838, BRD-K55478147	inhibitor of HDAC6	HDAC6	probe	0.00100 - 33.0 uM	33
+ISOX	BRD-K69840642	inhibitor of HDAC6	HDAC6	probe	0.00100 - 33.0 uM	33
+istradefylline	KW-6002, istradefylline, BRD-K87774949	antagonist of the adenosine A2A receptor	ADORA2A	experimental	0.00100 - 33.0 uM	33
+itraconazole	Sporanox, itraconazole, BRD-A34817987	anti-fungal agent; inhibitor of hedgehog signaling pathway		approved	0.000510 - 17.0 uM	17
+IU1	BRD-K45841694	inhibitor of the deubiquitinase activity of USP14	USP14	probe	0.00200 - 66.0 uM	66
+JQ-1	(+)-JQ1, JQ1-(+), BRD-K54606188	inhibitor of bromodomain (BRD) and extra-C terminal domain (BET) proteins	BRDT	probe	0.00200 - 66.0 uM	66
+JW-480	BRD-K99655327	inhibitor of serine hydrolase enzyme NCEH	NCEH1	probe	0.00200 - 66.0 uM	66
+JW-55	BRD-K53328210	inhibitor of tankyrase	TNKS	probe	0.00200 - 66.0 uM	66
+JW-74	BRD-K75664313	inhibitor of WNT signaling		probe	0.00200 - 66.0 uM	66
+leptomycin B	BRD-K27624156	inhibitor of exportin 1	XPO1	probe	0.00200 - 66.0 uM	66
+linifanib	ABT-869, linifanib, BRD-K99749624	inhibitor of VEGFRs	FLT1;FLT3;KDR	experimental	0.00200 - 66.0 uM	66
+linsitinib	OSI-906, BRD-K86118762	inhibitor of insulin-like growth factor 1 receptor and insulin receptor	IGF1R;INSR	experimental	0.00100 - 33.0 uM	33
+lomeguatrib	lomeguatrib, BRD-K27955832	inhibitor of methylguanine-DNA methyltransferase	MGMT	experimental	0.00200 - 66.0 uM	66
+lovastatin	lovastatin acid, NP-001236, Mevacor, Altocor, Altoprev, BRD-A70155556, BRD-K01825606	inhibitor of HMG-CoA reductase	HMGCR	approved	0.00410 - 130 uM	130
+LRRK2-IN-1	BRD-K01436366	inhibitor of leucine-rich repeat kinase 2; inhibitor of doublecortin-like kinase	DCLK1;LRRK2	probe	0.00200 - 66.0 uM	66
+LY-2157299	LY2157299, LY 2157299, BRD-K78118466	inhibitor of the transforming growth factor beta type 1 receptor	TGFBR1	probe	0.00200 - 66.0 uM	66
+LY-2183240	LY2183240, LY-2183240, BRD-K37865504	inhibitor of fatty acid amide hydrolase; inhibitor of anandamide uptake	FAAH	probe	0.00100 - 33.0 uM	33
+manumycin A	manumycin A, UCFI-C, BRD-K78599730	inhibitor of RAS farnesyltransferase	FNTA;FNTB	probe	0.000920 - 30.0 uM	30
+marinopyrrole A	marinopyrrole A, maritoclax, BRD-K57261999	natural product; putative inhibitor of MCL1	MCL1	probe	0.00200 - 66.0 uM	66
+masitinib	masitinib, Masivet, BRD-K71035033	"inhibitor of c-KIT, PDGFRA, and PDGFRB"""	KIT;PDGFRA;PDGFRB	experimental	0.00200 - 66.0 uM	66
+Mdivi-1	mdivi-1, BRD-K61128465	inhibitor of dynamin 1; inhibitor of mitrochondrial division inhibitor	DNM1	probe	0.00200 - 66.0 uM	66
+Merck60	BRD6929, BRD-K04466929	inhibitor of HDAC1 and HDAC2	HDAC1;HDAC2	probe	0.00100 - 33.0 uM	33
+methotrexate	methotrexate, methotrexate, methotrexate, methotrexate, amethopterin l-, amet...	inhibitor of dihydrofolate reductase	DHFR	approved	0.00200 - 66.0 uM	66
+methylstat	BRD-K52560704	inhibitor of lysine specific demethylases	KDM3A;KDM4A;KDM4B;KDM4C;KDM4D	probe	0.00200 - 66.0 uM	66
+MG-132	MG-132, Z-leu-leu-leu-al, LLL CPD, Z-leu-leu-leucinal, Z-LLL, ZLLL-CHO, ZlllAL, MG132, BRD-K60230970	inhibitor of the proteosome	PSMB1;PSMB2;PSMB5;PSMD1;PSMD2	probe	0.000610 - 20.0 uM	20
+MGCD-265	BRD-K56277358	inhibitor of c-MET and VEGFRs	FLT1;FLT3;KDR;MET	experimental	0.00200 - 66.0 uM	66
+MI-1	BRD-K64497429	binder of menin; inhibitor of menin-MLL fusion protein	MEN1	probe	0.00100 - 33.0 uM	33
+MI-2	BRD-K90860366	binder of menin; inhibitor of menin-MLL fusion protein	MEN1	probe	0.00200 - 66.0 uM	66
+mitomycin	mitomycin, mitomycin, mitomycin, mitomycin C, mitomycin-C, mitomycin, mito-C,...	DNA crosslinker		approved	0.00150 - 50.0 uM	50
+MK-0752	BRD-K18850819	inhibitor of gamma-secretase	APH1A;NCSTN;PSEN1;PSENEN	experimental	0.00200 - 66.0 uM	66
+MK-2206	BRD-K68065987	inhibitor of AKT1	AKT1	experimental	0.00100 - 33.0 uM	33
+ML006	ML006, T6748133, BRD2698, BRD-K89692698	agonist of sphingosine 1-phosphate receptor 3	S1PR3	probe	0.0160 - 530 uM	530
+ML029	BRD2020, BRD-K59962020	inhibitor of antigen receptor-mediated NFkappaB activity		probe	0.00100 - 33.0 uM	33
+ML030	triazolothiadiazine, ML-030, triazolothiadiazine, BRD-K05402890	inhibitor of phosphdiesterase 4A/B/D	PDE4A;PDE4B;PDE4D	probe	0.00200 - 66.0 uM	66
+ML031	T-5345967, T5345967, T5345967, BRD-K38985961	inhibitor of sphingosine 1-phosphate receptor 2	S1PR2	probe	0.0160 - 530 uM	530
+ML050	BRD5679, BRD-A83255679, BRD-K01826854	antagonist of GPR30	GPER1	probe	0.00200 - 66.0 uM	66
+ML083	ML083, ASN 05257430, T6909415, BRD1590, BRD-K44241590	activator of muscle pyruvate kinase	PKM	probe	0.00110 - 37.0 uM	37
+ML162	BRD5421, BRD-A36275421	selectively kills engineered cells expressing mutant HRAS		probe	0.00100 - 33.0 uM	33
+ML203	ML203, NCGC00185916-03, M2-PK activator, mw-ctdd-3, BRD2993, BRD-K80672993	activator of muscle pyruvate kinase (PKM2)	PKM	probe	0.00110 - 37.0 uM	37
+ML210	TL-HRAS-61, BRD-K01877528	selectively kills engineered cells expressing mutant HRAS		probe	0.00100 - 33.0 uM	33
+ML239	BRD-K01121114	ML239; inhibitor of breast cancer stem cell proliferation		probe	0.00200 - 66.0 uM	66
+ML258	BRD-A82720512	inhibitor of BIM-BCL-B interaction	BCL2L10	probe	0.00200 - 66.0 uM	66
+ML311	BRD-A40802033	inhibitor of MCL1	MCL1	probe	0.00100 - 66.0 uM	66
+ML312	BRD-K70809902	"inhibitor of scavenger receptor class B, member 1 (SCARB1)-mediated lipid uptake"""	SCARB1	probe	0.00200 - 66.0 uM	66
+ML320	BRD-K81491172	inhibitor of GSK3 beta	GSK3B	probe	0.00200 - 66.0 uM	66
+ML334 diastereomer	BRD-K93367411	inhibitor of KEAP1-NFE2L2 protein-protein interaction	KEAP1;NFE2L2	probe	0.00410 - 130 uM	130
+MLN2238	ixazomib, BRD-K78659596	inhibitor of 20S proteasome at the chymotrypsin-like proteolytic (beta-5) site	PSMB5	experimental	0.00100 - 33.0 uM	33
+MLN2480	BRD-K43410529	inhibitor of RAF kinases	ARAF;BRAF;RAF1	experimental	0.00200 - 66.0 uM	66
+momelotinib	CYT-387, CYT387, cyt387, BRD-K87737963	inhibitor of Janus kinases 1 and 2	JAK1;JAK2	experimental	0.00200 - 66.0 uM	66
+MST-312	Telomerase Inhibitor IX, MST-312, BRD-K19894101	inhibitor of telomerase reverse transcriptase	TERT	probe	0.00100 - 33.0 uM	33
+myricetin	cannabiscetin, Myricetin, myricetin, myricetol, myricitin, ML061, BRD-K43149758	flavonoid antioxidant		probe	0.00200 - 66.0 uM	66
+myriocin	myriocin, antibiotic ISP-1, thermozymocidin, BRD-A76279427	inhibitor of serine palmitoyltransferase	SPTLC1;SPTLC2;SPTLC3	probe	0.00100 - 33.0 uM	33
+N9-isopropylolomoucine	N9-isopropylolomoucine, BRD-K71726959	inhibitor of CDK1/cyclin B and CDK5/p35 complexes	CCNB1;CDK1;CDK5;CDK5R1	probe	0.0120 - 400 uM	400
+nakiterpiosin	nakiterpiosin, BRD-K38264551	natural product; inhibitor of microtubule assembly		probe	0.00100 - 33.0 uM	33
+narciclasine	BRD-K06792661	activates cellular activity of RhoA; modulator of Rho/Rho kinase/LIM kinase/cofilin signaling	RHOA	probe	0.00100 - 33.0 uM	33
+navitoclax	ABT-263, Navitoclax, navitoclax, ABT-263, BRD-K82746043	"inhibitor of BCL2, BCL-xL, and BCL-W"""	BCL2;BCL2L1;BCL2L2	experimental	0.00100 - 33.0 uM	33
+necrostatin-1	necrostatin-1, BRD-A36318220, BRD-K01825019	inhibitor of receptor-interacting protein kinase 1; inhibitor of the necroptosis cell death pathway	RIPK1	probe	0.0160 - 530 uM	530
+necrostatin-7	BRD-K50145167	inhibitor of necroptosis		probe	0.00200 - 66.0 uM	66
+necrosulfonamide	BRD-K64117221	inhibitor of downstream signaling of RIP3 associated with MLKL		probe	0.00200 - 66.0 uM	66
+nelarabine	nelarabine, BRD-K84466663	deoxyguanosine analog; inhibitor of DNA synthesis	POLA1	approved	0.00200 - 66.0 uM	66
+neopeltolide	neopeltolide, BRD-K62479592	inhibitor of cellular respiration		probe	0.00100 - 33.0 uM	33
+neratinib	HKI-272, Neratinib, neratinib, BRD-K85606544	inhibitor of EGFR and HER2	EGFR;ERBB2	experimental	0.00100 - 33.0 uM	33
+neuronal differentiation inducer III	Neuronal Differentiation Inducer III, ISX9, NDI III, BRD3639, BRD-K53903639	induction of rat HCN cell differentiation as judged by induction of neuronal reporter neuroD activity		probe	0.00810 - 270 uM	270
+niclosamide	niclosamide, niclosamide, iomesan, devermine, devermin, Niclosamide, niclosam...	inhibitor of STAT3 signaling	STAT3	approved	0.00100 - 33.0 uM	33
+nilotinib	nilotinib, AMN107, Tasigna, BRD-K81528515	"inhibitor of ABL1, BCR, and c-KIT"""	ABL1;BCR;KIT	approved	0.00200 - 66.0 uM	66
+nintedanib	BIBF-1120, nintedanib, BRD-K49075727	"inhibitor of c-KIT, VEGFRs, PDGFRs, and FGFRs"""	FGFR1;FGFR2;FGFR3;FLT1;FLT3;KDR;PDGFRA;PDGFRB	experimental	0.00200 - 66.0 uM	66
+NPC-26	BRD-K36852164	"induces cell death through a non-apoptotic, mitochondrial-dependent mechanism"""		probe	0.00120 - 40.0 uM	40
+NSC19630	MIRA-1, BRD-K39706510	inhibitor of Werner syndrome helicase activity	WRN	probe	0.00200 - 66.0 uM	66
+NSC23766	NSC 23766, NSC-23766, RAC1 inhibitor, NSC23766, BRD-A80213327, BRD-K01826800	inhibitor of RAC1-GEF interaction; prevents Rac1 activation by Rac-specific guanine nucleotide exchange factors (GEFs) TrioN and Tiam1	RAC1;TIAM1;TRIO	probe	0.0160 - 530 uM	530
+NSC30930	BRD-K29711668	inhibitor of steroid 5-alpha reductase	SRD5A2	probe	0.00200 - 66.0 uM	66
+NSC373980	HNF4a napthofuran agonist (Compound 5), BRD-K28456706	inhibitor of hepatocyte nuclear factor 4 alpha	HNF4A	probe	0.00200 - 66.0 uM	66
+NSC48300	BRD-K45748132	inhibitor of threonine endopeptidase taspase 1	TASP1	probe	0.00200 - 66.0 uM	66
+NSC74859	NSC 74859, S3I-201, S31-201, STAT3-inhibitor-VI, S3I-201, NSC 74859, BRD-K40853697	inhibitor of STAT3	STAT3	probe	0.0160 - 530 uM	530
+NSC95397	NSC-95397, NSC95397, BRD-K68143200	inhibitor of cell division cycle 25 phosphatase (CDC25)	CDC25A;CDC25B;CDC25C	probe	0.00100 - 33.0 uM	33
+nutlin-3	Nutlin-3, nutlin-3, BRD-A12230535	inhibitor of p53-MDM2 interaction	MDM2	experimental	0.00450 - 150 uM	150
+NVP-231	BRD-A12571627	inhibitor of ceramide kinase	CERK	probe	0.00200 - 66.0 uM	66
+NVP-ADW742	BRD-K15179513	inhibitor of insulin-like growth factor 1 receptor	IGF1R	probe	0.00200 - 66.0 uM	66
+NVP-BSK805	BRD-K02017404	inhibitor of Janus kinase 2	JAK2	probe	0.00200 - 66.0 uM	66
+NVP-TAE684	TAE684, BRD-K50140147	inhibitor of ALK and ALK-NPM fusion protein	ALK	probe	0.00200 - 66.0 uM	66
+O-6-benzylguanine	O6-Benzylguanine, BRD-K92041145	inhibitor of O(6)-alkylguanine DNA alkyltransferases	MGMT	experimental	0.00200 - 66.0 uM	66
+obatoclax	obatoclax, BRD-K15600710	"inhibitor of MCL1, BCL2, and BCL-xL"""	BCL2;BCL2L1;MCL1	experimental	0.00200 - 66.0 uM	66
+olaparib	AZD-2281, KU-0059436, olaparib, AZD 2281, KU0059436, AZD2281, Olaparib, KU-0059436, BRD-K02113016	inhibitor of poly (ADP-ribose) polymerase 1 and 2	PARP1;PARP2	experimental	0.00450 - 150 uM	150
+oligomycin A	oligomycin, BRD-A81541225	inhibitor of mitochondrial ATP synthase	ATP5L2	probe	0.00100 - 33.0 uM	33
+omacetaxine mepesuccinate	homoharringtonine, Synribo, BRD-K76674262	inhibitor of protein translation by preventing protein elongation		approved	0.00200 - 66.0 uM	66
+onalespib	AT13387, BRD-K58435339	inhibitor of HSP90	HSP90AA1	experimental	0.00200 - 66.0 uM	66
+OSI-027	BRD-K87124298	inhibitor of mTORC1 and mTORC2	MTOR	experimental	0.00200 - 66.0 uM	66
+OSI-930	BRD-K25340465	inhibitor of c-KIT and VEGFR2	KDR;KIT	experimental	0.00200 - 66.0 uM	66
+ouabain	acocantherin, uabaina, strophoperm, strophantine octahydrate, astrobain, g-st...	cardiac glycoside; inhibitor of the Na+/K+-ATPase	ATP1A1;ATP1A2;ATP1A3;ATP1A4;ATP1B1;ATP1B2;ATP1B3;ATP1B4	probe	0.00810 - 270 uM	270
+PAC-1	PAC-1, BRD-K92991072	activator of procaspase-3	CASP3	probe	0.00100 - 33.0 uM	33
+paclitaxel	paclitaxel, paclitaxel, paclitaxel, paclitaxel, paclitaxel, Abraxane, Anzatax...	inhibitor of microtubule assembly		approved	0.00200 - 66.0 uM	66
+palmostatin B	BRD-K42137908	inhibitor of acyl-protein thioesterase 1	LYPLA1	probe	0.00200 - 66.0 uM	66
+pandacostat	pandacostat, BRD-K44741158	"inhibitor of HDAC1, HDAC2, HDAC3, HDAC6, and HDAC8"""	HDAC1;HDAC2;HDAC3;HDAC6;HDAC8	probe	0.00100 - 33.0 uM	33
+panobinostat	LBH-589, LBH-589, BRD-K02130563	"inhibitor of HDAC1, HDAC2, HDAC3, HDAC6, and HDAC8"""	HDAC1;HDAC2;HDAC3;HDAC6;HDAC8	experimental	0.00200 - 66.0 uM	66
+parbendazole	parbendazole, parbendazole, SKF 29044, BRD-K02407574	inhibitor of microtubule assembly		probe	0.00200 - 66.0 uM	66
+PI-103	PI-103, BRD-K67868012	"inhibitor of DNA-PK, PI3K p110 delta, mTORC1, and catalytic subunits of PI3K"""	MTOR;PIK3CA;PIK3CB;PIK3CD;PIK3CG;PRKDC	probe	0.00110 - 37.0 uM	37
+pifithrin-alpha	pifithrin, pifithrin-alpha, pifithrin, BRD-K66874953	inhibitor of p53-dependent signaling		probe	0.00710 - 230 uM	230
+pifithrin-mu	pifithrin-mu, NSC 303580, NSC303580, pifithrin-mu, BRD-K96799727	inhibitor of p53 binding to mitochondria; inhibitor of HSP70	HSPA1A;HSPA1B;HSPA1L;TP53	probe	0.00100 - 33.0 uM	33
+PIK-93	BRD-K29395450	inhibitor of PI3K catalytic subunit gamma	PIK3CG	probe	0.00200 - 66.0 uM	66
+piperlongumine	piperlongumine, piperlonguminine, piperlongumine, BRD-K24132293	natural product; modulator of ROS levels		probe	0.00100 - 33.0 uM	33
+pitstop2	BRD-K90570971	inhibitor of clathrin and clathrin-independent endocytosis	CLTA;CLTB;CLTC;CLTCL1	probe	0.00200 - 66.0 uM	66
+PL-DI	BRD6168, BRD-K83336168	dimer of piperlongumine; inducer of ROS		probe	0.00200 - 66.0 uM	66
+pluripotin	pluripotin, BRD-K98538768	promoter of embryonic stem cell self-renewal; inhibitor of Ras-GAP and ERK	MAPK1;RASAL1	probe	0.00100 - 33.0 uM	33
+PLX-4720	BRD-K16478699	inhibitor of BRAF	BRAF	probe	0.00100 - 33.0 uM	33
+PRIMA-1	PRIMA-1, PRIMA1, PRIMA-1, BRD-K15318909	re-activator of the pro-apoptotic activity of mutant p53	TP53	probe	0.00510 - 170 uM	170
+PRIMA-1-Met	PRIMA-1-Met, APR-246, BRD-K49456190	re-activator of the pro-apoptotic activity of mutant p53	TP53	probe	0.00100 - 33.0 uM	33
+PRL-3 inhibitor I	PRL-3 Inhibitor I, BRD7482, BRD-K09907482	inhibitor of phosphatase of regenerating liver-3 (PRL3)	PTP4A3	probe	0.00410 - 130 uM	130
+procarbazine	procarbazine hydrochloride, procarbazine hydrochloride, procarbazine, procarb...	inducer of DNA damage		approved	0.00200 - 66.0 uM	66
+prochlorperazine	prochlorperazine, prochlorperazine edisylate, prochlorperazine maleate, proch...	inhibitor of dopamine receptor D2	DRD2	approved	0.00200 - 66.0 uM	66
+purmorphamine	purmorphamine, BRD-K73397362	activator of smoothened receptor	SMO	probe	0.00460 - 150 uM	150
+PX-12	PX-12, IV-2, BRD-A56592690	inhibitor of thioredoxin-1	TXN	experimental	0.00300 - 100 uM	100
+PYR-41	BRD-K60750172	inhibitor of ubiquitin-activating enzyme in cells	UBA1	probe	0.00200 - 66.0 uM	66
+QS-11	BRD-K02526760	inhibitor of GTPase activating protein of ARF 1 (ARFGAP1)	ARFGAP1	probe	0.00100 - 33.0 uM	33
+quizartinib	AC220, AC-220, quizartinib, BRD-K93918653	inhibtor of VEGFR3	FLT3	experimental	0.00200 - 66.0 uM	66
+QW-BI-011	BRD4770, BRD4770, BRD-K72264770	inhibitor of G9a histone methyltransferase	EHMT2	probe	0.00100 - 33.0 uM	33
+R428	R-428, BRD-K14870255	inhibitor of the tyrosine-protein kinase receptor UFO	AXL	probe	0.00200 - 66.0 uM	66
+RAF265	CHIR-265, RAF265, BRD-K93123848	ihibitor of VEGFR2 and BRAF	BRAF;KDR	experimental	0.00200 - 66.0 uM	66
+regorafenib	BAY-73-4506, regorafenib, Stivarga, BRD-K16730910	"inhibitor of BRAF, RET, KIT, and VEGFR2"""	BRAF;KDR;KIT;RET	approved	0.00200 - 66.0 uM	66
+Repligen 136	BRD-K47503321	inhibitor of HDAC3	HDAC3	probe	0.00200 - 66.0 uM	66
+RG-108	RG108, BRD-K89391146	inhibitor of DNA methyltransferase	DNMT1	probe	0.00810 - 270 uM	270
+rigosertib	ON-01910, Estybon, Novonex, BRD-K55187425	inhibitor of polo-like kinase 1; inhibitor of PI3K catalytic subunits alpha and beta	PIK3CA;PIK3CB;PLK1	experimental	0.00200 - 66.0 uM	66
+RITA	NSC 652287, NSC652287, BRD-K00317371	inhibitor of p53-MDM2 interaction	MDM2;TP53	probe	0.00100 - 33.0 uM	33
+RO4929097	RO-4929097, RG4733, BRD-K22024824	inhibitor of gamma-secretase	APH1A;NCSTN;PSEN1;PSENEN	experimental	0.00200 - 66.0 uM	66
+ruxolitinib	INCB018424, Jakafi, Jakavi, BRD-K53972329	inhibitor of Janus kinases 1 and 2	JAK1;JAK2	approved	0.00200 - 66.0 uM	66
+salermide	BRD-A67788537	inhibitor of sirtuin 1 and sirtuin 2	SIRT1;SIRT2	probe	0.0120 - 400 uM	400
+saracatinib	AZD0530, SARACATINIB, Saracatinib, saracatinib, BRD-K19540840	inhibitor of SRC and ABL1	ABL1;SRC	experimental	0.00200 - 66.0 uM	66
+SB-225002	SB-225002, SB-225002, BRD-K61323504	inhibitor of chemokine receptor 2	CXCR2	probe	0.00110 - 37.0 uM	37
+SB-431542	SB 431542, SB-431542, BRD-K67298865	inhibitor of the transforming growth factor beta type 1 receptor	TGFBR1	probe	0.00200 - 66.0 uM	66
+SB-525334	BRD-K37720887	inhibitor of the transforming growth factor beta type 1 receptor	TGFBR1	probe	0.00200 - 66.0 uM	66
+SB-743921	BRD-K62358710	inhibitor of kinesin 11	KIF11	experimental	0.00100 - 33.0 uM	33
+SCH-529074	BRD6488, BRD-K24376488	activator of mutant p53	TP53	probe	0.00100 - 33.0 uM	33
+SCH-79797	SCH79797, BRD-K17140735	antagonist of proteinase-activated receptor 1 (PAR1)	F2R	probe	0.00110 - 37.0 uM	37
+selumetinib	selumetinib, AZD-6244, AZD6244, AZD 6244, ARRY-142886, Selumetinib, BRD-K57080016	inhibitor of MEK1 and MEK2	MAP2K1;MAP2K2	experimental	0.00810 - 270 uM	270
+semagacestat	LY450139, BRD-K65592642	inhibitor of gamma-secretase	APH1A;NCSTN;PSEN1;PSENEN	experimental	0.00200 - 66.0 uM	66
+sepantronium bromide	YM-155, YM155, BRD-K76703230	inhibitor of survivin expression	BIRC5	experimental	0.0000310 - 1.00 uM	1
+serdemetan	JNJ 26854165, BRD9430, BRD-K60219430	inhibitor of MDM2	MDM2	experimental	0.00100 - 33.0 uM	33
+SGX-523	SGX523, BRD-K19477839	inhibitor of MET	MET	experimental	0.00200 - 66.0 uM	66
+SID 26681509	BRD7745, BRD-K08417745	inhibitor of cathepsin L	CTSL	probe	0.00900 - 300 uM	300
+sildenafil	sildenafil, sildenafil, BRD-K79759585	inhibitor of phosphodiesterase 5A	PDE5A	approved	0.0160 - 530 uM	530
+silmitasertib	CX-4945, CX4945, BRD-K81458380	inhibitor of casein kinase 2	CSNK2A1;CSNK2A2	experimental	0.00200 - 66.0 uM	66
+simvastatin	simvastatin, simvastatin, simvastatin, simvastatin, MK-733, simvastatin, simv...	inhibitor of HMG-CoA reductase	HMGCR	approved	0.00100 - 33.0 uM	33
+sirolimus	RAPAMYCIN, rapamycin, sirolimus, BRD-K84937637	inhibitor of mTOR	MTOR	approved	0.00100 - 33.0 uM	33
+sitagliptin	sitagliptin phosphate, sitagliptin, sitagliptin, BRD-K19416115	inhibitor of dipetidyl peptidase-4	DPP4	approved	0.00200 - 66.0 uM	66
+SJ-172550	SJ-172550, BRD-K93095519	inhibitor of p53-MDM2 interaction	MDM2;TP53	probe	0.00100 - 33.0 uM	33
+skepinone-L	skepinone-l, BRD-K83607951	inhibitor of p38 MAPK	MAPK14	probe	0.00200 - 66.0 uM	66
+SKI-II	SKI-II, BRD-K20755323	inhibitor of sphingosine kinase 1	SPHK1	probe	0.00410 - 130 uM	130
+SMER-3	BRD-K92960067	inhibitor of E3-ubiquitin ligase	CUL1;SKP1	probe	0.00200 - 66.0 uM	66
+SN-38	7-ethyl-10-hydroxycamptothecin, BRD-A36630025	metabolite of irinotecan; inhibitor of topoisomerase I	TOP1	probe	0.0000410 - 1.30 uM	1.3
+SNS-032	BMS-387032, BRD-K43389698	inhibitor of cyclin-dependent kinases	CDK16;CDK17;CDK2;CDK7;CDK9;CDKL5	experimental	0.00200 - 66.0 uM	66
+SNX-2112	SNX-2112, BRD-K71281111	inhibitor of HSP90alpha and HSP90beta	HSP90AA1;HSP90B1	probe	0.00100 - 37.0 uM	37
+sonidegib	erismodegib, LDE225, NVP-LDE225, BRD6430, BRD-K19796430	screening hit		probe	0.00100 - 33.0 uM	33
+sorafenib	BAY-43-9006, sorafenib tosylate, Nexavar, BRD-K23984367	"inhibitor of BRAF, CRAF, and VEGFR2"""	BRAF;FLT3;KDR;RAF1	approved	0.00200 - 66.0 uM	66
+sotrastaurin	AEB071, BRD-K16761703	inhibitor of protein kinase C beta	PRKCB	experimental	0.00200 - 66.0 uM	66
+spautin-1	BRD-K84964099	inhibitor of the deubiquitinase activity of USP13 and USP10	USP10;USP13	probe	0.00200 - 66.0 uM	66
+SR-II-138A	SR II 138A, BRD-K11172604	silvestrol analog; inhibits translation by modulating the eIF4F complex	EIF4A2;EIF4E;EIF4G1	probe	0.00100 - 33.0 uM	33
+SR1001	BRD-K47981327	synthetic ROR ligand; suppressor of TH17 differentiation	RORA;RORC	probe	0.00200 - 66.0 uM	66
+SR8278	BRD-A02904414	antagonist of Rev-ErbAalpha	NR1D1	probe	0.00200 - 66.0 uM	66
+SRT-1720	SRT-1720, BRD55319, BRD-K53855319	activator of sirtuin-1	SIRT1	probe	0.00110 - 37.0 uM	37
+staurosporine	alkaloid AM-2282 from Streptomyces, AM-2282, (+)-staurosporine, antibiotic 23...	inhibitor of multiple kinases		probe	0.000100 - 3.30 uM	3.3
+StemRegenin 1	SR1, StemRegenin 1, stemregenin-1, BRD-K36739687	inhibitor of aryl hydrocarbon receptor	AHR	probe	0.00200 - 66.0 uM	66
+STF-31	BRD-K22477529	inhibitor of nicotinamide phosphoribosyltransferase	NAMPT	probe	0.00200 - 66.0 uM	66
+SU11274	Met kinase inhibitor, PKI-SU11274, BRD-K02965346	inhibitor of MET	MET	probe	0.00200 - 66.0 uM	66
+sunitinib	Sunitinib Malate, SU11248, SU-11248, sunitinib, Sutent, BRD-K42828737	"inhibitor of VEGFRs, c-KIT, and PDGFR alpha and beta"""	FLT1;FLT3;KDR;KIT;PDGFRA;PDGFRB	approved	0.00200 - 66.0 uM	66
+SZ4TA2	BRD-K55125219	inhibitor of BCL-xL	BCL2L1	probe	0.00200 - 66.0 uM	66
+tacedinaline	CI 994, CI-994, CI994, acetyldinaline, GOE 5549, tacedinaline, PD 123654, tac...	"inhibitor of HDAC1, HDAC2, HDAC3, HDAC6, and HDAC8"""	HDAC1;HDAC2;HDAC3;HDAC6;HDAC8	probe	0.00100 - 33.0 uM	33
+tacrolimus	FK-506, FK506, tacrolimus, BRD-K69608737	inhibitor of calcineurin	PPP3CA;PPP3CB;PPP3CC;PPP3R1;PPP3R2	approved	0.00230 - 74.0 uM	74
+tamatinib	R-406, fostamatinib, BRD-K20285085	inhibitor of spleen tyrosine kinase	SYK	experimental	0.00100 - 33.0 uM	33
+tamoxifen	tamoxifen citrate, tamoxifen, tamoxifen, tamoxifen citrate, TAMOXIFEN CITRATE...	modulator of estrogen receptors	ESR1;ESR2	approved	0.00300 - 100 uM	100
+tandutinib	CT53518, MLN518, Tandutinib, tandutinib, BRD-K89162000	inhibitor of c-KIT and VEGFR3	FLT3;KIT	experimental	0.00200 - 66.0 uM	66
+tanespimycin	17-allylamino-geldanamycin, 17-allylamino-geldanamycin, 17-allylamino-geldana...	inhibitor of HSP90	HSP90AA1	experimental	0.00100 - 33.0 uM	33
+temozolomide	Temozolomide, BRD-K32107296	DNA alkylator		approved	0.00200 - 66.0 uM	66
+temsirolimus	CCI-779, TEMSIROLIMUS, Torisel, BRD-K08177763	inhibitor of mTOR	MTOR	approved	0.00200 - 66.0 uM	66
+teniposide	teniposide, vee M-26, EPT, VM-26, VM26, Vumon, Vehem, Vumon, BRD-A35588707	inhibitor of topoisomerase II	TOP2A;TOP2B	approved	0.00100 - 33.0 uM	33
+TG-100-115	TG100-115, BRD-K64785675	inhibitor of PI3K catalytic subunits delta and gamma	PIK3CD;PIK3CG	experimental	0.00200 - 66.0 uM	66
+TGX-221	PI 3-Kbeta inhibitor VI, BRD-A41692738	inhibitor of PI3K catalytic subunit beta	PIK3CB	probe	0.00200 - 66.0 uM	66
+thalidomide	thalidomide, thalidomide, thalidomide, thalidomide, (+/-)-thalidomide, E-217,...	immunomodulatory drug; binder of cereblon	CRBN	approved	0.00200 - 66.0 uM	66
+tigecycline	tigecycline, Tygacil, BRD-A34462049, BRD-K01825150	analog of tetracycline		approved	0.00200 - 66.0 uM	66
+tipifarnib	tipifarnib-P2, Tipifarnib, Tipifarnib-P2, IND 58359, tipifarnib, R115777, Zarnestra, BRD-K62965247	inhibitor of farnesyltransferase	FNTA	probe	0.00100 - 33.0 uM	33
+tipifarnib-P1	Tipifarnib-P1, BRD-K63195589	inhibitor of farnesyltransferase	FNTA	experimental	0.00100 - 33.0 uM	33
+tivantinib	ARQ-197, ARQ 197, tivantinib, BRD-K33379087	inhibitor of MET; inhibitor of microtubule assembly	MET	experimental	0.00200 - 66.0 uM	66
+vandetanib	ZD-6474, vandetanib, Vandetanib, ZD6474, Caprelsa, Zactima, BRD-K77625799	inhibitor of VEGFR2 and EGFR	EGFR;KDR	approved	0.00200 - 66.0 uM	66
+veliparib	ABT-888, Veliparib, BRD-K87142802	inhibitor of poly (ADP-ribose) polymerase 1 (PARP1) and 2 (PARP2)	PARP1;PARP2	experimental	0.00100 - 33.0 uM	33
+vemurafenib	PLX-4032, RG-7204, RG7204, R7204, RO5185426, PLX-4032, BRD-K56343971	inhibitor of BRAF	BRAF	approved	0.00100 - 33.0 uM	33
+VER-155008	VER155008, BRD-K32330832	inhibitor of HSP70	HSPA1A;HSPA1B;HSPA1L	probe	0.00110 - 37.0 uM	37
+vincristine	BRD-K82109576	inhibitor of mictrotubule assembly		approved	0.00400 - 130 uM	130
+vorapaxar	SCH 530348, vorapaxar, BRD-K93442924	antagonist of proteinase-activated receptor 1 (PAR1)	F2R	experimental	0.00200 - 66.0 uM	66
+vorinostat	vorinostat, vorinostat, suberoylanilide hydroxamic acid, suberanilohydroxamic...	"inhibitor of HDAC1, HDAC2, HDAC3, HDAC6, and HDAC8"""	HDAC1;HDAC2;HDAC3;HDAC6;HDAC8	approved	0.00100 - 33.0 uM	33
+voxtalisib analogue	BRD-K75308783	inhibitor of mTOR and PI3K kinase acitivities	MTOR;PIK3CA;PIK3CB;PIK3CD;PIK3CG;PRKDC	experimental	0.00200 - 66.0 uM	66
+VU0155056	BRD-K31406481	inhibitor of phospholipase D1/D2	PLD1;PLD2	probe	0.00200 - 66.0 uM	66
+WAY-362450	FXR450, WAY-362450, BRD-K54640016	agonist of farnesoid X receptor	NR1H4	probe	0.00200 - 66.0 uM	66
+WP1130	BRD-K43644456	"inhibitor of the deubiquitinase activity of USP9X, USP5, USP14, and UCH37"""	UCHL5;USP14;USP5;USP9X	probe	0.00200 - 66.0 uM	66
+WZ4002	WZ-4002, BRD-K72420232	inhibitor of EGFR targeting T790M resistance	EGFR	probe	0.00100 - 33.0 uM	33
+WZ8040	BRD-K81728688	inhibitor of EGFR targeting T790M resistance	EGFR	probe	0.00200 - 66.0 uM	66
+YK 4-279	YK-4-279, BRD-A62182663	inhibitor of RNA helicase A (RHA) binding to EWS-FLI1; inhibitor of ERG and ETV1 activity	DHX9;ERG;ETV1	probe	0.00100 - 33.0 uM	33
+zebularine	zebularine, BRD-A01145011	inhibitor of DNA methyltransferases	DNMT1	probe	0.0180 - 590 uM	590
+ZSTK474	ZSTK-474, BRD-K63068307	"inhibitor of PI3K catalytic subunits beta, delta, and gamma"""	PIK3CB;PIK3CD;PIK3CG	experimental	0.00200 - 66.0 uM	66

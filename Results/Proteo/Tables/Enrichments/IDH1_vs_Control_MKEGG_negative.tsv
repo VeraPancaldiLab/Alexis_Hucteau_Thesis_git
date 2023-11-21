@@ -1,0 +1,6 @@
+	ID	Description	GeneRatio	BgRatio	pvalue	geneID	Count
+M00160	M00160	V-type ATPase, eukaryotes	3/8	24/852	0.00100490990854907	537/9114/10312	3
+M00165	M00165	Reductive pentose phosphate cycle (Calvin cycle)	2/8	12/852	0.00486240029241895	2203/7086	2
+M00055	M00055	N-glycan precursor biosynthesis	2/8	14/852	0.00664108161431397	440138/85365	2
+M00004	M00004	Pentose phosphate pathway (Pentose phosphate cycle)	1/8	12/852	0.107696856236367	7086	1
+M00003	M00003	Gluconeogenesis, oxaloacetate => fructose-6P	1/8	18/852	0.15763218319824	2203	1

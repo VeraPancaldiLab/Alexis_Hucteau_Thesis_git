@@ -1,0 +1,4 @@
+	ID	Description	GeneRatio	BgRatio	pvalue	geneID	Count
+M00095	M00095	C5 isoprenoid biosynthesis, mevalonate pathway	1/6	10/852	0.06858382117799	38	1
+M00004	M00004	Pentose phosphate pathway (Pentose phosphate cycle)	1/6	12/852	0.0818187010310479	6120	1
+M00160	M00160	V-type ATPase, eukaryotes	1/6	24/852	0.157981069144465	9114	1

@@ -1,0 +1,7 @@
+	ID	Description	GeneRatio	BgRatio	pvalue	geneID	Count
+M00958	M00958	Adenine ribonucleotide degradation, AMP => Urate	2/12	16/852	0.0195681512361816	100/271	2
+M00095	M00095	C5 isoprenoid biosynthesis, mevalonate pathway	1/12	10/852	0.132904860247162	10654	1
+M00004	M00004	Pentose phosphate pathway (Pentose phosphate cycle)	1/12	12/852	0.157458527189192	6888	1
+M00034	M00034	Methionine salvage pathway	1/12	12/852	0.157458527189192	58478	1
+M00009	M00009	Citrate cycle (TCA cycle, Krebs cycle)	1/12	22/852	0.270942088891126	48	1
+M00014	M00014	Glucuronate pathway (uronate pathway)	1/12	27/852	0.322263238770824	51084	1

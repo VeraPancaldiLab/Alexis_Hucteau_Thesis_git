@@ -1,0 +1,13 @@
+predicted
+input
+GErel:expressionby
+GErel:expression
+GErel:expression,indirecteffect
+GErel:repression
+expressionregulates
+GErel:repressedby
+GErel:inhibition,repression
+GErel:inhibited,repressed
+GErel:repressed,indirecteffect
+GErel:inhibited,expression
+GErel:repression,indirecteffect

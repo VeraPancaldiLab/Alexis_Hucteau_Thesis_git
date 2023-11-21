@@ -1,0 +1,5 @@
+	ID	Description	GeneRatio	BgRatio	pvalue	geneID	Count
+M00892	M00892	UDP-N-acetyl-D-glucosamine biosynthesis, eukaryotes, glucose => UDP-GlcNAc	1/2	12/852	0.0279869581767925	3098	1
+M00011	M00011	Citrate cycle, second carbon oxidation, 2-oxoglutarate => oxaloacetate	1/2	14/852	0.03261283328644	4967	1
+M00009	M00009	Citrate cycle (TCA cycle, Krebs cycle)	1/2	22/852	0.0510059968112631	4967	1
+M00001	M00001	Glycolysis (Embden-Meyerhof pathway), glucose => pyruvate	1/2	26/852	0.060136376425415	3098	1

@@ -1,0 +1,10 @@
+	ID	Description	GeneRatio	BgRatio	pvalue	geneID	Count
+M00160	M00160	V-type ATPase, eukaryotes	3/12	24/852	0.00366359078332362	537/9114/51606	3
+M00004	M00004	Pentose phosphate pathway (Pentose phosphate cycle)	2/12	12/852	0.0111063292582438	2821/7086	2
+M00892	M00892	UDP-N-acetyl-D-glucosamine biosynthesis, eukaryotes, glucose => UDP-GlcNAc	2/12	12/852	0.0111063292582438	2821/3098	2
+M00099	M00099	Sphingosine biosynthesis	2/12	16/852	0.0195681512361816	427/91012	2
+M00958	M00958	Adenine ribonucleotide degradation, AMP => Urate	2/12	16/852	0.0195681512361816	271/272	2
+M00001	M00001	Glycolysis (Embden-Meyerhof pathway), glucose => pyruvate	2/12	26/852	0.0489945787646214	2821/3098	2
+M00087	M00087	beta-Oxidation	1/12	12/852	0.157458527189192	30	1
+M00094	M00094	Ceramide biosynthesis	1/12	12/852	0.157458527189192	91012	1
+M00165	M00165	Reductive pentose phosphate cycle (Calvin cycle)	1/12	12/852	0.157458527189192	7086	1

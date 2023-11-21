@@ -1,0 +1,12 @@
+	ID	Description	GeneRatio	BgRatio	pvalue	geneID	Count
+M00532	M00532	Photorespiration	2/19	11/852	0.0230001265425081	847/6470	2
+M00036	M00036	Leucine degradation, leucine => acetoacetate + acetyl-CoA	2/19	13/852	0.031761307614501	1629/64087	2
+M00152	M00152	Cytochrome bc1 complex	1/19	11/852	0.220861535023725	4519	1
+M00004	M00004	Pentose phosphate pathway (Pentose phosphate cycle)	1/19	12/852	0.238463949809158	6888	1
+M00094	M00094	Ceramide biosynthesis	1/19	12/852	0.238463949809158	29956	1
+M00415	M00415	Fatty acid elongation in endoplasmic reticulum	1/19	13/852	0.255689169992046	201562	1
+M00011	M00011	Citrate cycle, second carbon oxidation, 2-oxoglutarate => oxaloacetate	1/19	14/852	0.272544838371249	8803	1
+M00938	M00938	Pyrimidine deoxyribonucleotide biosynthesis, UDP => dTTP	1/19	14/852	0.272544838371249	1854	1
+M00099	M00099	Sphingosine biosynthesis	1/19	16/852	0.30517736390637	29956	1
+M00958	M00958	Adenine ribonucleotide degradation, AMP => Urate	1/19	16/852	0.30517736390637	100	1
+M00009	M00009	Citrate cycle (TCA cycle, Krebs cycle)	1/19	22/852	0.394956489413472	8803	1

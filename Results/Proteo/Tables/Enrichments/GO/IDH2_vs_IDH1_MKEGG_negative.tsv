@@ -1,0 +1,12 @@
+	ID	Description	GeneRatio	BgRatio	pvalue	geneID	Count
+M00053	M00053	Deoxyribonucleotide biosynthesis, ADP/GDP/CDP/UDP => dATP/dGTP/dCTP/dUTP	2/9	11/852	0.00519746516664391	4832/29922	2
+M00050	M00050	Guanine ribonucleotide biosynthesis, IMP => GDP,GTP	2/9	12/852	0.00620265978931876	4832/29922	2
+M00052	M00052	Pyrimidine ribonucleotide biosynthesis, UMP => UDP/UTP,CDP/CTP	2/9	12/852	0.00620265978931876	4832/29922	2
+M00938	M00938	Pyrimidine deoxyribonucleotide biosynthesis, UDP => dTTP	2/9	14/852	0.0084583263977388	4832/29922	2
+M00049	M00049	Adenine ribonucleotide biosynthesis, IMP => ADP,ATP	2/9	19/852	0.0154616116421453	4832/29922	2
+M00095	M00095	C5 isoprenoid biosynthesis, mevalonate pathway	1/9	10/852	0.101262087629092	38	1
+M00032	M00032	Lysine degradation, lysine => saccharopine => acetoacetyl-CoA	1/9	11/852	0.110868549875337	1892	1
+M00087	M00087	beta-Oxidation	1/9	12/852	0.120383630792248	1892	1
+M00912	M00912	NAD biosynthesis, tryptophan => quinolinate => NAD	1/9	12/852	0.120383630792248	64802	1
+M00036	M00036	Leucine degradation, leucine => acetoacetate + acetyl-CoA	1/9	13/852	0.129808091890903	64087	1
+M00055	M00055	N-glycan precursor biosynthesis	1/9	14/852	0.139142689236531	79796	1

@@ -1,0 +1,14 @@
+	ID	Description	GeneRatio	BgRatio	pvalue	geneID	Count
+M00032	M00032	Lysine degradation, lysine => saccharopine => acetoacetyl-CoA	2/20	11/852	0.0253754135590893	1892/2639	2
+M00087	M00087	beta-Oxidation	2/20	12/852	0.0300243106212685	37/1892	2
+M00055	M00055	N-glycan precursor biosynthesis	2/20	14/852	0.0402482321368578	79053/79796	2
+M00095	M00095	C5 isoprenoid biosynthesis, mevalonate pathway	1/20	10/852	0.212443472376923	38	1
+M00053	M00053	Deoxyribonucleotide biosynthesis, ADP/GDP/CDP/UDP => dATP/dGTP/dCTP/dUTP	1/20	11/852	0.231150278258706	4832	1
+M00035	M00035	Methionine degradation	1/20	12/852	0.249434457134836	1788	1
+M00050	M00050	Guanine ribonucleotide biosynthesis, IMP => GDP,GTP	1/20	12/852	0.249434457134836	4832	1
+M00052	M00052	Pyrimidine ribonucleotide biosynthesis, UMP => UDP/UTP,CDP/CTP	1/20	12/852	0.249434457134836	4832	1
+M00912	M00912	NAD biosynthesis, tryptophan => quinolinate => NAD	1/20	12/852	0.249434457134836	64802	1
+M00147	M00147	NADH dehydrogenase (ubiquinone) 1 beta subcomplex	1/20	14/852	0.28477097554148	4713	1
+M00938	M00938	Pyrimidine deoxyribonucleotide biosynthesis, UDP => dTTP	1/20	14/852	0.28477097554148	4832	1
+M00049	M00049	Adenine ribonucleotide biosynthesis, IMP => ADP,ATP	1/20	19/852	0.366328196863407	4832	1
+M00089	M00089	Triacylglycerol biosynthesis	1/20	23/852	0.425130342441464	55326	1

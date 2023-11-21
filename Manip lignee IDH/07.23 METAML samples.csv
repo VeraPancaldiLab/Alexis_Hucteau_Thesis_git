@@ -1,0 +1,24 @@
+07.2023 ;METAML (CRCT, Dr. Jean-Emmanuel SARRY);
+Alexis Hucteau's samples;;
+;;
+Sample_name;Condition;Analysis
+M13_WT 1;Molm13_WT;Untargeted
+M13_WT 2;;Untargeted
+M13_WT 3;;Untargeted
+#108 1;Molm13_mIDH1;Untargeted
+#108 2;;Untargeted
+#108 3;;Untargeted
+#115 1;Molm13_mIDH2;Untargeted
+#115 2;;Untargeted
+#115 3;;Untargeted
+K562_WT 1;K562_WT;Untargeted
+K562_WT 2;;Untargeted
+K562_WT 3;;Untargeted
+#111 1;K562_mIDH1;Untargeted
+#111 2;;Untargeted
+#111 3;;Untargeted
+#119 1;K562_mIDH2;Untargeted
+#119 2;;Untargeted
+#119 3;;Untargeted
+;;
+;;

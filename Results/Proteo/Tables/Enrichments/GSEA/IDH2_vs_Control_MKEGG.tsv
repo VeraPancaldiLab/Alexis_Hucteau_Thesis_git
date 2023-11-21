@@ -1,0 +1,6 @@
+	ID	Description	setSize	enrichmentScore	NES	pvalue	rank	leading_edge	core_enrichment
+M00088	M00088	Ketone body biosynthesis, acetyl-CoA => acetoacetate/3-hydroxybutyrate/acetone	2	0.867884539412702	1.34285167581492	0.0745156482861401	36	tags=50%, list=8%, signal=46%	622
+M00957	M00957	Lysine degradation, bacteria, L-lysine => glutarate => succinate/acetyl-CoA	2	0.842654531397703	1.30381404234504	0.0938897168405365	46	tags=50%, list=11%, signal=45%	2639
+M00001	M00001	Glycolysis (Embden-Meyerhof pathway), glucose => pyruvate	2	0.841232227488152	1.30161335423306	0.0953800298062593	69	tags=100%, list=16%, signal=84%	226/2597
+M00003	M00003	Gluconeogenesis, oxaloacetate => fructose-6P	2	0.841232227488152	1.30161335423306	0.0953800298062593	69	tags=100%, list=16%, signal=84%	226/2597
+M00165	M00165	Reductive pentose phosphate cycle (Calvin cycle)	2	0.841232227488152	1.30161335423306	0.0953800298062593	69	tags=100%, list=16%, signal=84%	226/2597

@@ -1,0 +1,6 @@
+	ID	Description	GeneRatio	BgRatio	pvalue	geneID	Count
+M00101	M00101	Cholesterol biosynthesis, squalene 2,3-epoxide => cholesterol	1/11	11/852	0.133934664451145	1595	1
+M00052	M00052	Pyrimidine ribonucleotide biosynthesis, UMP => UDP/UTP,CDP/CTP	1/11	12/852	0.145262510694947	129607	1
+M00094	M00094	Ceramide biosynthesis	1/11	12/852	0.145262510694947	29956	1
+M00036	M00036	Leucine degradation, leucine => acetoacetate + acetyl-CoA	1/11	13/852	0.156455501626322	64087	1
+M00099	M00099	Sphingosine biosynthesis	1/11	16/852	0.189239739616154	29956	1

@@ -1,0 +1,9 @@
+	ID	Description	GeneRatio	BgRatio	pvalue	geneID	Count
+M00165	M00165	Reductive pentose phosphate cycle (Calvin cycle)	2/11	12/852	0.00932835576932365	226/2597	2
+M00958	M00958	Adenine ribonucleotide degradation, AMP => Urate	2/11	16/852	0.0164869480573685	100/272	2
+M00003	M00003	Gluconeogenesis, oxaloacetate => fructose-6P	2/11	18/852	0.0207252764194486	226/2597	2
+M00001	M00001	Glycolysis (Embden-Meyerhof pathway), glucose => pyruvate	2/11	26/852	0.0416006551497048	226/2597	2
+M00004	M00004	Pentose phosphate pathway (Pentose phosphate cycle)	1/11	12/852	0.145262510694947	6888	1
+M00002	M00002	Glycolysis, core module involving three-carbon compounds	1/11	13/852	0.156455501626322	2597	1
+M00160	M00160	V-type ATPase, eukaryotes	1/11	24/852	0.271081952050785	51606	1
+M00014	M00014	Glucuronate pathway (uronate pathway)	1/11	27/852	0.299783026789021	51084	1
