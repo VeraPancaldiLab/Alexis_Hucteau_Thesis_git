@@ -1,0 +1,25 @@
+---
+title: "Analyse cytometry data"
+author: Alexis Hucteau
+date: "`r Sys.Date()`"
+output:
+    html_document:
+      toc: yes
+      toc_float: yes
+      theme: united
+editor_options:
+  markdown:
+    wrap: sentence
+---
+
+# Libraries
+
+```{r}
+require(tidyverse)
+require(flowCore)
+require(flowClust)
+require(open)
+require(ggcyto)
+require(gridExtra)
+```
+

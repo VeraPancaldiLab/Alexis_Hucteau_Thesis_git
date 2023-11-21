@@ -1,0 +1,321 @@
+---
+title: "Analyse list of genes from flow data"
+author: Alexis Hucteau
+date: "`r Sys.Date()`"
+output:
+    html_document:
+      toc: yes
+      toc_float: yes
+      theme: united
+editor_options:
+  markdown:
+    wrap: sentence
+---
+
+# Libraries
+
+```{r, error=F, warning=F, echo=FALSE, include=F}
+rm(DmIALite, DOLite, DOLiteTerm, HsIALite, MmIALite, RnIALite)
+
+library(dplyr)
+library(parallel)
+library(biomaRt)
+library(DOSE)
+library(clusterProfiler)
+library(ReactomePA)
+library(pathview)
+library(forcats)
+library(ggplot2)
+library(ggstance)
+library(enrichplot)
+library(svglite)
+library(ggrepel)
+
+cores2Use <- detectCores() - 2
+
+"%ni%" <- Negate("%in%")
+```
+
+```{r}
+mart <- useMart('ENSEMBL_MART_ENSEMBL')
+mart <- useDataset('hsapiens_gene_ensembl', mart)
+
+attrmart <- listAttributes(mart)
+
+annotLookup <- getBM(
+  mart = mart,
+  attributes = c(
+    'hgnc_symbol',
+    'entrezgene_id', 
+    'ensembl_gene_id'),
+  uniqueRows = TRUE)
+```
+
+
+```{r}
+Make_genes_ensembl <- function(Genes_df){
+  ensembl_genes <- merge(Genes_df, annotLookup, by.x = "nodeLabel", by.y = "hgnc_symbol", all.x = F, all.y = F) %>% na.omit 
+  ensembl_genes$distance_abs <- abs(ensembl_genes$distance) 
+  ensembl_genes %>% .[order(.$distance_abs, decreasing = T),]
+  ensembl_genes
+}
+
+
+
+Make_enrichggplot <- function(gsea, Title){
+  y <- arrange(gsea, abs(NES)) %>% 
+        group_by(sign(NES)) %>% 
+        dplyr::slice(1:5)
+  res <- ggplot(y, aes(NES, fct_reorder(Description, NES), fill=pvalue), showCategory=10) + 
+    geom_col(orientation='y') + 
+    scale_fill_continuous(low='red', high='blue', guide=guide_colorbar(reverse=TRUE)) + 
+    theme_minimal() + ylab(NULL) + ggtitle(Title)
+  res
+}
+
+Enrichments_plots <- function(GeneSetEnrichment, Title, EnrichmentName, Genes_ENTREZ){
+  print(paste(Title, EnrichmentName))
+  if(!is.null(GeneSetEnrichment)){
+    GeneSetEnrichment_sign <- GeneSetEnrichment@result %>% dplyr::filter(pvalue < 0.1 & setSize > 1) %>% nrow
+    if(GeneSetEnrichment_sign > 0){
+      y <- Make_enrichggplot(GeneSetEnrichment, paste(Title, EnrichmentName))
+      tmp <- GeneSetEnrichment
+      tmp@result <- tmp@result %>% dplyr::filter(setSize > 1)
+      max_geneset <- tmp@result %>% dplyr::filter(pvalue < 0.1) %>% nrow
+      edox <- setReadable(tmp, 'org.Hs.eg.db', 'ENTREZID')
+      options(ggrepel.max.overlaps = Inf)
+      max_geneset <- ifelse(max_geneset > 40, 40, max_geneset)
+      d <- enrichplot::dotplot(edox, showCategory = 30) + ggtitle(paste(Title, EnrichmentName))
+      v <- cnetplot(edox, foldChange=Genes_ENTREZ, node_label = "all") + ggtitle(paste(Title, EnrichmentName))
+      list("Enrichment_barplot" = y,
+           "Cnetplot" = v,
+           "Enrichment_dotplot" = d,
+           "Readable_enrichment" = edox)
+    }else{
+      NULL
+    }
+  }else{
+    NULL
+  }
+}
+
+Do_enrichment_analysis <- function(Genes_ENTREZ, Title){
+  genes_ENTREZ <- Genes_ENTREZ[order(Genes_ENTREZ, decreasing = T)]
+  dse <- tryCatch(
+    {
+      gseDO(genes_ENTREZ, pAdjustMethod = "none", pvalueCutoff = 0.1, minGSSize = 1, verbose = F)
+      },
+    error = function(cond) {
+            message("ERROR")
+            message("Here's the original error message:")
+            message(cond)
+            # Choose a return value in case of error
+            return(NULL)
+    }
+  )
+  message("KEGG Starting")
+  kse <- tryCatch(
+    {
+      gseKEGG(genes_ENTREZ, minGSSize = 2, pvalueCutoff = 0.1, pAdjustMethod = "none", verbose = F, organism = 'hsa', keyType = 'ncbi-geneid')
+    }, 
+    error = function(cond) {
+            message("ERROR")
+            message("Here's the original error message:")
+            message(cond)
+            # Choose a return value in case of error
+            return(NULL)
+    }
+  )
+  message("KEGG DONE")
+  message("Wiki in progress")
+  wse <- tryCatch(
+    {
+      gseWP(genes_ENTREZ, minGSSize = 2, pvalueCutoff = 0.1, pAdjustMethod = "none", verbose = F, organism = "Homo sapiens")
+    },
+    error = function(cond) {
+            message("ERROR")
+            message("Here's the original error message:")
+            message(cond)
+            # Choose a return value in case of error
+            return(NULL)
+    }
+  )
+  message("Reactome in progress")
+  rse <- tryCatch(
+    {
+      gsePathway(genes_ENTREZ, pvalueCutoff = 0.2, pAdjustMethod = "BH", verbose = F)
+    },
+    error = function(cond) {
+            message("ERROR")
+            message("Here's the original error message:")
+            message(cond)
+            # Choose a return value in case of error
+            return(NULL)
+    }
+  )
+
+  dose_enrich <- Enrichments_plots(dse, Title, "Dose", genes_ENTREZ)
+  kegg_enrich <- Enrichments_plots(kse, Title, "KEGG", genes_ENTREZ)
+  wiki_enrich <- Enrichments_plots(wse, Title, "WikiPath", genes_ENTREZ)
+  
+  list("DOSE" = dose_enrich,
+       "KEGG" = kegg_enrich,
+       "WIKIpathway" = wiki_enrich,
+       "Reactome_Pathway" = rse)
+}
+
+ Do_gene_ontology_Kegg_analysis <- function(Flow_data, Distance_threshold, Title){
+  genes_up <- Flow_data %>% dplyr::filter(distance > Distance_threshold & !stringr::str_detect(nodeLabel, "chr") & !stringr::str_detect(nodeLabel, "MAR0") & !stringr::str_detect(nodeLabel, "MAR1"))
+  genes_down <- Flow_data %>% dplyr::filter(distance < -Distance_threshold & !stringr::str_detect(nodeLabel, "chr") & !stringr::str_detect(nodeLabel, "MAR0") & !stringr::str_detect(nodeLabel, "MAR1")) %>% unique
+  
+  genes_up_ensembl <- Make_genes_ensembl(genes_up)
+  genes_down_ensembl <- Make_genes_ensembl(genes_down)
+  
+  genes_up_ensembl_c <- genes_up_ensembl$distance_abs
+  names(genes_up_ensembl_c) <- genes_up_ensembl$entrezgene_id
+  
+  genes_down_ensembl_c <- genes_down_ensembl$distance_abs
+  names(genes_down_ensembl_c) <- genes_down_ensembl$entrezgene_id
+  
+  genes_ensembl_c <- genes_down_ensembl$distance
+  names(genes_ensembl_c) <- genes_down_ensembl$entrezgene_id
+  
+  genes_ensembl_c <- c(genes_up_ensembl_c, genes_ensembl_c)
+  print(head(genes_up_ensembl_c, 10))
+  print(head(genes_down_ensembl_c, 10))
+  print(head(genes_ensembl_c, 10))
+
+  enrichments_up <- Do_enrichment_analysis(genes_up_ensembl_c, paste(Title, "up"))
+  enrichments_down <- Do_enrichment_analysis(genes_down_ensembl_c, paste(Title, "down"))
+  enrichments_upndown <- Do_enrichment_analysis(genes_ensembl_c, paste(Title, ""))
+
+  list("Enrichments"= list("UP" = enrichments_up,
+                         "DOWN" = enrichments_down,
+                         "BOTH" = enrichments_upndown),
+     "genelists" = list("Ensembl_UP" = genes_up_ensembl_c,
+                        "Ensembl_Down" = genes_down_ensembl_c,
+                        "Ensemble" = genes_ensembl_c,
+                        "UP" = genes_up$nodeLabel,
+                        "Down" = genes_down$nodeLabel))
+}
+```
+
+```{r}
+Flows_Clusters_Flow_data <- read.table("../../Results/Multi_layer_pheno_like/New_regulon_40k/Flow_analysis_old/Clusters_analysis/Flow_Clusters.tsv", 
+                                       sep = "\t", header = T)
+
+Flows_mIDH_Flow_data <- read.table("../../Results/Multi_layer_pheno_like/New_regulon_40k/Flow_analysis_old/mIDH_analysis/Flow_mIDH.tsv", 
+                                       sep = "\t", header = T)
+```
+
+
+```{r}
+New_Flows_Clusters_Flow_data <- read.table("../../Results/Multi_layer_pheno_like/New_regulon_40k/Flow_analysis/Clusters_analysis/Flow_Clusters_filtered_2.tsv", 
+                                       sep = "\t", header = T)
+
+New_Flows_mIDH_Flow_data <- read.table("../../Results/Multi_layer_pheno_like/New_regulon_40k/Flow_analysis/mIDH_analysis/Flows_mIDH_filtered_2.tsv", 
+                                       sep = "\t", header = T)
+
+Flows_mIDH1_R_vs_mIDH2_R_data <- read.table("../../Results/Multi_layer_pheno_like/New_regulon_40k/Flow_analysis/mIDH1_R_vs_mIDH2_R/Flow_mIDH1_R_vs_mIDH2_R_filtered_2.tsv", 
+                                       sep = "\t", header = T)
+
+Flows_mIDH2_R_vs_mIDH2_NR_data  <- read.table("../../Results/Multi_layer_pheno_like/New_regulon_40k/Flow_analysis/mIDH2_R_vs_mIDH2_NR/Flow_mIDH2_R_vs_mIDH2_NR_filtered_2.tsv", 
+                                       sep = "\t", header = T)
+
+Flows_mIDH2_vs_Cluster_NR_data   <- read.table("../../Results/Multi_layer_pheno_like/New_regulon_40k/Flow_analysis/mIDH2_vs_Cluster_NR/Flow_mIDH2_vs_Cluster_NR_filtered_2.tsv", 
+                                       sep = "\t", header = T)
+```
+
+# 25k
+
+```{r}
+New_Flows_Clusters_Flow_25k_data <- read.table("../../Results/Multi_layer_pheno_like/New_regulon_40k/Flow_analysis/Clusters_analysis/Flow_Clusters_filtered_25k.tsv", 
+                                       sep = "\t", header = T)
+
+New_Flows_mIDH_Flow_25k_data <- read.table("../../Results/Multi_layer_pheno_like/New_regulon_40k/Flow_analysis/mIDH_analysis/Flows_mIDH_filtered_25k.tsv", 
+                                       sep = "\t", header = T)
+
+Flows_mIDH1_R_vs_mIDH2_R_25k_data <- read.table("../../Results/Multi_layer_pheno_like/New_regulon_40k/Flow_analysis/mIDH1_R_vs_mIDH2_R/Flow_mIDH1_R_vs_mIDH2_R_filtered_25k.tsv", 
+                                       sep = "\t", header = T)
+
+Flows_mIDH2_R_vs_mIDH2_NR_25k_data  <- read.table("../../Results/Multi_layer_pheno_like/New_regulon_40k/Flow_analysis/mIDH2_R_vs_mIDH2_NR/Flow_mIDH2_R_vs_mIDH2_NR_filtered_25k.tsv", 
+                                       sep = "\t", header = T)
+
+
+Flows_mIDH2_vs_Cluster_NR_25k_data   <- read.table("../../Results/Multi_layer_pheno_like/New_regulon_40k/Flow_analysis/mIDH2_vs_Cluster_NR/Flow_mIDH2_vs_Cluster_NR_filtered_25k.tsv", 
+                                       sep = "\t", header = T)
+
+Flows_mIDH1_vs_Cluster_NR_25k_data   <- read.table("../../Results/Multi_layer_pheno_like/New_regulon_40k/Flow_analysis/mIDH1_vs_Cluster_NR/Flow_mIDH1_vs_Cluster_NR_filtered_25k.tsv", 
+                                       sep = "\t", header = T)
+```
+
+
+
+
+```{r, echo=F}
+GO_Analysis_0.5 <- lapply(c("Clusters_25k", "mIDH_25k", "mIDH1_R_vs_mIDH2_R_25k", "mIDH2_R_vs_mIDH2_NR_25k", "mIDH2_vs_Cluster_NR_25k", "mIDH1_vs_Cluster_NR_25k"), function(Class){
+  switch(Class, 
+         "Old_Clusters" = Do_gene_ontology_Kegg_analysis(Flows_Clusters_Flow_data, 0.05, "Old_Clusters"),
+         "Old_mIDH" = Do_gene_ontology_Kegg_analysis(Flows_mIDH_Flow_data, 0.05, "Old_mIDH"),
+         "Clusters" = Do_gene_ontology_Kegg_analysis(New_Flows_Clusters_Flow_data, 0.05, "Clusters"),
+         "mIDH" = Do_gene_ontology_Kegg_analysis(New_Flows_mIDH_Flow_data, 0.05, "mIDH"),
+         "mIDH1_R_vs_mIDH2_R" = Do_gene_ontology_Kegg_analysis(Flows_mIDH1_R_vs_mIDH2_R_data, 0.05, "mIDH1_R_vs_mIDH2_R") ,
+         "mIDH2_R_vs_mIDH2_NR" = Do_gene_ontology_Kegg_analysis(Flows_mIDH2_R_vs_mIDH2_NR_data, 0.05, "mIDH2_R_vs_mIDH2_NR"),
+         "mIDH2_vs_Cluster_NR" = Do_gene_ontology_Kegg_analysis(Flows_mIDH2_vs_Cluster_NR_data, 0.05, "mIDH2_vs_Cluster_NR"),
+         "Clusters_25k" = Do_gene_ontology_Kegg_analysis(New_Flows_Clusters_Flow_25k_data, 0.05, "Clusters_25k"),
+         "mIDH_25k" = Do_gene_ontology_Kegg_analysis(New_Flows_mIDH_Flow_25k_data, 0.05, "mIDH_25k"),
+         "mIDH1_R_vs_mIDH2_R_25k" = Do_gene_ontology_Kegg_analysis(Flows_mIDH1_R_vs_mIDH2_R_25k_data, 0.05, "mIDH1_R_vs_mIDH2_R_25k") ,
+         "mIDH2_R_vs_mIDH2_NR_25k" = Do_gene_ontology_Kegg_analysis(Flows_mIDH2_R_vs_mIDH2_NR_25k_data, 0.05, "mIDH2_R_vs_mIDH2_NR_25k"),
+         "mIDH2_vs_Cluster_NR_25k" = Do_gene_ontology_Kegg_analysis(Flows_mIDH2_vs_Cluster_NR_25k_data, 0.05, "mIDH2_vs_Cluster_NR_25k"),
+         "mIDH1_vs_Cluster_NR_25k" = Do_gene_ontology_Kegg_analysis(Flows_mIDH1_vs_Cluster_NR_25k_data, 0.05, "mIDH1_vs_Cluster_NR_25k")
+         )
+})
+names(GO_Analysis_0.5) <- c("Clusters_25k", "mIDH_25k", "mIDH1_R_vs_mIDH2_R_25k", "mIDH2_R_vs_mIDH2_NR_25k", "mIDH2_vs_Cluster_NR_25k", "mIDH1_vs_Cluster_NR_25k")
+
+system("bash ~/blabla.sh")
+```
+
+
+```{r, echo=F}
+GO_Analysis_0.5[["mIDH1_R_vs_mIDH2_R_25k"]] <- Do_gene_ontology_Kegg_analysis(Flows_mIDH1_R_vs_mIDH2_R_25k_data, 0.05, "mIDH1_R_vs_mIDH2_R_25k")
+system("say go")
+```
+
+
+```{r}
+tmp <- mclapply(names(GO_Analysis_0.5), function(Comp){
+  mclapply(names(GO_Analysis_0.5[[Comp]][["Enrichments"]]), function(Sign){
+    mclapply(names(GO_Analysis_0.5[[Comp]][["Enrichments"]][[Sign]]), function(onto){
+      message(paste(Comp, Sign, "Barplot", onto))
+      if(onto == "Reactome_Pathway"){
+        return (NULL)
+      }
+      directory <- "../../Results/Multi_layer_pheno_like/New_regulon_40k/Flow_analysis_old/"
+      dir.create(paste0(directory, Comp), showWarnings = F)
+      directory <- paste0(directory, Comp)
+      dir.create(paste0(directory, "/", onto), showWarnings = F)
+      directory <- paste0(directory, "/", onto)
+      dir.create(paste0(directory, "/Tables"), showWarnings = F)
+      p <- GO_Analysis_0.5[[Comp]][["Enrichments"]][[Sign]][[onto]][["Enrichment_barplot"]]
+      ggsave(plot = p, paste0(directory, "/", Sign, "_Enrichment_barplot.png"), bg = 'white', width = 1920, height = 1080, units = "px", scale = 3)
+      message(paste(Comp, Sign, "Cnet"))
+      p <- GO_Analysis_0.5[[Comp]][["Enrichments"]][[Sign]][[onto]][["Cnetplot"]]
+      d <- GO_Analysis_0.5[[Comp]][["Enrichments"]][[Sign]][[onto]][["Readable_enrichment"]] %>%
+        setReadable('org.Hs.eg.db', 'ENTREZID') %>%
+        enrichplot::dotplot(showCategory = 30) + ggtitle(paste(Comp, onto, Sign, sep = " "))
+      ggsave(plot = d, paste0(directory, "/", Sign, "_Enrichment_Dotplot.png"), bg = 'white', width = 1920, height = 1080, units = "px", scale = 3)
+      table_go <- GO_Analysis_0.5[[Comp]][["Enrichments"]][[Sign]][[onto]][["Readable_enrichment"]]@result 
+      write.table(table_go, paste0(directory, "/Tables/", Sign, "_Enrichment_table.tsv"), sep = "\t", quote = F, row.names = F)
+      ggsave(plot = p, paste0(directory, "/", Sign, "_Enrichment_Cnetplot.png"), bg = 'white', width = 1920, height = 1080, units = "px", scale = 3)
+      
+    }, mc.cores = cores2Use)
+  }, mc.cores = cores2Use)
+}, mc.cores = cores2Use)
+rm(tmp)
+```
+
+```{r}
+save.image("/media/alexis/DATA/Session/R_session/Thesis_paper_Rsessions/Analyse_flow_results_tmp.RData")
+system("bash ~/shutdown_o_clock.sh")
+```
+

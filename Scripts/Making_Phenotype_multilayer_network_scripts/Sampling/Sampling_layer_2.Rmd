@@ -1,0 +1,169 @@
+---
+title: "Sampling Layer 2"
+subtitle: "Layer 2"
+author: Alexis Hucteau
+date: "`r Sys.Date()`"
+output:
+    html_document:
+      toc: yes
+      toc_float: yes
+      theme: united
+editor_options:
+  markdown:
+    wrap: sentence
+---
+
+# Libraries
+
+```{r, error=F, warning=F, echo=FALSE, include=F}
+rm(DmIALite, DOLite, DOLiteTerm, HsIALite, MmIALite, RnIALite)
+
+library(dplyr)
+library(parallel)
+library(ggplot2)
+
+cores2use <- detectCores()
+source("~/Core_scripts/msviper_functions.R")
+```
+
+
+# Loading DATA
+
+## Loading Clinical data
+
+```{r}
+Clinical_patient_data <- read.table("~/GitHub/Thesis_paper/Datasets/Clinical_Koichi_data_isoform_SRR_annotated.tsv", sep = "\t", header = T)
+Clinical_patient_data$Baseline_phenotype_2 <- sapply(Clinical_patient_data$Best_response, function(resp){
+  switch(resp,
+         "CR" = "Responder",
+         "CRp" = "Responder",
+         "CRi" = "Responder",
+         "MLFS" = "Responder",
+         "HI" = "Responder",
+         "PR" = "Responder",
+         "SD" = "Non_Responder",
+         "PD" = "Non_Responder",
+         "Not_assessed" = "Not_assessed",
+         "NA" = "Control")
+})
+```
+
+## Loading networks
+
+```{r}
+Regulonlaml_network <- read.table("~/GitHub/Thesis_paper/Datasets/regulonlaml_symbol.tsv", sep = "\t", header = T)
+
+data(dorothea_hs, package = "dorothea")
+
+doronet <-  dorothea_hs %>%
+  filter(confidence %in% c("A", "B", "C", "D", "E"))
+doronet <- doronet[c(1,3,2,4)]
+
+Koichi_RNAseq <- read.table("~/GitHub/Thesis_paper/Datasets/Koichi_NR_R_symbol_no_dup.tsv", check.names = F)
+```
+
+```{r}
+Koichi_dorothea_TF_actitity <- viper(Koichi_RNAseq, dorothea2viper_regulons(doronet))
+```
+
+## Combining TF activities
+
+### Filter Samples classes
+
+### Function
+
+```{r}
+Return_value <- function(Feature_TF, Feature_Gene, Node){
+  if(Node %in% rownames(Feature_TF)){
+    Feature_TF[Node, ] %>% unlist
+  }else if(Node %in% rownames(Feature_Gene)){
+    Feature_Gene[Node, ] %>% unlist
+  }else{
+    c(0)
+  }
+}
+
+Calculate_edges_weight_corr <- function(Network, Features_TF, Features_Gene){
+  sapply(1:nrow(Network), function(node){
+    A <- Return_value(Features_TF, Features_Gene, Network[node, "tf"])
+    B <- Return_value(Features_TF, Features_Gene, Network[node, "target"])
+    if(length(B) <= 4){
+      return(0)
+    }
+    Hmisc::rcorr(A,B, type = "pearson")$r[1,2]
+  })
+}
+
+Scale_edge_weight <- function(Network){
+  w <- Network$weight_corr
+  scaled_weight <- sapply(w, function(we){
+    res <- abs(we)
+    if(is.na(res)){
+      res <- 0
+    }else if(is.nan(res)){
+      res <- 0
+    }else if(res == Inf){
+      res <- 1
+    }
+    res
+  })
+  sqrt(scaled_weight)
+}
+
+
+Create_GRN_corr <- function(GRN, TF_activities, RNAseq, Clinicals=Clinical_patient_data){
+  
+  samples.list <- lapply(1:20, function(sampling){
+    sample(colnames(Koichi_RNAseq), size = 15, replace = F)
+  })
+
+  TF_activities.list <- mclapply(1:20, function(class){
+    samples <- samples.list[[class]]
+    TF_activities[,samples]
+  }, mc.cores = cores2use)
+
+  gene_exp.list <- lapply(1:20, function(class){
+    samples <- samples.list[[class]]
+    RNAseq[,samples]
+  })
+
+  GRN.list <- mclapply(1:20, function(class){
+    res <- GRN
+    res$weight_corr <- Calculate_edges_weight_corr(GRN, 
+                                                   TF_activities.list[[class]], 
+                                                   gene_exp.list[[class]])
+    res$weight_corr <- Scale_edge_weight(res)
+    res
+  }, mc.cores = cores2use)
+  names(GRN.list) <- names(gene_exp.list)
+  return(GRN.list)
+}
+```
+
+### Calcul
+
+```{r}
+Regulon_GRN_corr <- Create_GRN_corr(as.data.frame(doronet), Koichi_dorothea_TF_actitity, Koichi_RNAseq)
+```
+
+
+```{r}
+1:20 %>% 
+  lapply(function(Pheno){
+    file_path <- paste0("~/GitHub/Thesis_paper/Results/Multi_layer_pheno_like/Sampling/Layer_2/Network_", Pheno, ".tsv")
+    Regulon_GRN_corr[[Pheno]] %>%
+      dplyr::filter(!is.na(weight_corr) & weight_corr > 0) %>%
+      write.table(file_path, sep = "\t", row.names = F, quote = F)
+  })
+```
+
+
+```{r}
+save.image("/media/alexis/DATA/Session/R_session/Thesis_paper_Rsessions/Multi_layer_phenolike/Layer_2_sampling.RData")
+```
+
+
+
+
+
+

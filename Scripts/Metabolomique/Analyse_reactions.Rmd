@@ -1,0 +1,556 @@
+---
+title: "Analyse_reactions"
+author: Alexis Hucteau
+date: "`r Sys.Date()`"
+output:
+    html_document:
+      toc: yes
+      toc_float: yes
+      theme: united
+editor_options:
+  markdown:
+    wrap: sentence
+---
+
+# Initialisation
+
+## Libraries
+
+```{r, error=F, warning=F, echo=FALSE, include=F}
+rm(DmIALite, DOLite, DOLiteTerm, HsIALite, MmIALite, RnIALite)
+
+library(dplyr)
+library(matrixTests)
+library(factoextra)
+library(Hmisc)
+library(matrixStats)
+library(RColorBrewer)
+library(pheatmap)
+library(data.table)
+library(parallel)
+library(ggpubr)
+library("grid")
+library("gridExtra")
+library(ggplotify)
+library(clusterProfiler)
+library(org.Hs.eg.db)
+library(biomaRt)
+library(EnhancedVolcano)
+
+cores2use <- detectCores()
+
+source("~/Core_scripts/core_functions.R")
+```
+
+## Loading Data
+
+```{r}
+mIDHi_react_scores_GEM <- read.csv("../../Datasets/mIDHi_react_scores_GEM.csv", check.names = F, row.names = 1)
+colnames(mIDHi_react_scores_GEM) <- colnames(mIDHi_react_scores_GEM) %>%
+  stringr::str_remove("X")
+Clinical_patient_data <- read.table("../../Datasets/Clinical_Koichi_data_isoform.tsv", sep = "\t", header = T)
+
+Clinical_patient_data$Baseline_phenotype <- sapply(Clinical_patient_data$Best_response, function(resp){
+  switch(resp,
+         "CR" = "Responder",
+         "CRi" = "Responder",
+         "CRp" = "Responder",
+         "HI" = "Responder",
+         "MLFS" = "Responder",
+         "Not_assessed" = "Not_assessed",
+         "PD" = "Non_Responder",
+         "PR" = "Responder",
+         "SD" = "Non_Responder",
+         "NA" = "Control"
+         )
+})
+
+mIDHi_react_scores_GEM_Baseline <- mIDHi_react_scores_GEM[stringr::str_detect(colnames(mIDHi_react_scores_GEM), pattern="BL")]
+```
+
+## Making Pheno
+
+```{r}
+Phenos <- lapply(colnames(mIDHi_react_scores_GEM_Baseline), function(sample){
+  tmp <- dplyr::filter(Clinical_patient_data, Baseline_RNAseq_data == sample)
+  list("Response" = tmp$Baseline_phenotype,
+       "Cluster" = tmp$Cluster,
+       "IDH" = tmp$IDH_isoform)
+}) %>% data.table::rbindlist()
+rownames(Phenos) <- colnames(mIDHi_react_scores_GEM_Baseline)
+```
+
+# Global analyses
+
+## PCA
+
+```{r}
+Make_PCA_pheno <- function(data, pheno){
+  data <- data[!is.na(pheno)]
+  pheno <- pheno[!is.na(pheno)]
+  res.pca <- prcomp(t(data))
+  p <- fviz_pca_ind(res.pca, label="all", habillage=pheno, addEllipses=T, ellipse.level=0.95)
+  p <- p + ggtitle("PCA Metabolomic")
+  p
+}
+```
+
+```{r}
+Make_PCA_pheno(mIDHi_react_scores_GEM_Baseline, Phenos$phenos_combined)
+```
+
+## Heatmap
+
+```{r}
+Make_heatmap <- function(DATA, Phenotype, method = "pearson", 
+                         title, annotation_color, kmeans_k = NA, cuttree = NA, corr=T) {
+  if(corr){
+    corr <- rcorr(as.matrix(DATA), type = method)$r
+    colnames(corr) <- colnames(DATA)
+  }else{
+    corr <- DATA
+  }
+  title <- paste0(title, " ", method)
+  heatmap <- pheatmap(corr, 
+                      color = colorRampPalette(brewer.pal(n = 9, name = "YlOrRd"))(100),
+                      annotation_col = Phenotype,
+                      annotation_colors = annotation_color,
+                      legend = TRUE, scale = "none",
+                      treeheight_row = 20,
+                      main = title, 
+                      fontsize = 10,
+                      cutree_cols = cuttree
+  )
+  return(heatmap)
+}
+```
+
+```{r}
+Annotation_color <-  list(
+    Response = c(Non_Responder = "red", Responder = "green", Intermediate_Responder = "orange"),
+    Cluster = c(Cluster_R = "green", Cluster_NR = "red", No_clustered = "grey"),
+    IDH = c(IDH1 = "blue", IDH2_R140 = "pink", IDH2_R172 = "yellow"))
+
+Var_reac <- rowVars(as.matrix(mIDHi_react_scores_GEM_Baseline))
+names(Var_reac) <- rownames(mIDHi_react_scores_GEM_Baseline)
+```
+
+
+```{r}
+pourcent_reac <- c(1, 5, 10, 50, 100)
+method = "pearson"
+
+plots_pearson <- lapply(pourcent_reac, function(percent){
+  nb_reac <- percent*nrow(mIDHi_react_scores_GEM_Baseline)%/%100 
+  Top_var_reac <- Var_reac[order(Var_reac, decreasing = T)] %>% .[1:nb_reac]
+  Top_Var_mIDH_react_score <- mIDHi_react_scores_GEM_Baseline %>% .[rownames(.) %in% names(Top_var_reac),]
+  heat <- Make_heatmap(Top_Var_mIDH_react_score, Phenos, title = paste0(percent, "% of reaction"), annotation_color = Annotation_color, method = method)
+  pca_p <- Make_PCA_pheno(Top_Var_mIDH_react_score, Phenos$Cluster)
+  list(heat, pca_p)
+})
+
+plot_spearman <- lapply(pourcent_reac, function(percent){
+  nb_reac <- percent*nrow(mIDHi_react_scores_GEM_Baseline)%/%100 
+  Top_var_reac <- Var_reac[order(Var_reac, decreasing = T)] %>% .[1:nb_reac]
+  Top_Var_mIDH_react_score <- mIDHi_react_scores_GEM_Baseline %>% .[rownames(.) %in% names(Top_var_reac),]
+  heat <- Make_heatmap(Top_Var_mIDH_react_score, Phenos, title = paste0(percent, "% of reaction"), annotation_color = Annotation_color, method = "spearman")
+  pca_p <- Make_PCA_pheno(Top_Var_mIDH_react_score, Phenos$Cluster)
+  list(heat, pca_p)
+})
+
+lm <- rbind(c(1,2),
+         c(3, 5),
+         c(4, 5),
+         c(6, 7),
+         c(8, 10),
+         c(9, 10))
+gri <- grid.arrange(grobs = list(as.grob(plots_pearson[[1]][[1]]), as.grob(plots_pearson[[2]][[1]]), 
+                          as.grob(plots_pearson[[3]][[1]]), as.grob(plots_pearson[[4]][[1]]),
+                          as.grob(plots_pearson[[5]][[1]]),
+                          as.grob(plot_spearman[[1]][[1]]), as.grob(plot_spearman[[2]][[1]]), 
+                          as.grob(plot_spearman[[3]][[1]]), as.grob(plot_spearman[[4]][[1]]),
+                          as.grob(plot_spearman[[5]][[1]])),
+             layout_matrix = lm)
+
+ggsave("../../Results/Metabolism/Heatmap_reactions.png", gri, bg = "white", width = 7600, height = 8400, units = "px")
+```
+
+# Comparisons analysis
+
+## Function
+
+```{r}
+t_test_pheno_comp <- function(phenoA, phenoB, df){
+  res <- row_t_welch(df[, phenoA], df[, phenoB]) %>%
+    t()
+  colnames(res) <- stringr::str_remove(colnames(res), pattern = "_pos")
+  colnames(res) <- stringr::str_remove(colnames(res), pattern = "_neg")
+  
+  res[,!duplicated(colnames(res))] %>% t() %>% data.frame()
+}
+```
+
+## Phenos
+
+```{r}
+Phenos$phenos_combined <- paste(Phenos$IDH, Phenos$Response, sep = "_")
+pheno_IDH1_R <- Phenos$phenos_combined == "IDH1_Responder"
+pheno_IDH2_R <- (Phenos$phenos_combined == "IDH2_R140_Responder" | Phenos$phenos_combined == "IDH2_R172_Responder")
+pheno_IDH1_NR <- Phenos$phenos_combined == "IDH1_Non_Responder"
+pheno_IDH2_NR <- (Phenos$phenos_combined == "IDH2_R140_Non_Responder" | Phenos$phenos_combined == "IDH2_R172_Non_Responder")
+```
+
+## Analysis
+
+```{r}
+Response_in_IDH1_analysis <- t_test_pheno_comp(pheno_IDH1_NR, pheno_IDH1_R, mIDHi_react_scores_GEM_Baseline)
+Response_in_IDH2_analysis <- t_test_pheno_comp(pheno_IDH2_NR, pheno_IDH2_R, mIDHi_react_scores_GEM_Baseline)
+IDH_in_Responder_analysis <- t_test_pheno_comp(pheno_IDH2_R, pheno_IDH1_R, mIDHi_react_scores_GEM_Baseline)
+IDH_in_Non_responder_analysis <- t_test_pheno_comp(pheno_IDH2_NR, pheno_IDH1_NR, mIDHi_react_scores_GEM_Baseline)
+```
+
+# Volcano plots
+
+```{r}
+IDH_in_Responder_analysis$mean.diff <- as.numeric(IDH_in_Responder_analysis$mean.diff)
+IDH_in_Responder_analysis$pvalue <- as.numeric(IDH_in_Responder_analysis$pvalue)
+IDH_in_Responder_analysis$logFC <- sapply(1:nrow(IDH_in_Responder_analysis), function(reaction){
+  A <- IDH_in_Responder_analysis[reaction, 4] %>% as.numeric
+  B <- IDH_in_Responder_analysis[reaction, 5] %>% as.numeric
+  log2(A/B)
+})
+
+Volcano_IDH_in_Responder <- EnhancedVolcano(
+      toptable = IDH_in_Responder_analysis,
+      lab = rownames(IDH_in_Responder_analysis),
+      x = "logFC",
+      y = "pvalue",
+      FCcutoff = 0.01,
+      pCutoff = 0.1,
+      title = "IDH1 vs IDH2",
+      subtitle = NA,
+      subtitleLabSize = 0, 
+      xlim = c(min(IDH_in_Responder_analysis[["logFC"]], na.rm = TRUE),
+               max(IDH_in_Responder_analysis[["logFC"]], na.rm = TRUE)), 
+      ylim = c(0,max(-log10(IDH_in_Responder_analysis[["pvalue"]]), na.rm = TRUE))
+  )
+Volcano_IDH_in_Responder
+```
+
+```{r}
+IDH_in_Non_responder_analysis$mean.diff <- as.numeric(IDH_in_Non_responder_analysis$mean.diff)
+IDH_in_Non_responder_analysis$pvalue <- as.numeric(IDH_in_Non_responder_analysis$pvalue)
+IDH_in_Non_responder_analysis$logFC <- sapply(1:nrow(IDH_in_Non_responder_analysis), function(reaction){
+  A <- IDH_in_Non_responder_analysis[reaction, 4] %>% as.numeric
+  B <- IDH_in_Non_responder_analysis[reaction, 5] %>% as.numeric
+  log2(A/B)
+})
+
+Volcano_IDH_in_Non_Responder <- EnhancedVolcano(
+      toptable = IDH_in_Non_responder_analysis,
+      lab = rownames(IDH_in_Non_responder_analysis),
+      x = "logFC",
+      y = "pvalue",
+      FCcutoff = 0.01,
+      pCutoff = 0.1,
+      title = "IDH1 vs IDH2",
+      subtitle = NA,
+      subtitleLabSize = 0, 
+      xlim = c(min(IDH_in_Non_responder_analysis[["logFC"]], na.rm = TRUE),
+               max(IDH_in_Non_responder_analysis[["logFC"]], na.rm = TRUE)), 
+      ylim = c(0,max(-log10(IDH_in_Non_responder_analysis[["pvalue"]]), na.rm = TRUE))
+  )
+Volcano_IDH_in_Non_Responder
+```
+
+```{r}
+Response_in_IDH1_analysis$mean.diff <- as.numeric(Response_in_IDH1_analysis$mean.diff)
+Response_in_IDH1_analysis$pvalue <- as.numeric(Response_in_IDH1_analysis$pvalue)
+Response_in_IDH1_analysis$logFC <- sapply(1:nrow(Response_in_IDH1_analysis), function(reaction){
+  A <- Response_in_IDH1_analysis[reaction, 4] %>% as.numeric
+  B <- Response_in_IDH1_analysis[reaction, 5] %>% as.numeric
+  log2(A/B)
+})
+
+Volcano_Response_in_IDH1 <- EnhancedVolcano(
+      toptable = Response_in_IDH1_analysis,
+      lab = rownames(Response_in_IDH1_analysis),
+      x = "logFC",
+      y = "pvalue",
+      FCcutoff = 0.01,
+      pCutoff = 0.1,
+      title = "NR vs R",
+      subtitle = NA,
+      subtitleLabSize = 0, 
+      xlim = c(min(Response_in_IDH1_analysis[["logFC"]], na.rm = TRUE),
+               max(Response_in_IDH1_analysis[["logFC"]], na.rm = TRUE)), 
+      ylim = c(0,max(-log10(Response_in_IDH1_analysis[["pvalue"]]), na.rm = TRUE))
+  )
+Volcano_Response_in_IDH1
+```
+
+```{r}
+Response_in_IDH2_analysis$mean.diff <- as.numeric(Response_in_IDH2_analysis$mean.diff)
+Response_in_IDH2_analysis$pvalue <- as.numeric(Response_in_IDH2_analysis$pvalue)
+Response_in_IDH2_analysis$logFC <- sapply(1:nrow(Response_in_IDH2_analysis), function(reaction){
+  A <- Response_in_IDH2_analysis[reaction, 4] %>% as.numeric
+  B <- Response_in_IDH2_analysis[reaction, 5] %>% as.numeric
+  log2(A/B)
+})
+
+Volcano_Response_in_IDH2 <- EnhancedVolcano(
+      toptable = Response_in_IDH2_analysis,
+      lab = rownames(Response_in_IDH2_analysis),
+      x = "logFC",
+      y = "pvalue",
+      FCcutoff = 0.01,
+      pCutoff = 0.1,
+      title = "NR vs R",
+      subtitle = NA,
+      subtitleLabSize = 0, 
+      xlim = c(min(Response_in_IDH2_analysis[["logFC"]], na.rm = TRUE), 
+                   max(Response_in_IDH2_analysis[["logFC"]], na.rm = TRUE)), 
+      ylim = c(0,max(-log10(Response_in_IDH2_analysis[["pvalue"]]), na.rm = TRUE))
+  )
+Volcano_Response_in_IDH2
+```
+
+# Gene reaction conversion network
+
+```{r}
+Gene_reaction_conversion_network <- read.table("~/GitHub/Thesis_paper/Results/Metabolism/Gene_reactions_network.tsv", sep = "\t", header = T)
+
+mart <- biomaRt::useMart(biomart = "ENSEMBL_MART_ENSEMBL",
+                         dataset = "hsapiens_gene_ensembl")
+
+genes <- getBM(filters = "hgnc_symbol",
+               attributes = c("ensembl_gene_id","entrezgene_id", "hgnc_symbol"),
+               values = unique(Gene_reaction_conversion_network$B), 
+               mart = mart)
+
+genes_universe_hgnc <- genes$hgnc_symbol %>% unique
+genes_universe_entrez <- genes$entrezgene_id %>% unique
+```
+
+## From reaction to GO
+
+```{r}
+From_reaction_to_gene <- function(Reactions_activity_comp, down = F){
+  if(down){
+    df <- dplyr::filter(Reactions_activity_comp, pvalue < 0.05 & logFC < -0.01)
+  }else{
+    df <- dplyr::filter(Reactions_activity_comp, pvalue < 0.05 & logFC > 0.01)
+  }
+  reactions <- rownames(df) %>% 
+    unique
+  genes_diff <- dplyr::filter(Gene_reaction_conversion_network, A %in% reactions) %>%
+    .$B %>%
+    unique
+  genes_diff
+}
+
+Compare_Enrichments <- function(List_DEGs){
+  list_direct_ID <- lapply(names(List_DEGs), function(Comparison){
+    ids <- List_DEGs[[Comparison]] %>% unique
+    data.table(Entrez = ids, group = Comparison)
+  })
+  names(list_direct_ID) <- names(List_DEGs)
+  mydf <- data.table::rbindlist(list_direct_ID)
+  go_cluster <- compareCluster(Entrez~group, data = mydf, fun = "enrichGO", OrgDb = org.Hs.eg.db, 
+                 keyType = "SYMBOL", pvalueCutoff = 0.05, pAdjustMethod = "BH", qvalueCutoff = 1, universe = genes_universe_hgnc)
+  mydf_entrez <- merge(mydf, genes, by.x = "Entrez", by.y = "hgnc_symbol")
+  kegg_cluster <- compareCluster(entrezgene_id~group, data = mydf_entrez, fun = "enrichKEGG", 
+                                 organism = "hsa", qvalueCutoff = 1,
+                                 keyType = 'ncbi-geneid', pvalueCutoff = 0.05, 
+                                 pAdjustMethod = "BH", universe = genes_universe_entrez) 
+  List("GO" = go_cluster,
+       "KEGG" = kegg_cluster)
+}
+
+Auto_set_readable <- function(Results_cluster_KEGG_WP){
+  setReadable(Results_cluster_KEGG_WP, OrgDb = org.Hs.eg.db, keyType = "ENTREZID")
+}
+```
+
+```{r}
+List_genes_reactions_diff <- list("IDH2_in_Responders" = From_reaction_to_gene(IDH_in_Responder_analysis),
+                                  "IDH2_in_Non_responders" = From_reaction_to_gene(IDH_in_Non_responder_analysis),
+                                  "Non_responder_in_IDH1" = From_reaction_to_gene(Response_in_IDH1_analysis),
+                                  "Non_responder_in_IDH2" = From_reaction_to_gene(Response_in_IDH2_analysis),
+                                  "IDH1_in_Responders" = From_reaction_to_gene(IDH_in_Responder_analysis, T),
+                                  "IDH1_in_Non_responders" = From_reaction_to_gene(IDH_in_Non_responder_analysis, T),
+                                  "Responder_in_IDH1" = From_reaction_to_gene(Response_in_IDH1_analysis, T),
+                                  "Responder_in_IDH2" = From_reaction_to_gene(Response_in_IDH2_analysis, T))
+
+IDH_GO_analysis <- Compare_Enrichments(List_genes_reactions_diff[c(1,2,5,6)])
+
+Response_GO_analysis <- Compare_Enrichments(List_genes_reactions_diff[c(3,4,7,8)])
+```
+
+```{r}
+lapply(names(IDH_GO_analysis), function(ont){
+  n <- 10
+  p <- dotplot(IDH_GO_analysis[[ont]], showCategory = n, font.size = 15) 
+  height_param <- n*6*120 +200
+  ggsave(paste0("~/GitHub/Thesis_paper/Results/Metabolism/Figures/IDH_cluster_comp_", ont, ".png"), p, bg = "white", width = 5700, 
+         height = height_param, units = "px", limitsize = FALSE)
+ if(ont == "KEGG"){
+    pcnet <- Auto_set_readable(IDH_GO_analysis[[ont]]) %>% cnetplot(showCategory = n, 
+                                                                    cex_label_gene = 2, 
+                                                                    cex_label_category = 2) 
+  }else{
+    pcnet <- cnetplot(IDH_GO_analysis[[ont]], showCategory = n, cex_label_gene = 2, cex_label_category = 2) 
+  }
+  height_param <- n*4*120 +200
+  ggsave(paste0("~/GitHub/Thesis_paper/Results/Metabolism/Figures/IDH_cluster_comp_", ont, "_cnetplot.png"), pcnet, bg = "white", width = 5700, 
+         height = 5700, units = "px", limitsize = FALSE)
+})
+
+lapply(names(Response_GO_analysis), function(ont){
+  n <- 10
+  p <- dotplot(Response_GO_analysis[[ont]], showCategory = n, font.size = 15) 
+  height_param <- n*6*120 +200
+  ggsave(paste0("~/GitHub/Thesis_paper/Results/Metabolism/Figures/Response_cluster_comp_", ont, ".png"), p, bg = "white", width = 5700, 
+         height = height_param, units = "px", limitsize = FALSE)
+ if(ont == "KEGG"){
+    pcnet <- Auto_set_readable(Response_GO_analysis[[ont]]) %>% cnetplot(showCategory = n, 
+                                                                         cex_label_gene = 2, 
+                                                                         cex_label_category = 2) 
+  }else{
+    pcnet <- cnetplot(Response_GO_analysis[[ont]], showCategory = n, cex_label_gene = 2, cex_label_category = 2) 
+  }
+  height_param <- n*4*120 +200
+  ggsave(paste0("~/GitHub/Thesis_paper/Results/Metabolism/Figures/Response_cluster_comp_", ont, "_cnetplot.png"), pcnet, bg = "white", width = 5700, 
+         height = 5700, units = "px", limitsize = FALSE)
+})
+```
+
+
+```{r}
+n <- 10
+p <- dotplot(GO_analysis$GO, showCategory = n) 
+height_param <- n*4*120 +200
+ggsave("~/GitHub/Thesis_paper/Results/Metabolism/Figures/Cluster_GO_plot.png", p, bg = "white", width = 5700, 
+       height = height_param, units = "px", limitsize = FALSE)
+
+pcnet <- cnetplot(GO_analysis$GO, showCategory = n, cex_label_gene = 2, cex_label_category = 2) 
+height_param <- n*4*120 +200
+ggsave("~/GitHub/Thesis_paper/Results/Metabolism/Figures/Cluster_GO_cnetplot.png", pcnet, bg = "white", width = 5700, 
+       height = 5700, units = "px", limitsize = FALSE)
+```
+
+```{r}
+n <- 10
+p <- dotplot(GO_analysis$KEGG, showCategory = n) 
+height_param <- n*4*120 +200
+ggsave("~/GitHub/Thesis_paper/Results/Metabolism/Figures/Cluster_KEGG_plot.png", p, bg = "white", width = 5700, 
+       height = height_param, units = "px", limitsize = FALSE)
+```
+
+
+```{r}
+pcnet <- cnetplot(Auto_set_readable(GO_analysis$KEGG), showCategory = n, cex_label_gene = 2, cex_label_category = 2) 
+height_param <- n*4*120 +200
+ggsave("~/GitHub/Thesis_paper/Results/Metabolism/Figures/Cluster_KEGG_cnetplot.png", pcnet, bg = "white", width = 5700, 
+       height = 5700, units = "px", limitsize = FALSE)
+```
+
+# Network comparison
+
+## Loading metabolic Network
+
+```{r}
+Metabolic_network <- read.table("~/GitHub/Thesis_paper/Results/Metabolism/Metabolic_network_clean.tsv", sep = "\t", header = T, quote = "")
+```
+
+## Function
+
+```{r}
+Make_specific_metabolic_network <- function(Diff_metabolic_data, Met_net = Metabolic_network){
+  Diff_metabolic_data$mean.diff <- as.numeric(Diff_metabolic_data$mean.diff)
+  Diff_metabolic_data$pvalue <- as.numeric(Diff_metabolic_data$pvalue)
+  sig_diff <- dplyr::filter(Diff_metabolic_data, pvalue < 0.1)
+  sig_reaction <- rownames(sig_diff) %>% unique()
+  
+  net <- dplyr::filter(Met_net, A %in% sig_reaction)
+  net
+}
+```
+
+```{r}
+List_reactions_diff <- list("IDH_in_Responders" = IDH_in_Responder_analysis,
+                                  "IDH_in_Non_responders" = IDH_in_Non_responder_analysis,
+                                  "Response_in_IDH1" = Response_in_IDH1_analysis,
+                                  "Response_in_IDH2" = Response_in_IDH2_analysis)
+```
+
+```{r}
+Networks_metabo <- lapply(names(List_reactions_diff), function(Comp){
+  net <- Make_specific_metabolic_network(List_reactions_diff[[Comp]])
+  net %>%
+    write.table(paste0("~/GitHub/Thesis_paper/Results/Metabolism/Network/", Comp, "_network.tsv"), sep = "\t", row.names = F, quote = F)
+  net
+})
+names(Networks_metabo) <- names(List_reactions_diff)
+```
+
+## Saving DMA
+
+```{r}
+lapply(names(List_reactions_diff), function(Comp){
+  analyse <- List_reactions_diff[[Comp]]
+  analyse <- analyse[,c(4, 5, 6,12)]
+  analyse$mean.diff <- as.numeric(analyse$mean.diff)
+  analyse$pvalue <- as.numeric(analyse$pvalue)
+  analyse$mean.x <- as.numeric(analyse$mean.x)
+  analyse$mean.y <- as.numeric(analyse$mean.y)
+  analyse$logFC <- sapply(1:nrow(analyse), function(reaction){
+    A <- analyse[reaction, 1] %>% as.numeric
+    B <- analyse[reaction, 2] %>% as.numeric
+    log2(A/B)
+  })
+  analyse %>%
+    write.table(paste0("~/GitHub/Thesis_paper/Results/Metabolism/DMA/", Comp, "_diff_activities.tsv"), 
+                sep = "\t", col.names = NA, quote = F)
+})
+```
+
+# From gene to reactions
+
+## function
+
+```{r}
+From_onto_to_reaction <- function(Onto_name, Onto_data, Group){
+  Onto_data <- Auto_set_readable(Onto_data) %>% .@compareClusterResult
+  genes_of_onto <- dplyr::filter(Onto_data, group == Group & Description == Onto_name) %>% 
+    .$geneID %>% stringr::str_split(pattern = "/") %>% unlist %>% unique
+  res_reactions <- dplyr::filter(Gene_reaction_conversion_network, B %in% genes_of_onto) %>%
+    .$A %>% unique
+  diff_data <- List_reactions_diff[[Group]]
+  diff_data 
+  diff_data$mean.x <- as.numeric(diff_data$mean.x)
+  diff_data$mean.y <- as.numeric(diff_data$mean.y)
+  diff_data$pvalue <- as.numeric(diff_data$pvalue)
+  diff_data$logFC <- sapply(1:nrow(diff_data), function(reaction){
+    A <- diff_data[reaction, 1] %>% as.numeric
+    B <- diff_data[reaction, 2] %>% as.numeric
+    log2(A/B)
+  })
+  react_diff <- diff_data %>% dplyr::filter(pvalue < 0.05 & abs(logFC) > 0.01) %>% rownames(.)
+  intersect(res_reactions, react_diff)
+}
+```
+
+```{r}
+From_onto_to_reaction("Fatty acid metabolism", GO_analysis$KEGG, Group = "IDH_in_Non_responders")
+```
+
+# Saving data for cross analysis
+
+```{r}
+lapply(names(List_genes_reactions_diff), function(Comp){
+  List_genes_reactions_diff[[Comp]] %>%
+    write.table(paste0("~/GitHub/Thesis_paper/Results/Metabolism/DMA/Genes_",Comp, ".tsv"), sep = "\t", row.names = F, quote = F)
+})
+```
+

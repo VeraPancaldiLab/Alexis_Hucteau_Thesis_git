@@ -1,0 +1,349 @@
+---
+title: "Sampling Combine"
+author: Alexis Hucteau
+date: "`r Sys.Date()`"
+output:
+    html_document:
+      toc: yes
+      toc_float: yes
+      theme: united
+editor_options:
+  markdown:
+    wrap: sentence
+---
+
+# Libraries
+
+```{r, error=F, warning=F, echo=FALSE, include=F}
+# rm(DmIALite, DOLite, DOLiteTerm, HsIALite, MmIALite, RnIALite)
+
+library(dplyr)
+library(parallel)
+library(ggplot2)
+
+cores2use <- detectCores()
+"%ni%" <- Negate("%in%")
+```
+
+# Create Intra layer links
+
+## Functions
+
+```{r}
+Formattage_layers <- function(Layer, n){
+  Layer <- Layer[1:3]
+  colnames(Layer) <- c("from", "to", "weight")
+  Layer$layer_from <- rep(n, nrow(Layer))
+  Layer$layer_to <- rep(n, nrow(Layer))
+  Layer <- Layer[, c("from", "layer_from", "to", "layer_to", "weight")]
+  Layer[Layer$weight !=0,]
+}
+
+Intra_layer_links <- function(Layer_1, Layer_2, Layer_3, Layer_4){
+  layers.list <- list(Layer_1, Layer_2, Layer_3, Layer_4)
+  layers.list <- mclapply(1:4, function(layer){
+    Formattage_layers(layers.list[[layer]], layer)
+  }, mc.cores = cores2use)
+  
+  intra_links <- purrr::reduce(layers.list, rbind) %>%
+    unique
+  
+  unique_nodes <- c(intra_links$from, intra_links$to) %>%
+    unique
+  
+  id_conversion <- data.frame(id_node = 1:length(unique_nodes),
+                              label_node = unique_nodes)
+  
+  intra_links <- merge(intra_links, id_conversion, by.x = "from", by.y = "label_node", all.x = T)
+  intra_links$from <- intra_links$id_node
+  intra_links <- intra_links[,c("from", "layer_from", "to", "layer_to", "weight")]
+  intra_links <- merge(intra_links, id_conversion, by.x = "to", by.y = "label_node", all.x = T)
+  intra_links$to <- intra_links$id_node
+  intra_links <- intra_links[,c("from", "layer_from", "to", "layer_to", "weight")]
+  
+  list("Intra_links" = intra_links, "ID_conversion" = id_conversion)
+}
+```
+
+
+
+```{r}
+Folder_multilayers <- "~/GitHub/Thesis_paper/Results/Multi_layer_pheno_like/Final_mutlilayer/mIDH2_NR/"
+Folder_Samples <- "~/GitHub/Thesis_paper/Results/Multi_layer_pheno_like/Sampling/"
+
+Layers_All_links_multi_layer_intra_scaled <- lapply(1:3, function(layer){
+  lapply(1:20, function(Sample){
+    layer_1 <- read.table(paste0(Folder_multilayers, "Layer_1/Network.tsv"), 
+                        sep = "\t", header = T)
+    layer_2 <- read.table(paste0(Folder_multilayers, "Layer_2/mIDH2_NR_GRN_network.tsv"),
+                          sep = "\t", header = T) %>%
+      .[c(1,2,5)]
+    layer_3 <- read.table(paste0(Folder_multilayers, "Layer_3/PPI.tsv"),
+                        sep = "\t", header = T) 
+    layer_4 <- read.table(paste0(Folder_multilayers, "Layer_4/mIDH2_NR_Reactions_weighted.tsv"),
+                        sep = "\t", header = T, quote = "\"") 
+    if(layer ==1){
+      layer_1 <- read.table(paste0(Folder_Samples, "Layer_1/Network_", Sample, ".tsv"), 
+                        sep = "\t", header = T)
+    }else if(layer == 2){
+      layer_2 <- read.table(paste0(Folder_Samples, "Layer_2/Network_", Sample, ".tsv"), 
+                        sep = "\t", header = T)
+    }else if(layer == 3){
+      layer_3 <- read.table(paste0(Folder_Samples, "Layer_3/Network_", Sample, ".tsv"), 
+                        sep = "\t", header = T)
+    }
+    layer_1$weight <- layer_1$weight %>% as.numeric
+    layer_2$weight_corr <- layer_2$weight_corr %>% as.numeric
+    layer_3$weight <- layer_3$weight %>% as.numeric
+    layer_4$scaled_weight <- layer_4$scaled_weight %>% as.numeric
+  
+    Intra_layer_links(layer_1, layer_2, layer_3, layer_4)
+  })
+})
+names(Layers_All_links_multi_layer_intra_scaled) <- c("Layer_1", "Layer_2", "Layer_3")
+```
+
+```{r}
+Create_Custom_Inter_layer_links <- function(Intra_layer, Layer_conversion, layer){
+  frag_in_network <- dplyr::filter(Layer_conversion, V1 %in% Intra_layer[["ID_conversion"]]$label_node)
+  gene_not_in_ID_conversion <- Layer_conversion$V2[Layer_conversion$V2 %ni% Intra_layer[["ID_conversion"]]$label_node] %>% unique
+  new_ids <- max(Intra_layer[["ID_conversion"]]$id_node) + 1
+  new_ids_max <- new_ids + length(gene_not_in_ID_conversion) - 1
+  new_ids_range <- new_ids:new_ids_max
+  gene_not_in_ID_conversion <- data.frame("Node_label" = gene_not_in_ID_conversion, 
+                                          "Node_ID" = new_ids_range)
+  tmp <- mclapply(1:nrow(frag_in_network), function(ele){
+    id_to <- dplyr::filter(Intra_layer[["ID_conversion"]], label_node %in% frag_in_network[ele, "V2"]) %>%
+    .$id_node 
+    id_from <- dplyr::filter(Intra_layer[["ID_conversion"]], label_node %in% frag_in_network[ele, "V1"]) %>%
+    .$id_node 
+    if(length(id_to) == 0){
+      new_gene_data <- dplyr::filter(gene_not_in_ID_conversion, Node_label == frag_in_network[ele, "V2"])
+      new_node_id <- new_gene_data$Node_ID
+      new_node_label <- new_gene_data$Node_label
+      layer_to <- ifelse(layer == 1, 2, 3)
+      new_edge <- data.frame("from" = id_from, "layer_from" = layer, 
+                 "to" = new_node_id, "layer_to" = layer_to, 
+                 "weight" = 0.5)
+      new_ID <- data.frame("id_node" = new_node_id, "label_node" = new_node_label)
+    }else{
+      layer_to <- ifelse(layer == 1, 2, 3)
+      new_edge <- data.frame("from" = id_from, "layer_from" = layer, 
+                   "to" = id_to, "layer_to" = layer_to, 
+                   "weight" = 0.5)
+      new_ID <- NULL
+    }
+    list("Intra_links" = new_edge, "ID_conversion" = new_ID)
+  }, mc.cores = 2) 
+  new_intra_links <- mclapply(1:length(tmp), function(new_id){
+    tmp[[new_id]][["Intra_links"]]
+  }, mc.cores = 2) %>% data.table::rbindlist() %>% unique %>% data.frame
+  new_id_converted <- mclapply(1:length(tmp), function(new_id){
+    tmp[[new_id]][["ID_conversion"]]
+  }, mc.cores = 2) %>% data.table::rbindlist() %>% unique %>% data.frame
+  links <- rbind(Intra_layer[["Intra_links"]], new_intra_links) %>% unique
+  ID_conversion <- rbind(Intra_layer[["ID_conversion"]], new_id_converted) %>% unique
+  
+  if(layer == 4){
+    inter_links <- Add_inter_links_of_common_nodes(links, ID_conversion)
+  }else{
+    inter_links <- links
+  }
+  
+  list("Intra_links" = inter_links, "ID_conversion" = ID_conversion)
+}
+
+Add_inter_links_of_common_nodes <- function(Links, Nodes){
+  nodes_layers <- mclapply(2:3, function(Layers){
+    node.from <- dplyr::filter(Links, layer_from == Layers) %>% .$from
+    node.to <- dplyr::filter(Links, layer_to == Layers) %>% .$to
+    unique(c(node.from, node.to))
+  }, mc.cores = 2)
+  common_nodes <- intersect(nodes_layers[[1]], nodes_layers[[2]])
+  if(!is.null(common_nodes)){
+    new_links <- mclapply(common_nodes, function(Nodes){
+      data.frame("from" = common_nodes, "layer_from" = 2, 
+                 "to" = common_nodes, "layer_to" = 3, 
+                 "weight" = 0.75
+                 )
+    }, mc.cores = 2) %>% data.table::rbindlist() %>% unique
+  }else{
+    new_links <- data.frame()
+  }
+  rbind(Links, new_links)
+}
+```
+
+```{r}
+layer_1_dataconversion <- read.table("~/GitHub/Thesis_paper/Datasets/Chromatine_part/Associate_fragment_to_gene_promoter.tsv",
+                                 sep = "\t", header = T)
+colnames(layer_1_dataconversion) <- c("V1", "V2")
+
+layer_4_dataconversion <- read.table("~/GitHub/Thesis_paper/Datasets/Metabolic_datasets/Gene_reactions_network.tsv",
+                                     sep = "\t", header = T)
+colnames(layer_4_dataconversion) <- c("V1", "V2")
+```
+
+
+```{r}
+Inter_layered <- mclapply(c("Layer_1", "Layer_2", "Layer_3"), function(Pheno){
+  mclapply(1:20, function(sampling){
+    res <- Create_Custom_Inter_layer_links(Layers_All_links_multi_layer_intra_scaled[[Pheno]][[sampling]], layer_1_dataconversion, 1)
+    res <- Create_Custom_Inter_layer_links(res, layer_4_dataconversion, 4)
+    res
+  }, mc.cores = 2)
+}, mc.cores = 2)
+names(Inter_layered) <- c("Layer_1", "Layer_2", "Layer_3")
+```
+
+```{r}
+Layer_1_interlayered_odd <- mclapply(seq(1,20, by = 2), function(sampling){
+  res <- Create_Custom_Inter_layer_links(Layers_All_links_multi_layer_intra_scaled[["Layer_1"]][[sampling]], layer_1_dataconversion, 1)
+  res <- Create_Custom_Inter_layer_links(res, layer_4_dataconversion, 4)
+  res
+}, mc.cores = 2)
+```
+
+
+
+```{r}
+save.image("/media/alexis/DATA/Session/R_session/Thesis_paper_Rsessions/Multi_layer_phenolike/Directed_multi_layer_sampling.RData")
+```
+
+
+```{r}
+Make_intra_scaled_link <- function(Link_line, intra_weight){
+  if(Link_line$layer_from < Link_line$layer_to){
+    res <-data.frame("from" = c(Link_line$from, Link_line$to), 
+             "layer_from" = c(Link_line$layer_from, Link_line$layer_to),
+             "to" = c(Link_line$to, Link_line$from), 
+             "layer_to" = c(Link_line$layer_to, Link_line$layer_from), 
+             "weight" = c(intra_weight[[Link_line$layer_from]][[1]], 
+                          intra_weight[[Link_line$layer_from]][[2]]))
+  }else{
+    res <- data.frame("from" = c(Link_line$from, Link_line$to), 
+               "layer_from" = c(Link_line$layer_from, Link_line$layer_to),
+               "to" = c(Link_line$to, Link_line$from), 
+               "layer_to" = c(Link_line$layer_to, Link_line$layer_from), 
+               "weight" = c(intra_weight[[Link_line$layer_to]][[2]], 
+                          intra_weight[[Link_line$layer_to]][[1]]))
+  }
+  return(res)
+}
+
+
+Scaling_intralayer_connection <- function(Multilayer){
+  layer_network <- lapply(1:4, function(layer){
+    dplyr::filter(Multilayer[["Intra_links"]], layer_from == layer & layer_to == layer) %>%
+      .[c(1,3)] %>% unique %>% igraph::graph.data.frame(directed = F) %>%
+      igraph::degree(mode = "all") %>% summary
+  })
+  
+  intra_layer_links <- lapply(1:3, function(intra){
+    n_nodes_in <- layer_network[[intra]][[3]]
+    n_nodes_out <- layer_network[[intra + 1]][[3]]
+    in2out <- n_nodes_in/n_nodes_out
+    in2out <- (1-1/(in2out+1))
+    in2out <- 0.2+0.6*in2out
+    out2in <- n_nodes_out/n_nodes_in 
+    out2in <- (1-1/(out2in+1))
+    out2in <- 0.2+0.6*out2in
+    list(in2out, out2in)
+  }) 
+  intra_links <- dplyr::filter(Multilayer[["Intra_links"]], layer_from != layer_to)
+  new_intra_links <- lapply(1:nrow(intra_links), function(link){
+    Make_intra_scaled_link(intra_links[link,], intra_layer_links)
+  }) %>% data.table::rbindlist() %>% unique
+  inter_links <- dplyr::filter(Multilayer[["Intra_links"]], layer_from == layer_to)
+  rbind(inter_links, new_intra_links)
+}
+```
+
+
+```{r}
+Multi_layers_scaled <- lapply(c("Layer_1", "Layer_2", "Layer_3"), function(layer){
+  mclapply(1:20, function(samples){
+    ID_conversion <- Inter_layered[[layer]][[samples]][["ID_conversion"]]
+    Intra_links <- Scaling_intralayer_connection(Inter_layered[[layer]][[samples]])
+    list("ID_conversion" = ID_conversion, "Intra_links" = Intra_links)
+  }, mc.cores = 2)
+})
+names(Multi_layers_scaled) <- c("Layer_1", "Layer_2", "Layer_3")
+```
+
+```{r}
+Folder_multilayers <- "~/GitHub/Thesis_paper/Results/Multi_layer_pheno_like/Sampling/Multilayers/"
+
+Make_Multilayer_file <- function(Multilayer, Class, Layer){
+  vertices <- Multilayer[[Class]][["ID_conversion"]]
+  multilayer <- Multilayer[[Class]][["Intra_links"]]
+  multilayer <- multilayer[,c(2,1,4,3,5)]
+  
+  dir.create(paste0(Folder_multilayers, Layer), showWarnings = F)
+  n_vertices <- unique(vertices$id_node) %>% length
+  n_edges <- nrow(multilayer)
+  file_edge <- paste0(Folder_multilayers, Layer, "/", Class, "_multilayer_infomap.edges")
+  if(file.exists(file_edge)){
+    file.remove(file_edge)
+  }
+  fileConn <- file(file_edge, open = "at")
+  writeLines(c(paste("*Vertices", n_vertices), "# node_id name"), fileConn)
+  utils::write.table(
+      vertices,
+      file = fileConn,
+      row.names = F,
+      col.names = F,
+      quote = F
+    )
+  intra <- dplyr::filter(multilayer, layer_from == layer_to)
+  n_intra <- nrow(intra)
+  writeLines(c(paste("*Multilayer", n_edges), "# layer_id node_id layer_id node_id weight", paste("# intra", n_intra)), fileConn)
+  inter <- dplyr::filter(multilayer, layer_from != layer_to)
+  n_inter <- nrow(inter)
+  utils::write.table(
+      intra,
+      file = fileConn,
+      row.names = F,
+      col.names = F,
+      quote = F
+    )
+  writeLines(paste("# inter", n_inter), fileConn)
+  utils::write.table(
+      inter,
+      file = fileConn,
+      row.names = F,
+      col.names = F,
+      quote = F
+    )
+  close(fileConn)
+  multilayer %>%
+    write.table(paste0(Folder_multilayers, Layer, "/", Class, "_multilayer_infomap.tsv"), sep = "\t", row.names = F)
+  vertices %>%
+    write.table(paste0(Folder_multilayers, Layer, "/", Class, "_multilayer_infomap_vertices.tsv"), sep = "\t", row.names = F)
+  return(NULL)
+}
+```
+
+
+```{r}
+mclapply(names(Multi_layers_scaled), function(Class){
+  mclapply(1:20, function(samples){
+    Make_Multilayer_file(Multi_layers_scaled, samples, Class)
+    NULL
+  })
+}, mc.cores = cores2use)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+

@@ -1,0 +1,20 @@
+#!/bin/bash
+
+cd ~/GitHub/Thesis_paper/Results/Multi_layer_pheno_like/Final_multilayergenobioinfo.toulouse.inrae.fr
+/
+
+Pheno=$(ls)
+
+Comp="Comparison"
+
+for pheno in $Pheno
+do
+  if [[ -d $pheno ]] && [[ "$pheno" != *"$Comp"* ]] && [[ "$pheno" != *"Scaled"* ]];
+  then
+    cd $pheno
+    file=$pheno\_multilayer_infomap.edges
+    echo $file
+    sshpass -p "135264/Qgmatp" scp $file ahucteau@genologin.toulouse.inra.fr:work/Multilayer
+    cd ..
+  fi
+done

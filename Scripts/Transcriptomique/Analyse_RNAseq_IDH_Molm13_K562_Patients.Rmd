@@ -1,0 +1,790 @@
+---
+title: "Analyse RNAseq IDH Molm13 K562 Patients"
+author: Alexis Hucteau
+date: "`r Sys.Date()`"
+output:
+    html_document:
+      toc: yes
+      toc_float: yes
+      theme: united
+editor_options:
+  markdown:
+    wrap: sentence
+---
+
+# Initialisation
+
+## Libraries
+
+```{r}
+library(dplyr)
+library(matrixTests)
+library(factoextra)
+library(Hmisc)
+library(matrixStats)
+library(RColorBrewer)
+library(pheatmap)
+library(data.table)
+library(parallel)
+library(ggpubr)
+library("grid")
+library("gridExtra")
+library(ggplotify)
+library(limma)
+library(EnhancedVolcano)
+library(biomaRt)
+library(clusterProfiler)
+library(org.Hs.eg.db)
+library(simplifyEnrichment)
+library(pathview)
+library(DESeq2)
+library(edgeR)
+library(sva)
+library(EnhancedVolcano)
+
+cores2use <- detectCores() -2
+
+source("~/Core_scripts/core_functions.R")
+```
+
+## Loading data
+
+```{r}
+RNAseq_data <- read.table("~/GitHub/Thesis_paper/Datasets/Transcriptomics/RNAseq/Counts.txt", sep = "\t", row.names = 1, header = T)
+```
+
+```{r}
+Patient_METAML_RNAseq <- read.table("/media/alexis/DATA/Thesis_paper_DATA/Transcriptomes_patients/FEATURECOUNT_RAW_RNASEQ_FULL_TABLE_SARRY.gct", sep = "\t", header = T, check.names = F)
+Correspondance_ID_patient <- xlsx::read.xlsx("/media/alexis/DATA/Thesis_paper_DATA/Transcriptomes_patients/CORRESPONDANCE_PATIENTS.xlsx", sheetIndex = 1)
+Batches <- xlsx::read.xlsx("/media/alexis/DATA/Thesis_paper_DATA/Transcriptomes_patients/RNA batch.xlsx", sheetIndex = 1)
+IDH_statuts <- read.table("~/GitHub/Thesis_paper/Datasets/Transcriptomics/RNAseq/Patient_RNAseq_IDHstatut.csv", sep = "\t", header = T)
+```
+
+## Phenotyping
+
+```{r}
+IDH_statuts$sample <- paste0("TUH", IDH_statuts$Sample)
+Correspondance_IDH_patient <- dplyr::filter(Correspondance_ID_patient, PATIENT.ACRONYME %in% IDH_statuts$sample)
+colnames(Patient_METAML_RNAseq)
+IDH_patient_RNAseq_samples <- colnames(Patient_METAML_RNAseq)[colnames(Patient_METAML_RNAseq) %in% c(Correspondance_IDH_patient$NAME.RNAseq, Correspondance_IDH_patient$PATIENT.ACRONYME)]
+IDH_patient_RNAseq_samples
+```
+
+```{r}
+Pheno <- merge(Correspondance_IDH_patient, IDH_statuts, by.x = "PATIENT.ACRONYME", by.y = "sample")
+Pheno
+```
+
+# EdgeR analysis
+
+```{r}
+d0 <- DGEList(RNAseq_data)
+```
+
+```{r}
+d0 <- calcNormFactors(d0)
+d0
+```
+
+```{r}
+cutoff <- 1
+drop <- which(apply(cpm(d0), 1, max) < cutoff)
+d <- d0[-drop,] 
+dim(d) # number of genes left
+```
+
+```{r}
+snames <- colnames(RNAseq_data) # Sample names
+snames
+```
+
+```{r}
+IDH <- c("IDH1", "IDH2", "IDHwt", "IDH1", "IDH2", "IDHwt", "IDH1", "IDH2", "patients", "patients", "IDH2", "IDH2", "IDH1_IDH2", "IDH1_IDH2", "IDH2")
+
+Type_of_data <- c("K562", "K562", "K562", "Molm13", "Molm13", "Molm13", "patients", "patients", "patients", "patients", "patients", "patients", "patients", "patients", "patients")
+```
+
+```{r}
+group <- interaction(IDH, Type_of_data)
+group
+```
+
+```{r}
+plotMDS(d, col = as.numeric(group))
+```
+
+```{r}
+mm <- model.matrix(~0 + group)
+```
+
+```{r}
+y <- voom(d, mm, plot = T)$E
+```
+
+```{r}
+Batched_GE <- ComBat(y, batch = Type_of_data)
+```
+
+```{r}
+res.pca_cell <- prcomp(t(y[,Type_of_data != "patients"]))
+cell_plot <- fviz_pca_ind(res.pca_cell, label="all", habillage=IDH[Type_of_data != "patients"],
+             addEllipses=TRUE, ellipse.level=0.95) +
+  ggtitle("Cell line PCA")
+print(cell_plot)
+
+res.pca_cell_patient <- prcomp(t(y))
+cell_patient_plot <- fviz_pca_ind(res.pca_cell_patient, label="all", habillage=IDH,
+             addEllipses=TRUE, ellipse.level=0.95) +
+  ggtitle("Cell line + patient PCA")
+print(cell_patient_plot)
+
+res.pca_patient <- prcomp(t(y[,Type_of_data == "patients"]))
+patient_plot <- fviz_pca_ind(res.pca_patient, label="all",
+             addEllipses=FALSE, ellipse.level=0.95) +
+  ggtitle("Patient PCA")
+print(patient_plot)
+```
+
+
+
+
+```{r}
+res.pca_cell_patient <- prcomp(t(Batched_GE))
+cell_patient_plot <- fviz_pca_ind(res.pca_cell_patient, label="all", habillage=IDH,
+             addEllipses=FALSE, ellipse.level=0.95) +
+  ggtitle("Cell line + patient PCA")
+print(cell_patient_plot)
+
+ggsave("~/GitHub/Thesis_paper/Results/Transcriptomique/Molm_K562_data/Figures/PCA_patient_n_celllines_plot.png", cell_patient_plot, width = 2100, height = 2100, units = "px")
+
+res.pca_patient <- prcomp(t(Batched_GE[,Type_of_data == "patients"]))
+patient_plot <- fviz_pca_ind(res.pca_patient, label="all", habillage = IDH[Type_of_data == "patients"],
+             addEllipses=FALSE, ellipse.level=0.95) +
+  ggtitle("Patient PCA")
+print(patient_plot)
+
+ggsave("~/GitHub/Thesis_paper/Results/Transcriptomique/Molm_K562_data/Figures/PCA_patient_plot.png", patient_plot, width = 2100, height = 2100, units = "px")
+
+res.pca_cell <- prcomp(t(Batched_GE[,Type_of_data != "patients"]))
+cell_plot <- fviz_pca_ind(res.pca_cell, label="all", habillage=IDH[Type_of_data != "patients"],
+             addEllipses=TRUE, ellipse.level=0.95) +
+  ggtitle("Cell line PCA")
+print(cell_plot)
+
+ggsave("~/GitHub/Thesis_paper/Results/Transcriptomique/Molm_K562_data/Figures/PCA_Cell_lines.png", cell_plot, width = 2100, height = 2100, units = "px")
+```
+
+```{r}
+mart <- biomaRt::useMart(biomart = "ENSEMBL_MART_ENSEMBL",
+                         dataset = "hsapiens_gene_ensembl")
+
+genes <- getBM(filters = "ensembl_gene_id",
+               attributes = c("ensembl_gene_id","entrezgene_id", "hgnc_symbol"),
+               values = rownames(RNAseq_data), 
+               mart = mart)
+```
+
+```{r}
+Differential_analysis <- function(Focused_variable, DATA){
+  design.pairs <- function(levels) {
+    n <- length(levels)
+    design <- matrix(0,n,choose(n,2))
+    rownames(design) <- levels
+    colnames(design) <- 1:choose(n,2)
+    k <- 0
+    for (i in 1:(n - 1))
+      for (j in (i + 1):n) {
+        k <- k + 1
+        design[i,k] <- 1
+        design[j,k] <- -1
+        colnames(design)[k] <- paste(levels[i], "-", levels[j],sep = "")
+      }
+    design
+  }
+  design <- model.matrix(~0 + Focused_variable)
+  contr.matrix <- design.pairs(levels(factor(Focused_variable)))
+  colnames(design) <- rownames(contr.matrix)
+  Fit <- lmFit(DATA, design) %>%
+    contrasts.fit(., contr.matrix) %>%
+    eBayes(., trend = TRUE)
+
+  FitList <- list()
+  for (i in 1:ncol(contr.matrix)) {
+    FitList[[i]] <- topTable(Fit, coef = i, adjust.method = "BH", number = nrow(DATA)) %>%
+      mutate(ID = rownames(.))
+
+    message(paste0(i, " done"))
+
+  }
+  names(FitList) <- colnames(contr.matrix)
+  return(FitList)
+}
+```
+
+```{r}
+DEG_analysis <- Differential_analysis(as.vector(group), Batched_GE)
+```
+
+# DEG cell lines
+
+```{r}
+names(DEG_analysis)[c(12, 15, 20, 23, 33, 38)]
+
+DEG_analysis_usefull <- DEG_analysis[c(12, 15, 20, 23, 33, 38)]
+DEG_analysis_usefull <- lapply(names(DEG_analysis_usefull), function(Comparison){
+  merge(DEG_analysis_usefull[[Comparison]], genes, by.x = "ID", by.y = "ensembl_gene_id")
+})
+names(DEG_analysis_usefull) <- names(DEG_analysis)[c(12, 15, 20, 23, 33, 38)]
+```
+
+# Volcanos
+
+```{r}
+Volcano_IDH1_IDH2_K562 <- EnhancedVolcano(
+      toptable = DEG_analysis_usefull$`IDH1.K562-IDH2.K562`,
+      lab = DEG_analysis_usefull$`IDH1.K562-IDH2.K562`$hgnc_symbol,
+      x = "logFC",
+      y = "P.Value",
+      FCcutoff = 1.5,
+      pCutoff = 0.05,
+      title = "IDH1 vs IDH2 K562",
+      subtitle = NA,
+      subtitleLabSize = 0, ylim = c(0, 5)
+  )
+Volcano_IDH1_IDH2_K562
+
+Volcano_IDH1_IDH2_Molm13 <- EnhancedVolcano(
+      toptable = DEG_analysis_usefull$`IDH1.Molm13-IDH2.Molm13`,
+      lab = DEG_analysis_usefull$`IDH1.Molm13-IDH2.Molm13`$hgnc_symbol,
+      x = "logFC",
+      y = "P.Value",
+      FCcutoff = 1.5,
+      pCutoff = 0.05,
+      title = "IDH1 vs IDH2 Molm13",
+      subtitle = NA,
+      subtitleLabSize = 0, ylim = c(0, 5)
+  )
+Volcano_IDH1_IDH2_Molm13
+
+Volcano_IDH1_IDHwt_K562 <- EnhancedVolcano(
+      toptable = DEG_analysis_usefull$`IDH1.K562-IDHwt.K562`,
+      lab = DEG_analysis_usefull$`IDH1.K562-IDHwt.K562`$hgnc_symbol,
+      x = "logFC",
+      y = "P.Value",
+      FCcutoff = 1.5,
+      pCutoff = 0.05,
+      title = "IDH1 vs IDHwt K562",
+      subtitle = NA,
+      subtitleLabSize = 0, ylim = c(0, 5)
+  )
+Volcano_IDH1_IDHwt_K562
+
+Volcano_IDH1_IDHwt_Molm13 <- EnhancedVolcano(
+      toptable = DEG_analysis_usefull$`IDH1.Molm13-IDHwt.Molm13`,
+      lab = DEG_analysis_usefull$`IDH1.Molm13-IDHwt.Molm13`$hgnc_symbol,
+      x = "logFC",
+      y = "P.Value",
+      FCcutoff = 1.5,
+      pCutoff = 0.05,
+      title = "IDH1 vs IDHwt Molm13",
+      subtitle = NA,
+      subtitleLabSize = 0, ylim = c(0, 5)
+  )
+Volcano_IDH1_IDHwt_Molm13
+
+Volcano_IDH2_IDHwt_K562 <- EnhancedVolcano(
+      toptable = DEG_analysis_usefull$`IDH2.K562-IDHwt.K562`,
+      lab = DEG_analysis_usefull$`IDH2.K562-IDHwt.K562`$hgnc_symbol,
+      x = "logFC",
+      y = "P.Value",
+      FCcutoff = 1.5,
+      pCutoff = 0.05,
+      title = "IDH2 vs IDHwt K562",
+      subtitle = NA,
+      subtitleLabSize = 0, ylim = c(0, 5)
+  )
+Volcano_IDH2_IDHwt_K562
+
+Volcano_IDH2_IDHwt_Molm13 <- EnhancedVolcano(
+      toptable = DEG_analysis_usefull$`IDH2.Molm13-IDHwt.Molm13`,
+      lab = DEG_analysis_usefull$`IDH2.Molm13-IDHwt.Molm13`$hgnc_symbol,
+      x = "logFC",
+      y = "P.Value",
+      FCcutoff = 1.5,
+      pCutoff = 0.05,
+      title = "IDH2 vs IDHwt Molm13",
+      subtitle = NA,
+      subtitleLabSize = 0, ylim = c(0, 5)
+  )
+Volcano_IDH2_IDHwt_Molm13
+```
+
+
+```{r}
+Volcano_IDH1_IDH2_Molm13 %>% ggsave(filename = "~/GitHub/Thesis_paper/Results/Transcriptomique/Molm_K562_data/Figures/Volcano/Volcano_IDH1_IDH2_Molm13.png", bg = "white", width = 7600, height = 4200, units = "px")
+Volcano_IDH1_IDH2_K562 %>% ggsave(filename = "~/GitHub/Thesis_paper/Results/Transcriptomique/Molm_K562_data/Figures/Volcano/Volcano_IDH1_IDH2_K562.png", bg = "white", width = 7600, height = 4200, units = "px")
+Volcano_IDH1_IDHwt_K562 %>%
+  ggsave(filename="~/GitHub/Thesis_paper/Results/Transcriptomique/Molm_K562_data/Figures/Volcano/Volcano_IDH1_IDHwt_K562.png", bg = "white", width = 7600, height = 4200, units = "px")
+Volcano_IDH1_IDHwt_Molm13 %>%
+  ggsave(filename="~/GitHub/Thesis_paper/Results/Transcriptomique/Molm_K562_data/Figures/Volcano/Volcano_IDH1_IDHwt_Molm13.png", bg = "white", width = 7600, height = 4200, units = "px")
+Volcano_IDH2_IDHwt_K562 %>%
+  ggsave(filename="~/GitHub/Thesis_paper/Results/Transcriptomique/Molm_K562_data/Figures/Volcano/Volcano_IDH2_IDHwt_K562.png", bg = "white", width = 7600, height = 4200, units = "px")
+Volcano_IDH2_IDHwt_Molm13 %>%
+  ggsave(filename="~/GitHub/Thesis_paper/Results/Transcriptomique/Molm_K562_data/Figures/Volcano/Volcano_IDH2_IDHwt_Molm13.png", bg = "white", width = 7600, height = 4200, units = "px")
+
+```
+
+# Functional analysis
+
+```{r}
+Compare_Enrichments <- function(List_DEGs, only_up = F, only_down=F){
+  list_direct_ID <- lapply(names(List_DEGs), function(Comparison){
+    up <- List_DEGs[[Comparison]]$UP 
+    down <- List_DEGs[[Comparison]]$DOWN 
+    if(only_down){
+      up <- down
+    }
+    if(only_up){
+      down <- up
+    }
+    if(only_down & only_up){
+      up <- List_DEGs[[Comparison]]$UP 
+      down <- List_DEGs[[Comparison]]$DOWN 
+    }
+    ids <- c(up, down) %>% unique %>% .[. != ""]
+    data.table(Entrez = ids, group = Comparison)
+  })
+  names(list_direct_ID) <- names(List_DEGs)
+  mydf <- data.table::rbindlist(list_direct_ID)
+  go_cluster <- compareCluster(Entrez~group, data = mydf, fun = "enrichGO", OrgDb = org.Hs.eg.db, 
+                 keyType = "SYMBOL", pvalueCutoff = 0.1, pAdjustMethod = "none", qvalueCutoff = 1)
+  mydf_entrez <- merge(mydf, genes, by.x = "Entrez", by.y = "hgnc_symbol")
+  kegg_cluster <- compareCluster(entrezgene_id~group, data = mydf_entrez, fun = "enrichKEGG", 
+                                 organism = "hsa", qvalueCutoff = 1,
+                                 keyType = 'ncbi-geneid', pvalueCutoff = 0.1, 
+                                 pAdjustMethod = "none", setReadable(OrgDb = org.Hs.eg.db)) 
+  
+  List("GO" = go_cluster,
+       "KEGG" = kegg_cluster)
+}
+
+Auto_set_readable <- function(Results_cluster_KEGG_WP){
+  setReadable(Results_cluster_KEGG_WP, OrgDb = org.Hs.eg.db, keyType = "ENTREZID")
+}
+```
+
+```{r}
+List_DEGs_cell_lines <- lapply(names(DEG_analysis_usefull), function(Comp){
+  if(stringr::str_detect(Comp, pattern = "IDH1") & stringr::str_detect(Comp, pattern = "IDH2") ){
+    up <- DEG_analysis_usefull[[Comp]] %>%
+      dplyr::filter(logFC < -1.5 & P.Value < 0.05) %>% .$hgnc_symbol %>% unique
+  }else{
+    up <- DEG_analysis_usefull[[Comp]] %>%
+      dplyr::filter(logFC > 1.5 & P.Value < 0.05) %>% .$hgnc_symbol %>% unique
+  }
+  if(stringr::str_detect(Comp, pattern = "IDH1") & stringr::str_detect(Comp, pattern = "IDH2") ){
+    down <- DEG_analysis_usefull[[Comp]] %>%
+      dplyr::filter(logFC > 1.5 & P.Value < 0.05) %>% .$hgnc_symbol %>% unique
+  }else{
+    down <- DEG_analysis_usefull[[Comp]] %>%
+      dplyr::filter(logFC < -1.5 & P.Value < 0.05) %>% .$hgnc_symbol %>% unique
+  }
+  list("UP" = up, "DOWN" = down)
+})
+names(List_DEGs_cell_lines) <- names(DEG_analysis_usefull)
+```
+
+```{r}
+List_DEGs_cell_lines_Molm13 <- List_DEGs_cell_lines[c(3,4,6)]
+List_DEGs_cell_lines_K562 <- List_DEGs_cell_lines[c(1,2,5)]
+
+Comp_enrichment_results_Molm13 <- Compare_Enrichments(List_DEGs_cell_lines_Molm13, only_up = T)
+Comp_enrichment_results_K562 <- Compare_Enrichments(List_DEGs_cell_lines_K562, only_up = T)
+
+```
+
+```{r}
+n <- 10
+p <- dotplot(Comp_enrichment_results_Molm13$GO, showCategory = n, font.size = 20) 
+height_param <- n*4*120 +200
+ggsave("~/GitHub/Thesis_paper/Results/Transcriptomique/Molm_K562_data/Figures/GO/Cluster_up_Molm_GO_plot.png", p, bg = "white", width = 5700, 
+       height = height_param, units = "px", limitsize = FALSE)
+```
+
+
+```{r}
+pcnet <- cnetplot(Comp_enrichment_results_Molm13$GO, showCategory = n, cex_label_gene = 3, cex_label_category = 3) 
+height_param <- n*4*120 +200
+ggsave("~/GitHub/Thesis_paper/Results/Transcriptomique/Molm_K562_data/Figures/GO/Cluster_up_Molm_GO_cnetplot.svg", pcnet, bg = "white", width = 5700, 
+       height = 5700, units = "px", limitsize = FALSE)
+```
+
+```{r}
+n <- 10
+p <- dotplot(Comp_enrichment_results_Molm13$KEGG, showCategory = n, font.size = 20) 
+height_param <- n*4*120 +200
+ggsave("~/GitHub/Thesis_paper/Results/Transcriptomique/Molm_K562_data/Figures/GO/Cluster_up_Molm_KEGG_plot.png", p, bg = "white", width = 5700, 
+       height = height_param, units = "px", limitsize = FALSE)
+```
+
+
+```{r}
+pcnet <- cnetplot(Auto_set_readable(Comp_enrichment_results_Molm13$KEGG), showCategory = n, cex_label_gene = 3, cex_label_category = 3) 
+height_param <- n*4*120 +200
+ggsave("~/GitHub/Thesis_paper/Results/Transcriptomique/Molm_K562_data/Figures/GO/Cluster_up_Molm_KEGG_cnetplot.svg", pcnet, bg = "white", width = 5700, 
+       height = 5700, units = "px", limitsize = FALSE)
+```
+
+```{r}
+n <- 10
+p <- dotplot(Comp_enrichment_results_K562$GO, showCategory = n, font.size = 20) 
+height_param <- n*4*120 +200
+ggsave("~/GitHub/Thesis_paper/Results/Transcriptomique/Molm_K562_data/Figures/GO/Cluster_up_K562_GO_plot.png", p, bg = "white", width = 5700, 
+       height = height_param, units = "px", limitsize = FALSE)
+```
+
+
+```{r}
+pcnet <- cnetplot(Comp_enrichment_results_K562$GO, showCategory = n, cex_label_gene = 3, cex_label_category = 3) 
+height_param <- n*4*120 +200
+ggsave("~/GitHub/Thesis_paper/Results/Transcriptomique/Molm_K562_data/Figures/GO/Cluster_up_K562_GO_cnetplot.svg", pcnet, bg = "white", width = 5700, 
+       height = 5700, units = "px", limitsize = FALSE)
+```
+
+```{r}
+n <- 10
+p <- dotplot(Comp_enrichment_results_K562$KEGG, showCategory = n, font.size = 20) 
+height_param <- n*4*120 +200
+ggsave("~/GitHub/Thesis_paper/Results/Transcriptomique/Molm_K562_data/Figures/GO/Cluster_up_K562_KEGG_plot.png", p, bg = "white", width = 5700, 
+       height = height_param, units = "px", limitsize = FALSE)
+```
+
+
+```{r}
+pcnet <- cnetplot(Auto_set_readable(Comp_enrichment_results_K562$KEGG), showCategory = n, cex_label_gene = 3, cex_label_category = 3) 
+height_param <- n*4*120 +200
+ggsave("~/GitHub/Thesis_paper/Results/Transcriptomique/Molm_K562_data/Figures/GO/Cluster_up_K562_KEGG_cnetplot.svg", pcnet, bg = "white", width = 5700, 
+       height = 5700, units = "px", limitsize = FALSE)
+```
+
+
+
+
+# Patient data
+
+```{r}
+DEG_analysis_patients <- DEG_analysis[["IDH1.patients-IDH2.patients"]]
+DEG_analysis_patients <- merge(DEG_analysis_patients, genes, by.x = "ID", by.y = "ensembl_gene_id")
+
+```
+
+```{r}
+Volcano_IDH1_IDH2_Patient_data <- EnhancedVolcano(
+      toptable = DEG_analysis_patients,
+      lab = DEG_analysis_patients$hgnc_symbol,
+      x = "logFC",
+      y = "P.Value",
+      FCcutoff = 1.5,
+      pCutoff = 0.05,
+      title = "IDH1 vs IDH2 Patient data",
+      subtitle = NA,
+      subtitleLabSize = 0, ylim = c(0, 5)
+  )
+Volcano_IDH1_IDH2_Patient_data
+```
+
+```{r}
+Genes_IDH1_patients <- DEG_analysis_patients %>%
+  dplyr::filter(logFC > 1.5 & P.Value < 0.05) %>% .$hgnc_symbol
+Genes_IDH2_patients <- DEG_analysis_patients %>%
+  dplyr::filter(logFC < -1.5 & P.Value < 0.05) %>% .$hgnc_symbol
+
+
+Genes_IDH1_patients_entrez <- genes %>% dplyr::filter(hgnc_symbol %in% Genes_IDH1_patients) %>% .$entrezgene_id
+Genes_IDH2_patients_entrez <- genes %>% dplyr::filter(hgnc_symbol %in% Genes_IDH2_patients) %>% .$entrezgene_id
+
+
+go_IDH1_patient <- enrichGO(Genes_IDH1_patients, OrgDb = org.Hs.eg.db, 
+                 keyType = "SYMBOL", pvalueCutoff = 0.1, pAdjustMethod = "none", qvalueCutoff = 1)
+
+kegg_IDH1_patient <- enrichKEGG(Genes_IDH1_patients_entrez, organism = "hsa", qvalueCutoff = 1,
+                                 keyType = 'ncbi-geneid', pvalueCutoff = 0.1, 
+                                 pAdjustMethod = "none") 
+
+go_IDH2_patient <- enrichGO(Genes_IDH2_patients, OrgDb = org.Hs.eg.db, 
+                 keyType = "SYMBOL", pvalueCutoff = 0.1, pAdjustMethod = "none", qvalueCutoff = 1)
+
+kegg_IDH2_patient <- enrichKEGG(Genes_IDH2_patients_entrez, organism = "hsa", qvalueCutoff = 1,
+                                 keyType = 'ncbi-geneid', pvalueCutoff = 0.1, 
+                                 pAdjustMethod = "none") 
+```
+
+```{r}
+dotplot(go_IDH2_patient)
+dotplot(kegg_IDH2_patient)
+dotplot(go_IDH1_patient)
+dotplot(kegg_IDH1_patient)
+```
+
+```{r}
+go_IDH2_patient %>% cnetplot
+kegg_IDH2_patient %>% cnetplot
+go_IDH1_patient %>% cnetplot
+kegg_IDH1_patient %>% cnetplot
+
+
+```
+
+# Proteomics
+
+```{r}
+Proteomic_cell_lines <- read.table("~/GitHub/Thesis_paper/Results/In_vitro/Proteomics.csv", sep = "\t", header = T, quote = "")
+```
+
+```{r}
+Volcano_IDH2_IDH1_Molm13_proteo <- EnhancedVolcano(
+      toptable = Proteomic_cell_lines,
+      lab = Proteomic_cell_lines$gene_name,
+      x = "IDH2_vs_IDH1_logFC",
+      y = "IDH2_vs_IDH1_t.test",
+      FCcutoff = 1.5,
+      pCutoff = 0.05,
+      title = "IDH2 vs IDH1 Molm13",
+      subtitle = NA,
+      subtitleLabSize = 0, ylim = c(0, 5)
+  )
+Volcano_IDH2_IDH1_Molm13_proteo
+
+Volcano_IDH2_IDH1_Molm13_proteo %>% ggsave(filename = "~/GitHub/Thesis_paper/Results/In_vitro/Volcano_IDH1_IDH2.png", bg = "white", width = 7600, height = 4200, units = "px")
+
+```
+
+
+```{r}
+universe_Proteo_Molm13 <- Proteomic_cell_lines$gene_name %>% unique
+
+mart <- biomaRt::useMart(biomart = "ENSEMBL_MART_ENSEMBL",
+                         dataset = "hsapiens_gene_ensembl")
+
+genes <- getBM(filters = "hgnc_symbol",
+               attributes = c("ensembl_gene_id","entrezgene_id", "hgnc_symbol"),
+               values = universe_Proteo_Molm13, 
+               mart = mart)
+```
+
+
+```{r}
+universe_proteo_entrez <- dplyr::filter(genes, hgnc_symbol %in% universe_Proteo_Molm13) %>% .$entrezgene_id %>% as.character()
+Auto_set_readable <- function(Results_cluster_KEGG_WP){
+  setReadable(Results_cluster_KEGG_WP, OrgDb = org.Hs.eg.db, keyType = "ENTREZID")
+}
+```
+
+
+```{r}
+Up_IDH2_IDH1_Proteo_Molm13 <- dplyr::filter(Proteomic_cell_lines, IDH2_vs_IDH1_logFC > 1.25 & IDH2_vs_IDH1_t.test < 0.05) %>%
+  .$gene_name %>% unique()
+
+Up_IDH2_IDH1_Proteo_Molm13_entrez <- dplyr::filter(genes, hgnc_symbol %in% Up_IDH2_IDH1_Proteo_Molm13) %>% .$entrezgene_id
+
+
+Down_IDH2_IDH1_Proteo_Molm13 <- dplyr::filter(Proteomic_cell_lines, IDH2_vs_IDH1_logFC < -1.25 & IDH2_vs_IDH1_t.test < 0.05) %>%
+  .$gene_name %>% unique()
+
+Down_IDH2_IDH1_Proteo_Molm13_entrez <- dplyr::filter(genes, hgnc_symbol %in% Down_IDH2_IDH1_Proteo_Molm13) %>% .$entrezgene_id
+
+
+Enrich_IDH2_GO_Proteo_Molm13 <- enrichGO(Up_IDH2_IDH1_Proteo_Molm13, OrgDb = org.Hs.eg.db, keyType = "SYMBOL", universe = universe_Proteo_Molm13, pAdjustMethod = "none", pvalueCutoff = 0.05)
+Enrich_IDH2_GO_Proteo_Molm13@result$qvalue <- Enrich_IDH2_GO_Proteo_Molm13@result$pvalue
+
+Enrich_IDH2_KEGG_Proteo_Molm13 <- enrichKEGG(Up_IDH2_IDH1_Proteo_Molm13_entrez, universe = universe_proteo_entrez, pAdjustMethod = "none", pvalueCutoff = 0.05)
+Enrich_IDH2_KEGG_Proteo_Molm13@result$qvalue <- Enrich_IDH2_KEGG_Proteo_Molm13@result$pvalue
+
+
+Enrich_IDH1_GO_Proteo_Molm13 <- enrichGO(Down_IDH2_IDH1_Proteo_Molm13, OrgDb = org.Hs.eg.db, keyType = "SYMBOL", universe = universe_Proteo_Molm13, pAdjustMethod = "none", pvalueCutoff = 0.05)
+Enrich_IDH1_GO_Proteo_Molm13@result$qvalue <- Enrich_IDH1_GO_Proteo_Molm13@result$pvalue
+
+Enrich_IDH1_KEGG_Proteo_Molm13 <- enrichKEGG(Down_IDH2_IDH1_Proteo_Molm13_entrez, universe = universe_proteo_entrez, pAdjustMethod = "none", pvalueCutoff = 0.05)
+Enrich_IDH1_KEGG_Proteo_Molm13@result$qvalue <- Enrich_IDH1_KEGG_Proteo_Molm13@result$pvalue
+
+
+```
+
+
+
+```{r}
+dotplot(Enrich_IDH2_GO_Proteo_Molm13, showCategory = 10)
+cnetplot(Enrich_IDH2_GO_Proteo_Molm13, showCategory = 10)
+dotplot(Enrich_IDH1_GO_Proteo_Molm13, showCategory = 10)
+cnetplot(Enrich_IDH1_GO_Proteo_Molm13, showCategory = 10)
+```
+
+```{r}
+dotplot(Enrich_IDH2_KEGG_Proteo_Molm13, showCategory = 20)
+Enrich_IDH2_KEGG_Proteo_Molm13 %>% setReadable(OrgDb = org.Hs.eg.db, keyType = "ENTREZID") %>% cnetplot(showCategory = 20)
+dotplot(Enrich_IDH1_KEGG_Proteo_Molm13, showCategory = 20)
+Enrich_IDH1_KEGG_Proteo_Molm13 %>% setReadable(OrgDb = org.Hs.eg.db, keyType = "ENTREZID") %>% cnetplot(showCategory = 20)
+```
+
+```{r}
+n <- 10
+p <- dotplot(Enrich_IDH2_GO_Proteo_Molm13, showCategory = n, font.size = 15) 
+height_param <- n*4*120 +200
+ggsave("~/GitHub/Thesis_paper/Results/In_vitro/IDH2_vs_IDH1_Molm13_GO_up_plot.png", p, bg = "white", width = 5700, 
+       height = height_param, units = "px", limitsize = FALSE)
+
+pcnet <- cnetplot(Enrich_IDH2_GO_Proteo_Molm13, showCategory = n, cex_label_gene = 2, cex_label_category = 2) 
+height_param <- n*4*120 +200
+ggsave("~/GitHub/Thesis_paper/Results/In_vitro/IDH2_vs_IDH1_Molm13_GO_up_cnetplot.png", pcnet, bg = "white", width = 5700, 
+       height = 5700, units = "px", limitsize = FALSE)
+```
+
+
+```{r}
+n <- 10
+p <- dotplot(Enrich_IDH1_GO_Proteo_Molm13, showCategory = n, font.size = 15) 
+height_param <- n*4*120 +200
+ggsave("~/GitHub/Thesis_paper/Results/In_vitro/IDH1_vs_IDH2_Molm13_GO_up_plot.png", p, bg = "white", width = 5700, 
+       height = height_param, units = "px", limitsize = FALSE)
+
+pcnet <- cnetplot(Enrich_IDH1_GO_Proteo_Molm13, showCategory = n, cex_label_gene = 2, cex_label_category = 2) 
+height_param <- n*4*120 +200
+ggsave("~/GitHub/Thesis_paper/Results/In_vitro/IDH1_vs_IDH2_Molm13_GO_up_cnetplot.png", pcnet, bg = "white", width = 5700, 
+       height = 5700, units = "px", limitsize = FALSE)
+```
+
+
+```{r}
+n <- 10
+p <- dotplot(Enrich_IDH2_KEGG_Proteo_Molm13, showCategory = n, font.size = 15) 
+height_param <- n*4*120 +200
+ggsave("~/GitHub/Thesis_paper/Results/In_vitro/IDH2_vs_IDH1_Molm13_KEGG_up_plot.png", p, bg = "white", width = 5700, 
+       height = height_param, units = "px", limitsize = FALSE)
+
+pcnet <- cnetplot(Auto_set_readable(Enrich_IDH2_KEGG_Proteo_Molm13), showCategory = n, cex_label_gene = 2, cex_label_category = 2) 
+height_param <- n*4*120 +200
+ggsave("~/GitHub/Thesis_paper/Results/In_vitro/IDH2_vs_IDH1_Molm13_KEGG_up_cnetplot.png", pcnet, bg = "white", width = 5700, 
+       height = 5700, units = "px", limitsize = FALSE)
+```
+
+
+```{r}
+n <- 10
+p <- dotplot(Enrich_IDH1_KEGG_Proteo_Molm13, showCategory = n, font.size = 15) 
+height_param <- n*4*120 +200
+ggsave("~/GitHub/Thesis_paper/Results/In_vitro/IDH1_vs_IDH2_Molm13_KEGG_up_plot.png", p, bg = "white", width = 5700, 
+       height = height_param, units = "px", limitsize = FALSE)
+
+pcnet <- cnetplot(Auto_set_readable(Enrich_IDH1_KEGG_Proteo_Molm13), showCategory = n, cex_label_gene = 2, cex_label_category = 2) 
+height_param <- n*4*120 +200
+ggsave("~/GitHub/Thesis_paper/Results/In_vitro/IDH1_vs_IDH2_Molm13_KEGG_up_cnetplot.png", pcnet, bg = "white", width = 5700, 
+       height = 5700, units = "px", limitsize = FALSE)
+```
+
+## GSEA
+
+```{r}
+IDH2_IDH1_4_GSEA <- Proteomic_cell_lines %>% dplyr::filter(IDH2_vs_IDH1_t.test < 0.05) %>% .$IDH2_vs_IDH1_logFC
+names(IDH2_IDH1_4_GSEA) <- Proteomic_cell_lines %>% dplyr::filter(IDH2_vs_IDH1_t.test < 0.05) %>% .$gene_name
+IDH2_IDH1_4_GSEA <- IDH2_IDH1_4_GSEA[order(IDH2_IDH1_4_GSEA, decreasing = T)]
+
+IDH2_IDH1_4_GSEA_KEGG <- Proteomic_cell_lines %>% .$IDH2_vs_IDH1_logFC
+names(IDH2_IDH1_4_GSEA_KEGG) <- Proteomic_cell_lines %>% .$gene_name
+IDH2_IDH1_4_GSEA_KEGG <- IDH2_IDH1_4_GSEA_KEGG[order(IDH2_IDH1_4_GSEA_KEGG, decreasing = T)]
+
+
+head(IDH2_IDH1_4_GSEA)
+
+names_entrez_gsea_kegg <- sapply(names(IDH2_IDH1_4_GSEA_KEGG), function(genenames){
+  id <- dplyr::filter(genes, hgnc_symbol == genenames) %>% .$entrezgene_id
+  id <- unique(id)
+  if(length(id) >1){
+    id[1]
+  }else{
+    id
+  }
+})
+  
+empty <- sapply(names(names_entrez_gsea_kegg), function(gene_name){
+  length(names_entrez_gsea_kegg[[gene_name]])
+})
+
+
+IDH2_IDH1_4_GSEA_KEGG <- IDH2_IDH1_4_GSEA_KEGG[empty == 1]
+names(IDH2_IDH1_4_GSEA_KEGG) <- names_entrez_gsea %>% unlist
+```
+
+
+```{r}
+GSEA_IDH2_vs_IDH1_Proteo_Molm <- gseGO(IDH2_IDH1_4_GSEA, OrgDb = org.Hs.eg.db, keyType = "SYMBOL", ont = "all",
+            minGSSize = 1, maxGSSize = 1000, pvalueCutoff = 0.05, verbose = F)
+
+GSEA_KEGG_IDH2_vs_IDH1_Proteo_Molm <- gseKEGG(IDH2_IDH1_4_GSEA_KEGG, keyType = "ncbi-geneid", minGSSize = 1, maxGSSize = 1000, pvalueCutoff = 0.05, verbose = F)
+
+```
+
+```{r}
+n <- 20
+
+dot_GSEA <- dotplot(GSEA_IDH2_vs_IDH1_Proteo_Molm, showCategory = n) 
+dot_GSEA
+ridge_GSEA <- ridgeplot(GSEA_IDH2_vs_IDH1_Proteo_Molm, showCategory = n)
+ridge_GSEA
+Cnet_GSEA <- cnetplot(GSEA_IDH2_vs_IDH1_Proteo_Molm, foldChange = IDH2_IDH1_4_GSEA, showCategory = n)
+Cnet_GSEA
+
+height_param <- n*4*120 +200
+ggsave("~/GitHub/Thesis_paper/Results/In_vitro/IDH2_vs_IDH1_Molm13_dot_GSEA.png", dot_GSEA, bg = "white", width = 5700, 
+       height = 5700, units = "px", limitsize = FALSE)
+ggsave("~/GitHub/Thesis_paper/Results/In_vitro/IDH2_vs_IDH1_Molm13_ridge_GSEA.png", ridge_GSEA, bg = "white", width = 5700, 
+       height = 5700, units = "px", limitsize = FALSE)
+ggsave("~/GitHub/Thesis_paper/Results/In_vitro/IDH2_vs_IDH1_Molm13_Cnet_GSEA.png", Cnet_GSEA, bg = "white", width = 5700, 
+       height = 5700, units = "px", limitsize = FALSE)
+```
+
+```{r}
+dot_GSEA_KEGG <- dotplot(GSEA_KEGG_IDH2_vs_IDH1_Proteo_Molm, showCategory = 20) 
+dot_GSEA_KEGG
+ridge_GSEA_KEGG <- ridgeplot(GSEA_KEGG_IDH2_vs_IDH1_Proteo_Molm)
+ridge_GSEA_KEGG
+Cnet_GSEA_KEGG <- GSEA_KEGG_IDH2_vs_IDH1_Proteo_Molm %>% Auto_set_readable %>% cnetplot(foldChange = IDH2_IDH1_4_GSEA_KEGG)
+Cnet_GSEA_KEGG
+
+ggsave("~/GitHub/Thesis_paper/Results/In_vitro/IDH2_vs_IDH1_Molm13_dot_GSEA_KEGG.png", dot_GSEA_KEGG, bg = "white", width = 5700, 
+       height = 5700, units = "px", limitsize = FALSE)
+ggsave("~/GitHub/Thesis_paper/Results/In_vitro/IDH2_vs_IDH1_Molm13_ridge_GSEA_KEGG.png", ridge_GSEA_KEGG, bg = "white", width = 5700, 
+       height = 5700, units = "px", limitsize = FALSE)
+ggsave("~/GitHub/Thesis_paper/Results/In_vitro/IDH2_vs_IDH1_Molm13_Cnet_GSEA_KEGG.png", Cnet_GSEA_KEGG, bg = "white", width = 5700, 
+       height = 5700, units = "px", limitsize = FALSE)
+
+
+```
+
+# Overlap Trancripto & Proteo
+
+```{r}
+Diff_genes_up_IDH2 <- DEG_analysis_usefull$`IDH1.Molm13-IDH2.Molm13` %>% 
+  dplyr::filter(logFC < -1.5 & P.Value < 0.05) %>%
+  .$hgnc_symbol
+Diff_prot_up_IDH2 <- Proteomic_cell_lines %>%
+  dplyr::filter(IDH2_vs_IDH1_t.test < 0.05 & IDH2_vs_IDH1_logFC > 1.25) %>% .$gene_name
+
+Diff_genes_up_IDH1 <- DEG_analysis_usefull$`IDH1.Molm13-IDH2.Molm13` %>% 
+  dplyr::filter(logFC > 1.5 & P.Value < 0.05) %>%
+  .$hgnc_symbol
+Diff_prot_up_IDH1 <- Proteomic_cell_lines %>%
+  dplyr::filter(IDH2_vs_IDH1_t.test < 0.05 & IDH2_vs_IDH1_logFC < - 1.25) %>% .$gene_name
+```
+
+## IDH2
+
+```{r}
+intersect(Diff_genes_up_IDH2, Diff_prot_up_IDH2)
+```
+
+## IDH1
+
+```{r}
+intersect(Diff_genes_up_IDH1, Diff_prot_up_IDH1)
+```
+

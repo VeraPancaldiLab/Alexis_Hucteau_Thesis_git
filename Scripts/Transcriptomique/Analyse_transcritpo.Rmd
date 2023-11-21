@@ -1,0 +1,1714 @@
+---
+title: "Analyse transcripto"
+author: Alexis Hucteau
+date: "`r Sys.Date()`"
+output:
+    html_document:
+      toc: yes
+      toc_float: yes
+      theme: united
+editor_options:
+  markdown:
+    wrap: sentence
+---
+
+# Libraries
+
+```{r, error=F, warning=F, echo=FALSE, include=F}
+library(dplyr)
+library(matrixTests)
+library(factoextra)
+library(Hmisc)
+library(matrixStats)
+library(RColorBrewer)
+library(pheatmap)
+library(data.table)
+library(parallel)
+library(ggpubr)
+library("grid")
+library("gridExtra")
+library(ggplotify)
+library(limma)
+library(EnhancedVolcano)
+library(biomaRt)
+library(clusterProfiler)
+library(org.Hs.eg.db)
+library(simplifyEnrichment)
+library(pathview)
+library(DESeq2)
+library(viper)
+library(aracne.networks)
+
+cores2use <- detectCores() -2
+
+source("~/Core_scripts/core_functions.R")
+```
+
+rsem-generate-data-matrix ./*.genes.results.genes.results > Counts.txt
+
+# Koichi data
+
+```{r, eval = F}
+Counts_data <- read.table("/media/alexis/DATA/Koichi_raw_data/RSEM/Counts.txt", sep = "\t", header = T, row.names = 1)
+colnames(Counts_data) <- colnames(Counts_data) %>% stringr::str_remove(".genes.results.genes.results")
+
+Counts_data %>% write.table("../../Datasets/Transcriptomics/RNAseq/Counts_Koichi_data.txt", sep = "\t")
+```
+
+```{r, eval = F}
+SraRunTable <- read.table("/media/alexis/DATA/Koichi_raw_data/SraRunTable.txt", sep = ",", header = T) %>%
+  .[c(1,26, 29)]
+head(SraRunTable)
+
+ID_Koichi_conversion <- read.table("~/tmp/Koichi_ID_conversion.csv", sep = "\t", header = T)
+ID_Koichi_conversion
+
+Clinical_patient_data <- read.table("~/GitHub/Thesis_paper/Datasets/Clinical_Koichi_data_isoform.tsv", sep = "\t", header = T) %>% merge(ID_Koichi_conversion, by.x = "patient_id", by.y = "ID_patient", all.x = T, all.y = T) 
+Clinical_patient_data$Baseline <- stringr::str_trim(Clinical_patient_data$Baseline) 
+Clinical_patient_data$Relapse <- stringr::str_trim(Clinical_patient_data$Relapse) 
+Clinical_patient_data <- merge(Clinical_patient_data, SraRunTable, by.x = "Baseline", by.y = "Sample.Name", all.x = T)[1:14]
+colnames(Clinical_patient_data)[14] <- "SRR_Baseline"
+Clinical_patient_data <- merge(Clinical_patient_data, SraRunTable, by.x = "Relapse", by.y = "Sample.Name", all.x = T)[1:15]
+colnames(Clinical_patient_data)[15] <- "SRR_Relapse"
+Clinical_patient_data <- Clinical_patient_data[c(3:13, 1, 2, 14, 15)]
+Clinical_patient_data <- Clinical_patient_data[order(Clinical_patient_data$patient_id),]
+Clinical_patient_data %>% write.table("~/GitHub/Thesis_paper/Datasets/Clinical_Koichi_data_isoform_SRR_annotated.tsv", sep = "\t", row.names = F)
+```
+
+```{r}
+Clinical_patient_data <- read.table("~/GitHub/Thesis_paper/Datasets/Clinical_Koichi_data_isoform_SRR_annotated_2.tsv", sep = "\t", header = T) 
+```
+
+
+```{r}
+files <- list.files("/media/alexis/DATA/Koichi_raw_data/RSEM", full.names = T) %>% 
+  .[stringr::str_detect(., "genes.results.genes.results")]
+
+Phenotype <- lapply(files, function(sample){
+  sample <- stringr::str_remove(sample, "/media/alexis/DATA/Koichi_raw_data/RSEM/") %>%
+    stringr::str_remove(".genes.results.genes.results")
+  baseline <- ifelse(sample %in% Clinical_patient_data$SRR_Baseline, "Baseline", "Relapse")
+  if(baseline == "Baseline"){
+    df <- dplyr::filter(Clinical_patient_data, SRR_Baseline == sample)
+  }else{
+    df <- dplyr::filter(Clinical_patient_data, SRR_Relapse == sample)
+  }
+  response <- df$Baseline_phenotype_2
+  IDH <- df$IDH_isoform
+  IDH_clean <- ifelse(df$IDH_isoform == "IDH1", "IDH1", "IDH2")
+  res <- data.frame(sample, 
+             "Timing" = baseline,
+             "Response" = response, 
+             "IDH" = IDH,
+             "IDH_clean" = IDH_clean)
+}) %>% data.table::rbindlist() %>% as.data.frame()
+rownames(Phenotype) <- colnames(Phenotype$sample)
+head(Phenotype)
+
+
+
+
+  
+# read.table("../../Datasets/Transcriptomics/RNAseq/Counts_Koichi_data.txt", sep = "\t")
+head(Clinical_patient_data)
+```
+
+
+```{r}
+samples_IDH1 <- dplyr::filter(Phenotype, IDH == "IDH1" & Timing == "Baseline") %>% 
+  .$sample
+samples_IDH2 <- dplyr::filter(Phenotype, ((IDH == "IDH2_R140" | IDH == "IDH2_R172") & Timing == "Baseline")) %>% 
+  .$sample
+
+samples_R <- dplyr::filter(Phenotype, (Response == "Responder" | Response == "Overall_Responder") & Timing == "Baseline") %>% 
+  .$sample
+samples_NR <- dplyr::filter(Phenotype, Response == "Non_Responder" & Timing == "Baseline") %>% 
+  .$sample
+samples_REL <- dplyr::filter(Phenotype, (Response == "Responder" | Response == "Overall_Responder") & Timing == "Relapse") %>% 
+  .$sample
+
+
+```
+
+```{r, eval =F}
+Ensembl_2_symbol <- read.table("~/GitHub/Thesis_paper/Datasets/Transcriptomics/RNAseq/beataml2_0_raw.csv", sep = ",", header = T, row.names = 1)[1:4]
+
+
+```
+
+```{r}
+Ensembl_2_symbol <- read.table("~/GitHub/Thesis_paper/Datasets/Transcriptomics/RNAseq/Ensembl_2_symbol.tsv", sep = "\t", header = T) 
+Ensembl_2_symbol <- Ensembl_2_symbol[-1]
+```
+
+# Differential Gene expression analysis
+
+## IDH1 vs IDH2
+
+```{r}
+Samples_2_keep_IDHs <- Phenotype$sample %in% c(samples_IDH1, samples_IDH2) 
+
+Counts_data_IDH1_IDH2 <- tximport::tximport(files[Samples_2_keep_IDHs], type = "rsem")
+Counts_data_IDH1_IDH2$length[Counts_data_IDH1_IDH2$length <=0] <- 1
+ddsTxi_IDH1_IDH2 <- DESeqDataSetFromTximport(Counts_data_IDH1_IDH2,
+                                   colData = Phenotype[Samples_2_keep_IDHs,],
+                                   design = ~ IDH_clean)
+
+dds_IDH1_IDH2 <- DESeq(ddsTxi_IDH1_IDH2)
+res_IDH1_IDH2 <- results(dds_IDH1_IDH2) 
+res_IDH1_IDH2
+res_IDH1_IDH2$ID_ensembl <- rownames(res_IDH1_IDH2)
+res_IDH1_IDH2 <- as_tibble(res_IDH1_IDH2)
+res_IDH1_IDH2_symbol <- merge(res_IDH1_IDH2, Ensembl_2_symbol, by.x = "ID_ensembl", by.y = "stable_id")
+head(res_IDH1_IDH2_symbol)
+```
+
+## NR vs R
+
+```{r}
+Samples_2_keep_Response <- Phenotype$sample %in% c(samples_NR, samples_R) 
+
+Counts_data_NR_R <- tximport::tximport(files[Samples_2_keep_Response], type = "rsem")
+Counts_data_NR_R$length[Counts_data_NR_R$length <=0] <- 1
+ddsTxi_NR_R <- DESeqDataSetFromTximport(Counts_data_NR_R,
+                                   colData = Phenotype[Samples_2_keep_Response,],
+                                   design = ~ Response)
+
+dds_NR_R <- DESeq(ddsTxi_NR_R)
+res_NR_R <- results(dds_NR_R)
+res_NR_R
+res_NR_R$ID_ensembl <- rownames(res_NR_R)
+res_NR_R <- as_tibble(res_NR_R)
+res_NR_R_symbol <- merge(res_NR_R, Ensembl_2_symbol, by.x = "ID_ensembl", by.y = "stable_id")
+head(res_NR_R_symbol)
+```
+
+## REL vs Responder Baseline
+
+```{r}
+Samples_2_keep_Relapse <- Phenotype$sample %in% c(samples_R, samples_REL) 
+
+Counts_data_REL_R <- tximport::tximport(files[Samples_2_keep_Relapse], type = "rsem")
+Counts_data_REL_R$length[Counts_data_REL_R$length <=0] <- 1
+ddsTxi_REL_R <- DESeqDataSetFromTximport(Counts_data_REL_R,
+                                   colData = Phenotype[Samples_2_keep_Relapse,],
+                                   design = ~ Timing)
+
+dds_REL_R <- DESeq(ddsTxi_REL_R)
+res_REL_R <- results(dds_REL_R)
+res_REL_R
+res_REL_R$ID_ensembl <- rownames(res_REL_R)
+res_REL_R <- as_tibble(res_REL_R)
+res_REL_R_symbol <- merge(res_REL_R, Ensembl_2_symbol, by.x = "ID_ensembl", by.y = "stable_id")
+head(res_REL_R_symbol)
+```
+
+## Response in IDH2
+
+```{r}
+Samples_2_keep_IDH2 <- (Phenotype$sample %in% c(samples_IDH2) & Phenotype$sample %in% c(samples_NR, samples_R))
+
+Counts_data_IDH2 <- tximport::tximport(files[Samples_2_keep_IDH2], type = "rsem")
+Counts_data_IDH2$length[Counts_data_IDH2$length <=0] <- 1
+ddsTxi_IDH2 <- DESeqDataSetFromTximport(Counts_data_IDH2,
+                                   colData = Phenotype[Samples_2_keep_IDH2,],
+                                   design = ~ Response)
+
+dds_IDH2 <- DESeq(ddsTxi_IDH2)
+res_IDH2 <- results(dds_IDH2)
+res_IDH2
+res_IDH2$ID_ensembl <- rownames(res_IDH2)
+res_IDH2 <- as_tibble(res_IDH2)
+res_IDH2_symbol <- merge(res_IDH2, Ensembl_2_symbol, by.x = "ID_ensembl", by.y = "stable_id")
+head(res_IDH2_symbol)
+```
+
+
+## Response in IDH1
+
+```{r}
+Samples_2_keep_IDH1 <- Phenotype$sample %in% c(samples_IDH1)
+
+Counts_data_IDH1 <- tximport::tximport(files[Samples_2_keep_IDH1], type = "rsem")
+Counts_data_IDH1$length[Counts_data_IDH1$length <=0] <- 1
+ddsTxi_IDH1 <- DESeqDataSetFromTximport(Counts_data_IDH1,
+                                   colData = Phenotype[Samples_2_keep_IDH1,],
+                                   design = ~ Response)
+
+dds_IDH1 <- DESeq(ddsTxi_IDH1)
+res_IDH1 <- results(dds_IDH1)
+res_IDH1
+res_IDH1$ID_ensembl <- rownames(res_IDH1)
+res_IDH1 <- as_tibble(res_IDH1)
+res_IDH1_symbol <- merge(res_IDH1, Ensembl_2_symbol, by.x = "ID_ensembl", by.y = "stable_id")
+head(res_IDH1_symbol)
+```
+
+## IDH in Responder
+
+```{r}
+Samples_2_keep_Responder <- Phenotype$sample %in% c(samples_R)
+
+Counts_data_IDH_in_Responder <- tximport::tximport(files[Samples_2_keep_Responder], type = "rsem")
+Counts_data_IDH_in_Responder$length[Counts_data_IDH_in_Responder$length <=0] <- 1
+ddsTxi_IDH_in_Responder <- DESeqDataSetFromTximport(Counts_data_IDH_in_Responder,
+                                   colData = Phenotype[Samples_2_keep_Responder,],
+                                   design = ~ IDH_clean)
+
+dds_IDH_in_Responder <- DESeq(ddsTxi_IDH_in_Responder)
+res_IDH_in_Responder <- results(dds_IDH_in_Responder)
+res_IDH_in_Responder
+res_IDH_in_Responder$ID_ensembl <- rownames(res_IDH_in_Responder)
+res_IDH_in_Responder <- as_tibble(res_IDH_in_Responder)
+res_IDH_in_Responder_symbol <- merge(res_IDH_in_Responder, Ensembl_2_symbol, by.x = "ID_ensembl", by.y = "stable_id")
+head(res_IDH_in_Responder_symbol)
+```
+
+## IDH in Non Responder
+
+```{r}
+Samples_2_keep_Non_Responder <- Phenotype$sample %in% c(samples_NR)
+
+Counts_data_IDH_in_Non_Responder <- tximport::tximport(files[Samples_2_keep_Non_Responder], type = "rsem")
+Counts_data_IDH_in_Non_Responder$length[Counts_data_IDH_in_Non_Responder$length <=0] <- 1
+ddsTxi_IDH_in_Non_Responder <- DESeqDataSetFromTximport(Counts_data_IDH_in_Non_Responder,
+                                   colData = Phenotype[Samples_2_keep_Non_Responder,],
+                                   design = ~ IDH_clean)
+
+dds_IDH_in_Non_Responder <- DESeq(ddsTxi_IDH_in_Non_Responder)
+res_IDH_in_Non_Responder <- results(dds_IDH_in_Non_Responder)
+res_IDH_in_Non_Responder
+res_IDH_in_Non_Responder$ID_ensembl <- rownames(res_IDH_in_Non_Responder)
+res_IDH_in_Non_Responder <- as_tibble(res_IDH_in_Non_Responder)
+res_IDH_in_Non_Responder_symbol <- merge(res_IDH_in_Non_Responder, Ensembl_2_symbol, by.x = "ID_ensembl", by.y = "stable_id")
+head(res_IDH_in_Non_Responder_symbol)
+```
+
+# Venn of DEGs
+
+## Function
+
+```{r}
+Extract_DEG <- function(DEG_datatable){
+  DEG_datatable %>% dplyr::filter(abs(log2FoldChange) > 1.5 & pvalue < 0.05) %>% 
+    .$display_label %>% unique
+}
+```
+
+```{r}
+List_DEGs <- list("IDH in Responders" = Extract_DEG(res_IDH_in_Responder_symbol),
+                  "IDH in Non responders" = Extract_DEG(res_IDH_in_Non_Responder_symbol),
+                  "Response in IDH1" = Extract_DEG(res_IDH1_symbol),
+                  "Response in IDH2" = Extract_DEG(res_IDH2_symbol))
+```
+
+
+```{r}
+venn <- ggvenn::ggvenn(List_DEGs, show_percentage = F, text_size = 10, set_name_size = 5)
+
+ggsave("~/GitHub/Thesis_paper/Results/Transcriptomique/Koichi/Figures/GGVenn_DEG.png", 
+       bg = "white", width = 7600, height = 4200, units = "px")
+```
+
+```{r}
+intersect(List_DEGs$`Response in IDH1`, List_DEGs$`Response in IDH2`)
+intersect(List_DEGs$`IDH in Responders`, List_DEGs$`IDH in Non responders`)
+```
+
+
+# PCA
+
+```{r, eval = F}
+Make_PCA_pheno <- function(data, pheno, samples, col_pheno){
+    pheno <- pheno[samples, col_pheno] 
+  res.pca <- prcomp(t(data))
+  p <- fviz_pca_ind(res.pca, label="all", habillage=pheno, addEllipses=T, ellipse.level=0.95)
+  p <- p + ggtitle("PCA Transcripto")
+  p
+}
+```
+
+## PCA plots
+
+```{r, eval = F}
+NR_R_normalized_counts <- vst(dds_NR_R, blind = F) %>% assay
+colnames(NR_R_normalized_counts) <- Phenotype[Samples_2_keep_Response, "sample"]
+IDH1_IDH2_normalized_counts <- vst(dds_IDH1_IDH2, blind = F) %>% assay
+colnames(IDH1_IDH2_normalized_counts) <- Phenotype[Samples_2_keep_IDHs, "sample"]
+# REL_R_normalized_counts <- vst(dds_REL_R, blind = F) %>% assay
+# colnames(REL_R_normalized_counts) <- Phenotype[Samples_2_keep_Relapse, "sample"]
+```
+
+
+```{r, eval = F}
+write.table(IDH1_IDH2_normalized_counts, "~/GitHub/Thesis_paper/Datasets/Transcriptomics/RNAseq/Koichi_RNAseq_IDH1_IDH2_Normalized.tsv", 
+            sep = "\t", col.names = NA)
+
+write.table(NR_R_normalized_counts, "~/GitHub/Thesis_paper/Datasets/Transcriptomics/RNAseq/Koichi_RNAseq_NR_R_Normalized.tsv", 
+            sep = "\t", col.names = NA)
+
+write.table(REL_R_normalized_counts, "~/GitHub/Thesis_paper/Datasets/Transcriptomics/RNAseq/Koichi_RNAseq_REL_R_Normalized.tsv", 
+            sep = "\t", col.names = NA)
+```
+
+
+```{r, eval = F}
+Make_PCA_pheno(NR_R_normalized_counts, Phenotype, Samples_2_keep_Response, 3)
+Make_PCA_pheno(IDH1_IDH2_normalized_counts, Phenotype, Samples_2_keep_IDHs, 5)
+Make_PCA_pheno(REL_R_normalized_counts, Phenotype, Samples_2_keep_Relapse, 2)
+```
+
+# Heatmap
+
+```{r, eval = F}
+Make_heatmap <- function(DATA, Phenotype, method = "pearson", 
+                         title, annotation_color, kmeans_k = NA, cuttree = NA, corr=T) {
+  if(corr){
+    corr <- rcorr(as.matrix(DATA), type = method)$r
+    colnames(corr) <- colnames(DATA)
+  }else{
+    corr <- DATA
+  }
+  title <- paste0(title, " ", method)
+  heatmap <- pheatmap(corr, 
+                      color = colorRampPalette(brewer.pal(n = 9, name = "YlOrRd"))(100),
+                      annotation_col = Phenotype,
+                      annotation_colors = annotation_color,
+                      legend = TRUE, scale = "none",
+                      treeheight_row = 20,
+                      main = title, 
+                      fontsize = 10,
+                      cutree_cols = cuttree
+  )
+  return(heatmap)
+}
+```
+
+```{r, eval = F}
+Annotation_color <-  list(IDH = c(IDH1 = "blue", IDH2_R140 = "pink", IDH2_R172 = "yellow"),
+                          Response = c(Non_Responder = "red", Responder = "green"))
+
+
+Datas <- list("Response" = NR_R_normalized_counts,
+              "IDH" = IDH1_IDH2_normalized_counts)
+```
+
+
+```{r, eval = F}
+names(Datas) %>% lapply(function(name_data){
+  data <- Datas[[name_data]]
+  Var_data <- rowVars(as.matrix(data))
+  names(Var_data) <- rownames(data)
+  pourcent_elem <- c(1, 5, 10, 50, 100)
+  method = c("pearson","spearman")
+  res <- lapply(method, function(meth){
+    plots_pearson <- lapply(pourcent_elem, function(percent){
+      nb_elem <- percent*nrow(data)%/%100 
+      Top_var <- Var_data[order(Var_data, decreasing = T)] %>% .[1:nb_elem]
+      Top_Var_data <- data %>% .[rownames(.) %in% names(Top_var),]
+      if(name_data == "Response"){
+        Phenos <- Phenotype[Samples_2_keep_Response,]
+        Pheno_PCA <- Phenos$Response
+        Samples_PCA <- Samples_2_keep_Response
+        Column_PCA <- 3
+      }else{
+        Phenos <- Phenotype[Samples_2_keep_IDHs, ]
+        Pheno_PCA <- Phenos$IDH
+        Samples_PCA <- Samples_2_keep_IDHs
+        Column_PCA <- 5
+      }
+      rownames(Phenos) <- Phenos$sample
+      heat <- Make_heatmap(Top_Var_data, Phenos[,c(3,4)], title = paste0(percent, "% of element"), 
+                           annotation_color = Annotation_color, method = meth)
+      pca_p <- Make_PCA_pheno(Top_Var_data, Phenotype, Samples_PCA, Column_PCA)
+      list(heat, pca_p)
+    })
+  })
+  
+  lm <- rbind(c(1,2),
+           c(3, 5),
+           c(4, 5),
+           c(6, 7),
+           c(8, 10),
+           c(9, 10))
+  gri <- grid.arrange(grobs = list(as.grob(res[[1]][[1]][[1]]), as.grob(res[[1]][[2]][[1]]),
+                            as.grob(res[[1]][[3]][[1]]), as.grob(res[[1]][[4]][[1]]),
+                            as.grob(res[[1]][[5]][[1]]),
+                            as.grob(res[[2]][[1]][[1]]), as.grob(res[[2]][[2]][[1]]),
+                            as.grob(res[[2]][[3]][[1]]), as.grob(res[[2]][[4]][[1]]),
+                            as.grob(res[[2]][[5]][[1]])),
+               layout_matrix = lm)
+  gri
+  ggsave(paste0("~/GitHub/Thesis_paper/Results/Transcriptomique/Heatmap_", name_data, "_2.png"), gri, bg = "white", width = 7600, height = 8400, units = "px")
+
+})
+
+
+```
+
+# Differential gene expression analysis
+
+## Volcano plots
+
+```{r, eval = F}
+Volcano_IDH1_IDH2 <- EnhancedVolcano(
+      toptable = res_IDH1_IDH2_symbol,
+      lab = res_IDH1_IDH2_symbol$display_label,
+      x = "log2FoldChange",
+      y = "pvalue",
+      FCcutoff = 1.5,
+      pCutoff = 0.05,
+      title = "IDH1 vs IDH2",
+      subtitle = NA,
+      subtitleLabSize = 0, ylim = c(0, 5)
+  )
+Volcano_IDH1_IDH2
+Volcano_IDH1_IDH2 %>% ggsave(filename = "~/GitHub/Thesis_paper/Results/Transcriptomique/Koichi/Figures/Volcano/Volcano_IDH1_IDH2.png", bg = "white", width = 7600, height = 4200, units = "px")
+
+Volcano_R_NR <- EnhancedVolcano(
+      toptable = res_NR_R_symbol,
+      lab = res_NR_R_symbol$display_label,
+      x = "log2FoldChange",
+      y = "pvalue",
+      FCcutoff = 1.5,
+      pCutoff = 0.05,
+      title = "NR vs R",
+      subtitle = NA,
+      subtitleLabSize = 0, xlim = c(-10, 10), ylim = c(0,6)
+  )
+Volcano_R_NR
+Volcano_R_NR %>% ggsave(filename = "~/GitHub/Thesis_paper/Results/Transcriptomique/Koichi/Figures/Volcano/Volcano_R_NR.png", bg = "white", width = 7600, height = 4200, units = "px")
+
+Volcano_REL_R <- EnhancedVolcano(
+      toptable = res_REL_R_symbol,
+      lab = res_REL_R_symbol$display_label,
+      x = "log2FoldChange",
+      y = "pvalue",
+      FCcutoff = 1.5,
+      pCutoff = 0.05,
+      title = "NR vs R",
+      subtitle = NA,
+      subtitleLabSize = 0, xlim = c(-10, 10), ylim = c(0,6)
+  )
+Volcano_REL_R
+Volcano_REL_R %>% ggsave(filename = "~/GitHub/Thesis_paper/Results/Transcriptomique/Koichi/Figures/Volcano/Volcano_REL_R.png", bg = "white", width = 7600, height = 4200, units = "px")
+
+```
+
+
+```{r}
+Volcano_IDH_in_Responder <- EnhancedVolcano(
+      toptable = res_IDH_in_Responder_symbol,
+      lab = res_IDH_in_Responder_symbol$display_label,
+      x = "log2FoldChange",
+      y = "pvalue",
+      FCcutoff = 1.5,
+      pCutoff = 0.05,
+      title = "IDH2 vs IDH1 in Responder",
+      subtitle = NA,
+      subtitleLabSize = 0, xlim = c(-10, 10), ylim = c(0,6)
+  )
+Volcano_IDH_in_Responder
+Volcano_IDH_in_Responder %>% ggsave(filename = "~/GitHub/Thesis_paper/Results/Transcriptomique/Koichi/Figures/Volcano/Volcano_IDH_in_Responder.png", bg = "white", width = 7600, height = 4200, units = "px")
+
+Volcano_IDH_in_Non_Responder <- EnhancedVolcano(
+      toptable = res_IDH_in_Non_Responder_symbol,
+      lab = res_IDH_in_Non_Responder_symbol$display_label,
+      x = "log2FoldChange",
+      y = "pvalue",
+      FCcutoff = 1.5,
+      pCutoff = 0.05,
+      title = "IDH2 vs IDH1 in Non Responder",
+      subtitle = NA,
+      subtitleLabSize = 0, xlim = c(-10, 10), ylim = c(0,6)
+  )
+Volcano_IDH_in_Non_Responder
+Volcano_IDH_in_Non_Responder %>% ggsave(filename = "~/GitHub/Thesis_paper/Results/Transcriptomique/Koichi/Figures/Volcano/Volcano_IDH_in_Non_Responder.png", bg = "white", width = 7600, height = 4200, units = "px")
+
+Volcano_Response_in_IDH2 <- EnhancedVolcano(
+      toptable = res_IDH2_symbol,
+      lab = res_IDH2_symbol$display_label,
+      x = "log2FoldChange",
+      y = "pvalue",
+      FCcutoff = 1.5,
+      pCutoff = 0.05,
+      title = "Responder vs Non Responder in IDH2",
+      subtitle = NA,
+      subtitleLabSize = 0, xlim = c(-10, 10), ylim = c(0,6)
+  )
+Volcano_Response_in_IDH2
+Volcano_Response_in_IDH2 %>% ggsave(filename = "~/GitHub/Thesis_paper/Results/Transcriptomique/Koichi/Figures/Volcano/Volcano_Response_in_IDH2.png", bg = "white", width = 7600, height = 4200, units = "px")
+
+Volcano_Response_in_IDH1 <- EnhancedVolcano(
+      toptable = res_IDH1_symbol,
+      lab = res_IDH1_symbol$display_label,
+      x = "log2FoldChange",
+      y = "pvalue",
+      FCcutoff = 1.5,
+      pCutoff = 0.05,
+      title = "Responder vs Non Responder in IDH1",
+      subtitle = NA,
+      subtitleLabSize = 0, xlim = c(-10, 10), ylim = c(0,6)
+  )
+Volcano_Response_in_IDH1
+Volcano_Response_in_IDH1 %>% ggsave(filename = "~/GitHub/Thesis_paper/Results/Transcriptomique/Koichi/Figures/Volcano/Volcano_Response_in_IDH1.png", bg = "white", width = 7600, height = 4200, units = "px")
+```
+
+# Gene set enrichment
+
+## GO
+
+### GO function
+
+```{r, eval = F}
+GO_KEGG_WP_MKEGG <- function(List_positive, List_negative){
+  list_enrichments <- list()
+  list_enrichments[["GO_positive"]] <- enrichGO(List_positive, OrgDb = org.Hs.eg.db, universe = Go_universe_hgnc, keyType = "SYMBOL", pvalueCutoff = 1)
+  list_enrichments[["GO_negative"]] <- enrichGO(List_negative, OrgDb = org.Hs.eg.db, universe = Go_universe_hgnc, keyType = "SYMBOL", pvalueCutoff = 1)
+  
+  entrez_id_positive <- dplyr::filter(genes, hgnc_symbol %in% List_positive) %>%
+    .$entrezgene_id %>% unique
+  entrez_id_negative <- dplyr::filter(genes, hgnc_symbol %in% List_negative) %>%
+    .$entrezgene_id %>% unique
+
+  list_enrichments[["KEGG_positive"]] <- enrichKEGG(entrez_id_positive, organism = "hsa", 
+                                                  keyType = 'ncbi-geneid', pvalueCutoff = 0.1, 
+                                                  pAdjustMethod = "none", universe = Go_universe_entrez)
+  list_enrichments[["KEGG_negative"]] <- enrichKEGG(entrez_id_negative, organism = "hsa", 
+                                                    keyType = 'ncbi-geneid', pvalueCutoff = 0.1, 
+                                                    pAdjustMethod = "none", universe = Go_universe_entrez)
+  
+  list_enrichments[["MKEGG_positive"]] <- enrichMKEGG(entrez_id_positive, organism = "hsa", 
+                                                    keyType = 'ncbi-geneid', pvalueCutoff = 0.1, 
+                                                    pAdjustMethod = "none", universe = Go_universe_entrez) 
+  list_enrichments[["MKEGG_negative"]] <- enrichMKEGG(entrez_id_negative, organism = "hsa", 
+                                                      keyType = 'ncbi-geneid', pvalueCutoff = 0.1, 
+                                                      pAdjustMethod = "none", universe = Go_universe_entrez)  
+  
+  list_enrichments[["WP_positive"]] <- enrichWP(entrez_id_positive, organism = "Homo sapiens", 
+                                              universe = Go_universe_entrez)
+  list_enrichments[["WP_negative"]] <- enrichWP(entrez_id_negative, organism = "Homo sapiens", 
+                                                universe = Go_universe_entrez)
+  
+  res <- lapply(names(list_enrichments), function(onto){
+    list_enrichments[[onto]]@result$qvalue <- list_enrichments[[onto]]@result$pvalue
+    list_enrichments[[onto]]@result$p.adjust <- list_enrichments[[onto]]@result$pvalue
+    list_enrichments[[onto]]
+  })
+  
+  names(res) <- names(list_enrichments)
+  
+  return(res)
+}
+```
+
+
+```{r}
+Make_enrich_plot <- function(enrichment, path){
+  n_enrich <- nrow(dplyr::filter(enrichment@result, pvalue < 0.05))
+  if(n_enrich == 0){
+    return(NULL)
+  }
+  if(enrichment@keytype !=  "SYMBOL"){
+    enrichment <- enrichment %>%
+      setReadable(OrgDb = org.Hs.eg.db, keyType = "ENTREZID")
+  }
+  height_plot <- 200 + (n_enrich *120)
+  cplot <- cnetplot(enrichment, showCategory = n_enrich)
+  p <- dotplot(enrichment, showCategory = n_enrich)
+  ggsave(paste0(path, "_dotplot.png"), p, bg = "white", width = 3800, height = height_plot, units = "px", limitsize = FALSE)
+  ggsave(paste0(path, "_cnetplot.png"), cplot, bg = "white", width = 3800, height = 3800, units = "px", limitsize = FALSE)
+  p
+  cplot
+  list(p, cplot)
+}
+```
+
+
+
+```{r}
+mart <- biomaRt::useMart(biomart = "ENSEMBL_MART_ENSEMBL",
+                         dataset = "hsapiens_gene_ensembl")
+
+genes <- getBM(filters = "ensembl_gene_id",
+               attributes = c("ensembl_gene_id","entrezgene_id", "hgnc_symbol"),
+               values = res_IDH1_IDH2$ID_ensembl, 
+               mart = mart)
+```
+
+```{r}
+GO_universe_ensembl <- res_IDH1_IDH2$ID_ensembl %>% unique 
+Go_universe_hgnc <- dplyr::filter(genes, ensembl_gene_id %in% GO_universe_ensembl) %>% .$hgnc_symbol %>% unique
+Go_universe_entrez <- dplyr::filter(genes, ensembl_gene_id %in% GO_universe_ensembl) %>% .$entrezgene_id %>% as.character %>% unique
+```
+
+
+
+```{r, eval = F}
+res_IDH1_IDH2_symbol_entrez <- merge(res_IDH1_IDH2, genes, by.x = "ID_ensembl", by.y = "ensembl_gene_id", all.y = F, all.x = F) %>% na.omit()
+
+res_Response_symbol_entrez <- merge(res_NR_R, genes, by.x = "ID_ensembl", by.y = "ensembl_gene_id", all.y = F, all.x = F) %>% na.omit()
+
+res_Relapse_symbol_entrez <- merge(res_REL_R, genes, by.x = "ID_ensembl", by.y = "ensembl_gene_id", all.y = F, all.x = F) %>% na.omit()
+```
+
+
+```{r}
+res_Response_in_IDH1_symbol_entrez <- merge(res_IDH1_symbol, genes, by.x = "ID_ensembl", by.y = "ensembl_gene_id", all.y = F, all.x = F) %>% na.omit()
+
+res_Response_in_IDH2_symbol_entrez <- merge(res_IDH2_symbol, genes, by.x = "ID_ensembl", by.y = "ensembl_gene_id", all.y = F, all.x = F) %>% na.omit()
+
+res_IDH_in_Responder_symbol_entrez <- merge(res_IDH_in_Responder_symbol, genes, by.x = "ID_ensembl", by.y = "ensembl_gene_id", all.y = F, all.x = F) %>% na.omit()
+
+res_IDH_in_Non_Responder_symbol_entrez <- merge(res_IDH_in_Non_Responder_symbol, genes, by.x = "ID_ensembl", by.y = "ensembl_gene_id", all.y = F, all.x = F) %>% na.omit()
+```
+
+# IDH
+
+```{r, eval = F}
+IDH2_UP <- res_IDH1_IDH2_symbol %>% dplyr::filter(log2FoldChange > 1.5 & pvalue < 0.05) %>% .$display_label %>% unique
+IDH2_DOWN <- res_IDH1_IDH2_symbol %>% dplyr::filter(log2FoldChange < -1.5 & pvalue < 0.05) %>% .$display_label %>% unique
+
+GO_IDH1_IDH2 <- GO_KEGG_WP_MKEGG(IDH2_UP, IDH2_DOWN)
+
+lapply(names(GO_IDH1_IDH2), function(enrichment){
+  Make_enrich_plot(GO_IDH1_IDH2[[enrichment]], paste0("~/GitHub/Thesis_paper/Results/Transcriptomique/Koichi/Figures/GO/IDH2_IDH1_", enrichment, ".png"))
+})
+```
+
+
+# Response
+
+```{r, eval = F}
+Response_UP <- res_NR_R_symbol %>% dplyr::filter(log2FoldChange > 1.5 & pvalue < 0.05) %>% .$display_label %>% unique
+Response_DOWN <- res_NR_R_symbol %>% dplyr::filter(log2FoldChange < -1.5 & pvalue < 0.05) %>% .$display_label %>% unique
+Response <- list("UP" = Response_UP, "DOWN" = Response_DOWN)
+GO_R_NR <- GO_KEGG_WP_MKEGG(Response_UP, Response_DOWN)
+
+lapply(names(GO_R_NR), function(enrichment){
+  Make_enrich_plot(GO_R_NR[[enrichment]], paste0("~/GitHub/Thesis_paper/Results/Transcriptomique/Koichi/Figures/GO/NR_vs_R_", enrichment))
+})
+```
+
+# Relapse
+
+```{r, eval = F}
+Relapse_UP <- res_REL_R_symbol %>% dplyr::filter(log2FoldChange > 1.5 & pvalue < 0.05) %>% .$display_label %>% unique
+Relapse_DOWN <- res_REL_R_symbol %>% dplyr::filter(log2FoldChange < -1.5 & pvalue < 0.05) %>% .$display_label %>% unique
+
+GO_REL_R <- GO_KEGG_WP_MKEGG(Relapse_UP, Relapse_DOWN)
+
+lapply(names(GO_REL_R), function(enrichment){
+  Make_enrich_plot(GO_REL_R[[enrichment]], paste0("~/GitHub/Thesis_paper/Results/Transcriptomique/Koichi/Figures/GO/REL_R_", enrichment, ".png"))
+})
+```
+
+# IDH in Responder
+
+```{r}
+IDH_in_responder_UP <- res_IDH_in_Responder_symbol %>% dplyr::filter(log2FoldChange > 1.5 & pvalue < 0.05) %>% .$display_label %>% unique
+IDH_in_responder_DOWN <- res_IDH_in_Responder_symbol %>% dplyr::filter(log2FoldChange < -1.5 & pvalue < 0.05) %>% .$display_label %>% unique
+Responder <- list("UP" = IDH_in_responder_UP, "DOWN" = IDH_in_responder_DOWN)
+```
+
+
+```{r, eval = F}
+GO_IDH_in_responder <- GO_KEGG_WP_MKEGG(IDH_in_responder_UP, IDH_in_responder_DOWN)
+
+lapply(names(GO_IDH_in_responder), function(enrichment){
+  Make_enrich_plot(GO_IDH_in_responder[[enrichment]], paste0("~/GitHub/Thesis_paper/Results/Transcriptomique/Koichi/Figures/GO/IDH_in_Responder_", enrichment, ".png"))
+})
+```
+
+# IDH in Non Responder
+
+```{r}
+IDH_in_non_responder_UP <- res_IDH_in_Non_Responder_symbol %>% dplyr::filter(log2FoldChange > 1.5 & pvalue < 0.05) %>% .$display_label %>% unique
+IDH_in_non_responder_DOWN <- res_IDH_in_Non_Responder_symbol %>% dplyr::filter(log2FoldChange < -1.5 & pvalue < 0.05) %>% .$display_label %>% unique
+Non_Responder <- list("UP" = IDH_in_non_responder_UP, "DOWN" = IDH_in_non_responder_DOWN)
+```
+
+
+```{r, eval = F}
+GO_IDH_in_non_responder <- GO_KEGG_WP_MKEGG(IDH_in_non_responder_UP, IDH_in_non_responder_DOWN)
+
+lapply(names(GO_IDH_in_non_responder), function(enrichment){
+  Make_enrich_plot(GO_IDH_in_non_responder[[enrichment]], paste0("~/GitHub/Thesis_paper/Results/Transcriptomique/Koichi/Figures/GO/IDH_in_Non_Responder_", enrichment))
+})
+```
+
+# Response in IDH1
+
+```{r}
+Responder_in_IDH1_UP <- res_IDH1_symbol %>% dplyr::filter(log2FoldChange > 1.5 & pvalue < 0.05) %>% .$display_label %>% unique
+Responder_in_IDH1_DOWN <- res_IDH1_symbol %>% dplyr::filter(log2FoldChange < -1.5 & pvalue < 0.05) %>% .$display_label %>% unique
+IDH1 <- list("UP" = Responder_in_IDH1_UP, "DOWN" = Responder_in_IDH1_DOWN)
+```
+
+
+```{r, eval =F}
+GO_Response_in_IDH1 <- GO_KEGG_WP_MKEGG(Responder_in_IDH1_UP, Responder_in_IDH1_DOWN)
+```
+
+
+```{r, eval = F}
+lapply(names(GO_Response_in_IDH1), function(enrichment){
+  Make_enrich_plot(GO_Response_in_IDH1[[enrichment]], paste0("~/GitHub/Thesis_paper/Results/Transcriptomique/Koichi/Figures/GO/Response_in_IDH1_", enrichment))
+})
+```
+
+# Response in IDH2
+
+```{r}
+Responder_in_IDH2_UP <- res_IDH2_symbol %>% dplyr::filter(log2FoldChange > 1.5 & pvalue < 0.05) %>% .$display_label %>% unique
+Responder_in_IDH2_DOWN <- res_IDH2_symbol %>% dplyr::filter(log2FoldChange < -1.5 & pvalue < 0.05) %>% .$display_label %>% unique
+IDH2 <- list("UP" = Responder_in_IDH2_UP, "DOWN" = Responder_in_IDH2_DOWN)
+```
+
+
+```{r, eval = F}
+GO_Response_in_IDH2 <- GO_KEGG_WP_MKEGG(Responder_in_IDH2_UP, Responder_in_IDH2_DOWN)
+
+lapply(names(GO_Response_in_IDH2), function(enrichment){
+  Make_enrich_plot(GO_Response_in_IDH2[[enrichment]], paste0("~/GitHub/Thesis_paper/Results/Transcriptomique/Koichi/Figures/GO/Response_in_IDH2_", enrichment))
+})
+```
+
+# Cluster compare results
+
+## Functions
+
+```{r}
+Compare_Enrichments <- function(List_DEGs, only_up = F, only_down=F, List_ready = F){
+  if(List_ready){
+    list_direct_ID <- lapply(names(List_DEGs), function(comp){
+      data.table(Entrez = List_DEGs[[comp]], group = comp)
+    })
+  }else{
+    list_direct_ID <- lapply(names(List_DEGs), function(Comparison){
+      up <- List_DEGs[[Comparison]]$UP 
+      down <- List_DEGs[[Comparison]]$DOWN 
+      if(only_down){
+        up <- down
+      }
+      if(only_up){
+        down <- up
+      }
+      if(only_down & only_up){
+        up <- List_DEGs[[Comparison]]$UP 
+        down <- List_DEGs[[Comparison]]$DOWN 
+      }
+      ids <- c(up, down) %>% unique
+      data.table(Entrez = ids, group = Comparison)
+    })
+  }
+  names(list_direct_ID) <- names(List_DEGs)
+  mydf <- data.table::rbindlist(list_direct_ID)
+  go_cluster <- compareCluster(Entrez~group, data = mydf, fun = "enrichGO", OrgDb = org.Hs.eg.db, 
+                 keyType = "SYMBOL", pvalueCutoff = 0.1, pAdjustMethod = "none", qvalueCutoff = 1)
+  mydf_entrez <- merge(mydf, genes, by.x = "Entrez", by.y = "hgnc_symbol")
+  kegg_cluster <- compareCluster(entrezgene_id~group, data = mydf_entrez, fun = "enrichKEGG", 
+                                 organism = "hsa", qvalueCutoff = 1,
+                                 keyType = 'ncbi-geneid', pvalueCutoff = 0.1, 
+                                 pAdjustMethod = "none", setReadable(OrgDb = org.Hs.eg.db)) 
+  
+  List("GO" = go_cluster,
+       "KEGG" = kegg_cluster)
+}
+
+Auto_set_readable <- function(Results_cluster_KEGG_WP){
+  setReadable(Results_cluster_KEGG_WP, OrgDb = org.Hs.eg.db, keyType = "ENTREZID")
+}
+```
+
+```{r}
+IDH1_inverted <- list("UP" = IDH1$DOWN,
+                      "DOWN" = IDH1$UP)
+
+IDH2_inverted <- list("UP" = IDH2$DOWN,
+                      "DOWN" = IDH2$UP)
+
+List_IDs <- list("Response_in_IDH1" = IDH1_inverted,
+                         "Response_in_IDH2" = IDH2_inverted,
+                         "IDH_in_Responder" = Responder,
+                         "IDH_in_Non_Responder" = Non_Responder)
+```
+
+
+```{r}
+List_IDH_comp <- list("IDH1_in_Responder" = dplyr::filter(res_IDH_in_Responder_symbol, 
+                                                          log2FoldChange < -1 & pvalue < 0.05) %>%
+                        .$display_label %>% unique, 
+                      "IDH1_in_Non_responder" = dplyr::filter(res_IDH_in_Non_Responder_symbol, 
+                                                              log2FoldChange < -1 & pvalue < 0.05) %>%
+                        .$display_label %>% unique, 
+                      "IDH2_in_Responder" = dplyr::filter(res_IDH_in_Responder_symbol, 
+                                                          log2FoldChange > 1 & pvalue < 0.05) %>%
+                        .$display_label %>% unique, 
+                      "IDH2_in_Non_responder" = dplyr::filter(res_IDH_in_Non_Responder_symbol, 
+                                                              log2FoldChange > 1 & pvalue < 0.05) %>%
+                        .$display_label %>% unique)
+
+List_Response_comp <- list("Responder_in_IDH1" = dplyr::filter(res_IDH1_symbol, 
+                                                          log2FoldChange < -1 & pvalue < 0.05) %>%
+                        .$display_label %>% unique, 
+                      "Responder_in_IDH2" = dplyr::filter(res_IDH2_symbol, 
+                                                          log2FoldChange < -1 & pvalue < 0.05) %>%
+                        .$display_label %>% unique, 
+                      "Non_responder_in_IDH1" = dplyr::filter(res_IDH1_symbol, 
+                                                          log2FoldChange > 1 & pvalue < 0.05) %>%
+                        .$display_label %>% unique, 
+                      "Non_responder_in_IDH2" = dplyr::filter(res_IDH2_symbol, 
+                                                          log2FoldChange > 1 & pvalue < 0.05) %>%
+                        .$display_label %>% unique)
+
+IDH_cluster_comp <- Compare_Enrichments(List_IDH_comp, List_ready = T)
+Response_cluster_comp <- Compare_Enrichments(List_Response_comp, List_ready = T)
+```
+
+```{r}
+lapply(names(IDH_cluster_comp), function(ont){
+  n <- 10
+  p <- dotplot(IDH_cluster_comp[[ont]], showCategory = n, font.size = 15) 
+  height_param <- n*6*120 +200
+  ggsave(paste0("~/GitHub/Thesis_paper/Results/Transcriptomique/Koichi/Figures/GO/IDH_cluster_comp_", ont, ".png"), p, bg = "white", width = 5700, 
+         height = height_param, units = "px", limitsize = FALSE)
+ if(ont == "KEGG"){
+    pcnet <- Auto_set_readable(IDH_cluster_comp[[ont]]) %>% cnetplot(showCategory = n, 
+                                                                          cex_label_gene = 2, cex_label_category = 2) 
+  }else{
+    pcnet <- cnetplot(IDH_cluster_comp[[ont]], showCategory = n, cex_label_gene = 2, cex_label_category = 2) 
+  }
+  height_param <- n*4*120 +200
+  ggsave(paste0("~/GitHub/Thesis_paper/Results/Transcriptomique/Koichi/Figures/GO/IDH_cluster_comp_", ont, "_cnetplot.png"), pcnet, bg = "white", width = 5700, 
+         height = 5700, units = "px", limitsize = FALSE)
+})
+
+lapply(names(Response_cluster_comp), function(ont){
+  n <- 10
+  p <- dotplot(Response_cluster_comp[[ont]], showCategory = n, font.size = 15) 
+  height_param <- n*6*120 +200
+  ggsave(paste0("~/GitHub/Thesis_paper/Results/Transcriptomique/Koichi/Figures/GO/Response_cluster_comp_", ont, ".png"), p, bg = "white", width = 5700, 
+         height = height_param, units = "px", limitsize = FALSE)
+  if(ont == "KEGG"){
+    pcnet <- Auto_set_readable(Response_cluster_comp[[ont]]) %>% cnetplot(showCategory = n, 
+                                                                          cex_label_gene = 2, cex_label_category = 2) 
+  }else{
+    pcnet <- cnetplot(Response_cluster_comp[[ont]], showCategory = n, cex_label_gene = 2, cex_label_category = 2) 
+  }
+  height_param <- n*4*120 +200
+  ggsave(paste0("~/GitHub/Thesis_paper/Results/Transcriptomique/Koichi/Figures/GO/Response_cluster_comp_", ont, "_cnetplot.png"), pcnet, bg = "white", width = 5700, 
+         height = 5700, units = "px", limitsize = FALSE)
+})
+```
+
+
+
+```{r}
+Cluster_comparison_up <- Compare_Enrichments(List_IDs, only_up = T)
+Cluster_comparison_down <- Compare_Enrichments(List_IDs, only_up = F, only_down = T)
+```
+
+```{r}
+n <- 10
+p <- dotplot(Cluster_comparison_up$GO, showCategory = n, font.size = 15)
+height_param <- n*4*150 +200
+ggsave("~/GitHub/Thesis_paper/Results/Transcriptomique/Koichi/Figures/GO/Cluster_up_GO_plot.png", p, bg = "white", width = 5700, 
+       height = height_param, units = "px", limitsize = FALSE)
+
+pcnet <- cnetplot(Cluster_comparison_up$GO, showCategory = n, cex_label_gene = 2, cex_label_category = 2) 
+height_param <- n*4*120 +200
+ggsave("~/GitHub/Thesis_paper/Results/Transcriptomique/Koichi/Figures/GO/Cluster_up_GO_cnetplot.png", pcnet, bg = "white", width = 5700, 
+       height = 5700, units = "px", limitsize = FALSE)
+```
+
+```{r}
+n <- 10
+p <- dotplot(Cluster_comparison_up$KEGG, showCategory = n, font.size = 15) 
+height_param <- n*4*120 +200
+ggsave("~/GitHub/Thesis_paper/Results/Transcriptomique/Koichi/Figures/GO/Cluster_up_KEGG_plot.png", p, bg = "white", width = 5700, 
+       height = height_param, units = "px", limitsize = FALSE)
+
+pcnet <- cnetplot(Auto_set_readable(Cluster_comparison_up$KEGG), showCategory = n, cex_label_gene = 2, cex_label_category = 2) 
+height_param <- n*4*120 +200
+ggsave("~/GitHub/Thesis_paper/Results/Transcriptomique/Koichi/Figures/GO/Cluster_up_KEGG_cnetplot.png", pcnet, bg = "white", width = 5700, 
+       height = 5700, units = "px", limitsize = FALSE)
+```
+
+
+
+```{r}
+n <- 10
+p <- dotplot(Cluster_comparison_down$GO, showCategory = n) 
+height_param <- n*4*120 +200
+ggsave("~/GitHub/Thesis_paper/Results/Transcriptomique/Koichi/Figures/GO/Cluster_down_GO_plot.png", p, bg = "white", width = 5700, 
+       height = height_param, units = "px", limitsize = FALSE)
+
+pcnet <- cnetplot(Cluster_comparison_down$GO, showCategory = n) 
+height_param <- n*4*120 +200
+ggsave("~/GitHub/Thesis_paper/Results/Transcriptomique/Koichi/Figures/GO/Cluster_down_GO_cnetplot.png", pcnet, bg = "white", width = 5700, 
+       height = 5700, units = "px", limitsize = FALSE)
+```
+
+
+
+# GSEA 
+
+## Function
+
+```{r}
+Make_geneset <- function(DEGs){
+  geneset <- DEGs$log2FoldChange
+  names(geneset) <- DEGs$entrezgene_id
+  geneset[order(geneset, decreasing = T)]
+}
+
+Do_enrichment <- function(Ont, Geneset){
+  if(Ont=="GO"){
+    res <- gseGO(Geneset, OrgDb = org.Hs.eg.db, keyType = "ENTREZID", ont = "all",
+            minGSSize = 1, maxGSSize = 1000, pvalueCutoff = 0.1, verbose = F)
+  }else if(Ont=="KEGG"){
+    res <- gseKEGG(Geneset, pvalueCutoff = 0.1, pAdjustMethod = "none", 
+                   verbose = F, organism = 'hsa', keyType = 'ncbi-geneid')
+  }else if(Ont=="MKEGG"){
+    res <- gseMKEGG(Geneset, pvalueCutoff = 0.1, pAdjustMethod = "none", 
+                   verbose = F, organism = 'hsa', keyType = 'ncbi-geneid')
+  }else if(Ont == "WP"){
+    res <- gseWP(Geneset, pvalueCutoff = 0.1, pAdjustMethod = "none", 
+                 verbose = F, organism = "Homo sapiens")
+  }
+  n_enrich <- nrow(dplyr::filter(res@result, pvalue < 0.05))
+  if(n_enrich == 0){
+    return(NULL)
+  }
+  res <- res %>% 
+    setReadable(OrgDb = org.Hs.eg.db, keyType = "ENTREZID")
+  res
+}
+
+GSEA_KEGG_MKEGG_WP_enrichments_function <- function(DEG_entrez_datatable){
+  geneset <- Make_geneset(DEG_entrez_datatable)
+  ont <- c("GO", "KEGG")
+  enrichments <- lapply(ont, function(onto){
+    Do_enrichment(onto, geneset)
+  })
+  names(enrichments) <- ont
+  enrichments
+}
+
+Make_enrich_gsea_plot <- function(enrichment, path, logFC_data){
+  n_enrich <- nrow(dplyr::filter(enrichment@result, pvalue < 0.05))
+  if(n_enrich == 0){
+    return(NULL)
+  }
+  height_plot <- 200 + (n_enrich *120)
+  cplot <- cnetplot(enrichment, showCategory = n_enrich, foldChange = logFC_data)
+  p <- dotplot(enrichment, showCategory = n_enrich)
+  rplot <- ridgeplot(enrichment, showCategory = n_enrich)
+  ggsave(paste0(path, "_dotplot.png"), p, bg = "white", width = 3800, height = height_plot, units = "px", limitsize = FALSE)
+  ggsave(paste0(path, "_cnetplot.png"), cplot, bg = "white", width = 3800, height = 3800, units = "px", limitsize = FALSE)
+  ggsave(paste0(path, "_ridgeplot.png"), rplot, bg = "white", width = 3800, height = 3800, units = "px", limitsize = FALSE)
+  p
+  cplot
+  rplot
+  list(p, cplot, rplot)
+}
+```
+
+## Runing GSEAs
+
+```{r}
+DEG_list <- list("IDH_in_responder" = res_IDH_in_Responder_symbol_entrez,
+                 "IDH_in_non_responder" = res_IDH_in_Non_Responder_symbol_entrez,
+                 "Response_in_IDH1" = res_Response_in_IDH1_symbol_entrez,
+                 "Response_in_IDH2" = res_Response_in_IDH2_symbol_entrez)
+
+GSEA_enrichments <- lapply(names(DEG_list), function(Comp){
+  enrichments <- GSEA_KEGG_MKEGG_WP_enrichments_function(DEG_list[[Comp]])
+  plots <- mclapply(names(enrichments), function(enrich){
+    Make_enrich_gsea_plot(enrichments[[enrich]], paste0("~/GitHub/Thesis_paper/Results/Transcriptomique/Koichi/Figures/GSEA/",
+                                                        Comp, "_", enrich), Make_geneset(DEG_list[[Comp]]))
+  }, mc.cores = cores2use)
+  list("Tables" = enrichments, "Plots" = plots)
+})
+names(GSEA_enrichments) <- names(DEG_list)
+```
+
+
+# TF activities
+
+## IDH
+
+```{r}
+source("~/Core_scripts/msviper_functions.R")
+data(dorothea_hs, package = "dorothea")
+
+doronet <-  dorothea_hs %>%
+  filter(confidence %in% c("A", "B", "C", "D", "E"))
+doronet <- doronet[c(1,3,2,4)]
+
+regulonlaml <- read.table("~/GitHub/Thesis_paper/Datasets/regulonaml_SYMBOL.tsv", sep = "\t", header = T)
+colnames(regulonlaml)[1:2] <- c("tf", "target")
+
+rownames(Phenotype) <- Phenotype$sample
+```
+
+
+```{r}
+Koichi_IDH1_IDH2_symbol <- IDH1_IDH2_normalized_counts %>% merge(Ensembl_2_symbol[c(1,2)], by.x = 0, by.y = "stable_id")
+Duplicated_genes <- Koichi_IDH1_IDH2_symbol$display_label %>% .[duplicated(.)] %>% unique
+
+Koichi_IDH1_IDH2_symbol_no_dup <- dplyr::filter(Koichi_IDH1_IDH2_symbol, display_label %ni% Duplicated_genes) 
+rownames(Koichi_IDH1_IDH2_symbol_no_dup) <- Koichi_IDH1_IDH2_symbol_no_dup$display_label
+n_samples <- ncol(Koichi_IDH1_IDH2_symbol_no_dup) - 1
+Koichi_IDH1_IDH2_symbol_no_dup <- Koichi_IDH1_IDH2_symbol_no_dup[2:n_samples]
+
+Phenotype_Koichi_IDH <- Phenotype[colnames(Koichi_IDH1_IDH2_symbol_no_dup), "IDH_clean"]
+ref_IDH1 <- Phenotype_Koichi_IDH == "IDH1"
+ref_IDH2 <- Phenotype_Koichi_IDH == "IDH2"
+
+# IDHm_regulonlaml_KOICHI_msvip <- run_msviper(Koichi_IDH1_IDH2_symbol_no_dup, regulonlaml, use_aracne = T, ref_IDH2, ref_IDH1, "IDH2", "IDH1", minsize = 4, ges.filter = T)
+
+Koichi_regulonlaml_TF_actitity <- viper(Koichi_IDH1_IDH2_symbol_no_dup, dorothea2viper_regulons(regulonlaml))
+Koichi_IDH1_IDH2_symbol_no_dup %>% write.table("~/GitHub/Thesis_paper/Datasets/Koichi_IDH1_IDH2_symbol_no_dup.tsv", sep = "\t", col.names = NA, quote = F)
+# IDHm_regulonlaml_KOICHI_msvip$mrs_table %>%
+  # write.table("~/GitHub/Thesis_paper/Results/Transcriptomique/TFs/IDH2_IDH1_Koichi_TF_activities.tsv", sep = "\t", col.names = NA, quote = F)
+
+Koichi_regulonlaml_TF_actitity %>% write.table("~/GitHub/Thesis_paper/Results/Transcriptomique/TFs/Koichi_TF_activities.tsv", sep = "\t", col.names = NA)
+```
+
+```{r, eval = F}
+png(filename = "~/GitHub/Thesis_paper/Results/Transcriptomique/Koichi/Figures/IDHm_regulonlaml_KOICHI_msvip.png", width = 1920, height = 1080)
+p <- plot(IDHm_regulonlaml_KOICHI_msvip$mrs, mrs = 50)
+p
+dev.off()
+```
+
+## Response
+
+```{r}
+Koichi_NR_R_symbol <- NR_R_normalized_counts %>% merge(Ensembl_2_symbol[c(1,2)], by.x = 0, by.y = "stable_id")
+Duplicated_genes <- Koichi_NR_R_symbol$display_label %>% .[duplicated(.)] %>% unique
+
+Koichi_NR_R_symbol_no_dup <- dplyr::filter(Koichi_NR_R_symbol, display_label %ni% Duplicated_genes) 
+rownames(Koichi_NR_R_symbol_no_dup) <- Koichi_NR_R_symbol_no_dup$display_label
+n_samples <- ncol(Koichi_NR_R_symbol_no_dup) - 1
+Koichi_NR_R_symbol_no_dup <- Koichi_NR_R_symbol_no_dup[2:n_samples]
+colnames(Koichi_NR_R_symbol_no_dup) <- sapply(colnames(Koichi_NR_R_symbol_no_dup), function(samplename){
+  dplyr::filter(Clinical_patient_data, SRR_Baseline == samplename) %>% .$Baseline_RNAseq_data
+})
+Koichi_NR_R_symbol_no_dup %>% write.table("~/GitHub/Thesis_paper/Datasets/Koichi_NR_R_symbol_no_dup.tsv", sep = "\t", col.names = NA, quote = F)
+
+Phenotype_Koichi_Response <- Phenotype[colnames(Koichi_NR_R_symbol_no_dup), "Response"]
+ref_NR <- Phenotype_Koichi_Response == "Non_Responder"
+ref_R <- Phenotype_Koichi_Response == "Responder"
+
+# NR_R_regulonlaml_KOICHI_msvip <- run_msviper(Koichi_NR_R_symbol_no_dup, regulonlaml, use_aracne = T, ref_NR, ref_R, "Non_Responder", "Responder", minsize = 4, ges.filter = T)
+# Koichi_regulonlaml_TF_actitity_NR_R <- viper(Koichi_NR_R_symbol_no_dup, dorothea2viper_regulons(regulonlaml))
+# Koichi_dorothea_TF_actitity <- viper(Koichi_NR_R_symbol_no_dup, dorothea2viper_regulons(doronet))
+
+
+# NR_R_regulonlaml_KOICHI_msvip$mrs_table %>%
+  # write.table("~/GitHub/Thesis_paper/Results/Transcriptomique/TFs/NR_R_Koichi_TF_activities.tsv", sep = "\t", col.names = NA, quote = F)
+
+# Koichi_regulonlaml_TF_actitity_NR_R %>% write.table("~/GitHub/Thesis_paper/Results/Transcriptomique/TFs/Koichi_TF_activities_NR_R.tsv", sep = "\t", col.names = NA)
+
+# Koichi_dorothea_TF_actitity %>% write.table("~/GitHub/Thesis_paper/Results/Transcriptomique/TFs/Koichi_TF_activities_doronet.tsv", sep = "\t", col.names = NA)
+# 
+```
+
+```{r, eval = F}
+png(filename = "~/GitHub/Thesis_paper/Results/Transcriptomique/Koichi/Figures/NR_R_regulonlaml_KOICHI_msvip.png", width = 1920, height = 1080)
+p <- plot(NR_R_regulonlaml_KOICHI_msvip$mrs, mrs = 50)
+p
+dev.off()
+p
+```
+
+## Relapse
+
+```{r, eval = F}
+Koichi_REL_R_symbol <- REL_R_normalized_counts %>% merge(Ensembl_2_symbol[c(1,2)], by.x = 0, by.y = "stable_id")
+Duplicated_genes <- Koichi_REL_R_symbol$display_label %>% .[duplicated(.)] %>% unique
+
+Koichi_REL_R_symbol_no_dup <- dplyr::filter(Koichi_REL_R_symbol, display_label %ni% Duplicated_genes) 
+rownames(Koichi_REL_R_symbol_no_dup) <- Koichi_REL_R_symbol_no_dup$display_label
+n_samples <- ncol(Koichi_REL_R_symbol_no_dup) - 1
+Koichi_REL_R_symbol_no_dup <- Koichi_REL_R_symbol_no_dup[2:n_samples]
+
+Phenotype_Koichi_Relapse <- Phenotype[colnames(Koichi_REL_R_symbol_no_dup), "Timing"]
+ref_REL <- Phenotype_Koichi_Relapse == "Relapse"
+ref_Baseline <- Phenotype_Koichi_Relapse == "Baseline"
+
+REL_R_regulonlaml_KOICHI_msvip <- run_msviper(Koichi_REL_R_symbol_no_dup, regulonlaml, use_aracne = T, ref_REL, ref_Baseline, "Relapse", "Baseline", minsize = 4, ges.filter = T)
+Koichi_regulonlaml_TF_actitity_REL_R <- viper(Koichi_REL_R_symbol_no_dup, dorothea2viper_regulons(regulonlaml))
+
+REL_R_regulonlaml_KOICHI_msvip$mrs_table %>%
+  write.table("~/GitHub/Thesis_paper/Results/Transcriptomique/TFs/REL_R_Koichi_TF_activities.tsv", sep = "\t", col.names = NA, quote = F)
+
+Koichi_regulonlaml_TF_actitity_REL_R %>% write.table("~/GitHub/Thesis_paper/Results/Transcriptomique/TFs/Koichi_TF_activities_REL_R.tsv", sep = "\t", col.names = NA, quote = F)
+```
+
+```{r, eval = F}
+png(filename = "~/GitHub/Thesis_paper/Results/Transcriptomique/Koichi/Figures/REL_R_regulonlaml_KOICHI_msvip.png", width = 1920, height = 1080)
+p <- plot(REL_R_regulonlaml_KOICHI_msvip$mrs, mrs = 50)
+p
+dev.off()
+p
+```
+
+## IDH in Responder
+
+```{r}
+Response <- sapply(colnames(Koichi_NR_R_symbol_no_dup), function(sample){
+  dplyr::filter(Clinical_patient_data, Baseline_RNAseq_data == sample) %>% .$Baseline_phenotype_2
+})
+IDH <- sapply(colnames(Koichi_NR_R_symbol_no_dup), function(sample){
+  dplyr::filter(Clinical_patient_data, Baseline_RNAseq_data == sample) %>% .$IDH_isoform
+})
+ref_IDH1_in_R <- IDH == "IDH1" & (Response == "Responder" | Response == "Overall_Responder")
+ref_IDH2_in_R <- (IDH == "IDH2_R172" | IDH == "IDH2_R140")  & (Response == "Responder" | Response == "Overall_Responder")
+
+# IDH_in_Responder_regulonlaml_KOICHI_msvip <- run_msviper(Koichi_NR_R_symbol_no_dup, regulonlaml, use_aracne = T, ref_IDH2_in_R, ref_IDH1_in_R, "IDH2", "IDH1", minsize = 4, ges.filter = T)
+IDH_in_Responder_regulonlaml_KOICHI_msvip_doro <- run_msviper(Koichi_NR_R_symbol_no_dup, as.data.frame(doronet), use_aracne = T, ref_IDH2_in_R, ref_IDH1_in_R, "IDH2", "IDH1", minsize = 4, ges.filter = T)
+
+IDH_in_Responder_regulonlaml_KOICHI_msvip_doro$mrs_table %>%
+  write.table("~/GitHub/Thesis_paper/Results/Transcriptomique/TFs/IDH_in_Responder_doro_Koichi_TF_activities.tsv", sep = "\t", col.names = NA, quote = F)
+
+# IDH_in_Responder_regulonlaml_KOICHI_msvip$mrs_table %>%
+  # write.table("~/GitHub/Thesis_paper/Results/Transcriptomique/TFs/IDH_in_Responder_Koichi_TF_activities.tsv", sep = "\t", col.names = NA, quote = F)
+```
+
+```{r}
+png(filename = "~/GitHub/Thesis_paper/Results/Transcriptomique/Koichi/Figures/IDH_in_Responder_dorothea_KOICHI_msvip.png", width = 720, height = 720)
+p <- plot(IDH_in_Responder_regulonlaml_KOICHI_msvip_doro$mrs, mrs = 25)
+p
+dev.off()
+p
+```
+
+
+```{r}
+# png(filename = "~/GitHub/Thesis_paper/Results/Transcriptomique/Koichi/Figures/IDH_in_Responder_regulonlaml_KOICHI_msvip.png", width = 1920, height = 1080)
+# p <- plot(IDH_in_Responder_regulonlaml_KOICHI_msvip$mrs, mrs = 50)
+# p
+# dev.off()
+# p
+```
+
+## IDH in Non Responder
+
+```{r}
+ref_IDH1_in_NR <- IDH == "IDH1" & Response == "Non_Responder"
+ref_IDH2_in_NR <- (IDH == "IDH2_R172" | IDH == "IDH2_R140")  & Response == "Non_Responder"
+
+# IDH_in_Non_Responder_regulonlaml_KOICHI_msvip <- run_msviper(Koichi_NR_R_symbol_no_dup, regulonlaml, use_aracne = T, ref_IDH2_in_NR, ref_IDH1_in_NR, "IDH2", "IDH1", minsize = 4, ges.filter = T)
+IDH_in_Non_Responder_regulonlaml_KOICHI_msvip_doro <- run_msviper(Koichi_NR_R_symbol_no_dup, doronet, use_aracne = T, ref_IDH2_in_NR, ref_IDH1_in_NR, "IDH2", "IDH1", minsize = 4, ges.filter = T)
+
+IDH_in_Non_Responder_regulonlaml_KOICHI_msvip_doro$mrs_table %>%
+  write.table("~/GitHub/Thesis_paper/Results/Transcriptomique/TFs/IDH_in_Non_Responder_Koichi_doro_TF_activities.tsv", sep = "\t", col.names = NA, quote = F)
+
+# IDH_in_Non_Responder_regulonlaml_KOICHI_msvip$mrs_table %>%
+#   write.table("~/GitHub/Thesis_paper/Results/Transcriptomique/TFs/IDH_in_Non_Responder_Koichi_TF_activities.tsv", sep = "\t", col.names = NA, quote = F)
+```
+
+```{r}
+png(filename = "~/GitHub/Thesis_paper/Results/Transcriptomique/Koichi/Figures/IDH_in_Non_Responder_dorothea_KOICHI_msvip.png", width = 720, height = 720)
+p <- plot(IDH_in_Non_Responder_regulonlaml_KOICHI_msvip_doro$mrs, mrs = 25)
+p
+dev.off()
+p
+```
+
+```{r}
+# png(filename = "~/GitHub/Thesis_paper/Results/Transcriptomique/Koichi/Figures/IDH_in_Non_Responder_regulonlaml_KOICHI_msvip.png", width = 1920, height = 1080)
+# p <- plot(IDH_in_Non_Responder_regulonlaml_KOICHI_msvip$mrs, mrs = 50)
+# p
+# dev.off()
+# p
+```
+
+## Response in IDH1
+
+```{r}
+# Response_in_IDH1_regulonlaml_KOICHI_msvip <- run_msviper(Koichi_NR_R_symbol_no_dup, regulonlaml, use_aracne = T, ref_NR_in_IDH1, ref_R_in_IDH1, "NR", "R", minsize = 4, ges.filter = T)
+Response_in_IDH1_regulonlaml_KOICHI_msvip_doro <- run_msviper(Koichi_NR_R_symbol_no_dup, doronet, use_aracne = T, ref_IDH1_in_NR, ref_IDH1_in_R, "NR", "R", minsize = 4, ges.filter = T)
+
+Response_in_IDH1_regulonlaml_KOICHI_msvip_doro$mrs_table %>%
+  write.table("~/GitHub/Thesis_paper/Results/Transcriptomique/TFs/Response_in_IDH1_Koichi_doro_TF_activities.tsv", sep = "\t", col.names = NA, quote = F)
+
+
+# Response_in_IDH1_regulonlaml_KOICHI_msvip$mrs_table %>%
+#   write.table("~/GitHub/Thesis_paper/Results/Transcriptomique/TFs/Response_in_IDH1_Koichi_TF_activities.tsv", sep = "\t", col.names = NA, quote = F)
+```
+
+```{r}
+png(filename = "~/GitHub/Thesis_paper/Results/Transcriptomique/Koichi/Figures/Response_in_IDH1_dorothea_KOICHI_msvip.png", width = 720, height = 720)
+p <- plot(Response_in_IDH1_regulonlaml_KOICHI_msvip_doro$mrs, mrs = 25)
+p
+dev.off()
+p
+```
+
+```{r}
+# png(filename = "~/GitHub/Thesis_paper/Results/Transcriptomique/Koichi/Figures/Response_in_IDH1_regulonlaml_KOICHI_msvip.png", width = 1920, height = 1080)
+# p <- plot(Response_in_IDH1_regulonlaml_KOICHI_msvip$mrs, mrs = 50)
+# p
+# dev.off()
+# p
+```
+
+## Response in IDH2
+
+```{r}
+# Response_in_IDH2_regulonlaml_KOICHI_msvip <- run_msviper(Koichi_NR_R_symbol_no_dup, regulonlaml, use_aracne = T, ref_NR_in_IDH2, ref_R_in_IDH2, "NR", "R", minsize = 4, ges.filter = T)
+Response_in_IDH2_regulonlaml_KOICHI_msvip_doro <- run_msviper(Koichi_NR_R_symbol_no_dup, doronet, use_aracne = T, ref_IDH2_in_NR, ref_IDH2_in_R, "NR", "R", minsize = 4, ges.filter = T)
+
+
+Response_in_IDH2_regulonlaml_KOICHI_msvip_doro$mrs_table %>%
+  write.table("~/GitHub/Thesis_paper/Results/Transcriptomique/TFs/Response_in_IDH2_Koichi_dorothea_TF_activities.tsv", sep = "\t", col.names = NA, quote = F)
+```
+
+```{r}
+png(filename = "~/GitHub/Thesis_paper/Results/Transcriptomique/Koichi/Figures/Response_in_IDH2_dorothea_KOICHI_msvip.png", width = 720, height = 720)
+p <- plot(Response_in_IDH2_regulonlaml_KOICHI_msvip_doro$mrs, mrs = 25)
+p
+dev.off()
+p
+```
+
+```{r}
+# png(filename = "~/GitHub/Thesis_paper/Results/Transcriptomique/Koichi/Figures/Response_in_IDH2_regulonlaml_KOICHI_msvip.png", width = 1920, height = 1080)
+# p <- plot(Response_in_IDH2_regulonlaml_KOICHI_msvip$mrs, mrs = 50)
+# p
+# dev.off()
+# p
+```
+
+# Saving Tables
+
+## DEG tables
+
+```{r}
+# res_NR_R_symbol %>% .[order(res_NR_R_symbol$log2FoldChange, decreasing = T), c(1:8)] %>%
+#   write.table("~/GitHub/Thesis_paper/Results/Transcriptomique/Koichi/Tables/DEGS/NR_R_DEG_tables.tsv", sep = "\t", row.names = F, quote = F)
+# 
+# res_IDH1_IDH2_symbol %>% .[order(res_IDH1_IDH2_symbol$log2FoldChange, decreasing = T), c(1:8)] %>%
+#   write.table("~/GitHub/Thesis_paper/Results/Transcriptomique/Koichi/Tables/DEGS/IDH1_IDH2_DEG_tables.tsv", sep = "\t", row.names = F, quote = F)
+# 
+# res_REL_R_symbol %>% .[order(res_REL_R_symbol$log2FoldChange, decreasing = T), c(1:8)] %>%
+#   write.table("~/GitHub/Thesis_paper/Results/Transcriptomique/Koichi/Tables/DEGS/REL_R_DEG_tables.tsv", sep = "\t", row.names = F, quote = F)
+
+res_IDH_in_Responder_symbol %>% .[order(res_IDH_in_Responder_symbol$log2FoldChange, decreasing = T), c(1:8)] %>%
+  write.table("~/GitHub/Thesis_paper/Results/Transcriptomique/Koichi/Tables/DEGS/IDH_in_Responder_DEG_tables.tsv", sep = "\t", row.names = F, quote = F)
+
+res_IDH_in_Non_Responder_symbol %>% .[order(res_IDH_in_Non_Responder_symbol$log2FoldChange, decreasing = T), c(1:8)] %>%
+  write.table("~/GitHub/Thesis_paper/Results/Transcriptomique/Koichi/Tables/DEGS/IDH_in_Non_Responder_DEG_tables.tsv", sep = "\t", row.names = F, quote = F)
+
+res_IDH1_symbol %>% .[order(res_IDH1_symbol$log2FoldChange, decreasing = T), c(1:8)] %>%
+  write.table("~/GitHub/Thesis_paper/Results/Transcriptomique/Koichi/Tables/DEGS/Response_in_IDH1_DEG_tables.tsv", sep = "\t", row.names = F, quote = F)
+
+res_IDH2_symbol %>% .[order(res_IDH2_symbol$log2FoldChange, decreasing = T), c(1:8)] %>%
+  write.table("~/GitHub/Thesis_paper/Results/Transcriptomique/Koichi/Tables/DEGS/Response_in_IDH2_DEG_tables.tsv", sep = "\t", row.names = F, quote = F)
+```
+
+## GO Tables
+
+```{r, eval = F}
+# write.table(GSEA_IDH1_IDH2@result, "~/GitHub/Thesis_paper/Results/Transcriptomique/Koichi/Tables/GO_enrichment_IDH1_vs_IDH2_deseq2.tsv", sep = "\t")
+# write.table(KEGG_IDH@result, "~/GitHub/Thesis_paper/Results/Transcriptomique/Koichi/Tables/KEGG_enrichment_IDH1_vs_IDH2_deseq2.tsv", sep = "\t")
+# write.table(IDH_MKEGG@result, "~/GitHub/Thesis_paper/Results/Transcriptomique/Koichi/Tables/MKEGG_enrichment_IDH1_vs_IDH2_deseq2.tsv", sep = "\t")
+# write.table(IDH_WIKI@result, "~/GitHub/Thesis_paper/Results/Transcriptomique/Koichi/Tables/WIKI_enrichment_IDH1_vs_IDH2_deseq2.tsv", sep = "\t")
+# write.table(IDH1_vs_IDH2_DOWN_GO@result, "~/GitHub/Thesis_paper/Results/Transcriptomique/Koichi/Tables/IDH1_vs_IDH2_DOWN_GO_deseq2.tsv", sep = "\t")
+# write.table(IDH1_vs_IDH2_DOWN_KEGG@result, "~/GitHub/Thesis_paper/Results/Transcriptomique/Koichi/Tables/IDH1_vs_IDH2_DOWN_KEGG_deseq2.tsv", sep = "\t")
+# write.table(IDH1_vs_IDH2_UP_GO@result, "~/GitHub/Thesis_paper/Results/Transcriptomique/Koichi/Tables/IDH1_vs_IDH2_UP_GO_deseq2.tsv", sep = "\t")
+# write.table(IDH1_vs_IDH2_UP_KEGG@result, "~/GitHub/Thesis_paper/Results/Transcriptomique/Koichi/Tables/IDH1_vs_IDH2_UP_KEGG_deseq2.tsv", sep = "\t")
+# write.table(IDH1_vs_IDH2_WIKIPATH_over_down@result, "~/GitHub/Thesis_paper/Results/Transcriptomique/Koichi/Tables/IDH1_vs_IDH2_WIKIPATH_over_down_deseq2.tsv", sep = "\t")
+# write.table(IDH1_vs_IDH2_WIKIPATH_over_up@result, "~/GitHub/Thesis_paper/Results/Transcriptomique/Koichi/Tables/IDH1_vs_IDH2_WIKIPATH_over_up_deseq2.tsv", sep = "\t")
+# 
+# write.table(GSEA_Response@result, "~/GitHub/Thesis_paper/Results/Transcriptomique/Koichi/Tables/GO_enrichment_Response_deseq2.tsv", sep = "\t")
+# write.table(KEGG_Response@result, "~/GitHub/Thesis_paper/Results/Transcriptomique/Koichi/Tables/KEGG_enrichment_Response_deseq2.tsv", sep = "\t")
+# write.table(Response_MKEGG@result, "~/GitHub/Thesis_paper/Results/Transcriptomique/Koichi/Tables/MKEGG_enrichment_Response_deseq2.tsv", sep = "\t")
+# write.table(Response_WIKI@result, "~/GitHub/Thesis_paper/Results/Transcriptomique/Koichi/Tables/WIKI_enrichment_Response_deseq2.tsv", sep = "\t")
+# write.table(KEGG_Response@result, "~/GitHub/Thesis_paper/Results/Transcriptomique/Koichi/Tables/KEGG_Response_deseq2.tsv", sep = "\t")
+# write.table(Response_DOWN_GO@result, "~/GitHub/Thesis_paper/Results/Transcriptomique/Koichi/Tables/Response_DOWN_GO_deseq2.tsv", sep = "\t")
+# write.table(Response_DOWN_KEGG@result, "~/GitHub/Thesis_paper/Results/Transcriptomique/Koichi/Tables/Response_DOWN_KEGG_deseq2.tsv", sep = "\t")
+# write.table(Response_UP_GO@result, "~/GitHub/Thesis_paper/Results/Transcriptomique/Koichi/Tables/Response_UP_GO_deseq2.tsv", sep = "\t")
+# write.table(Response_UP_KEGG@result, "~/GitHub/Thesis_paper/Results/Transcriptomique/Koichi/Tables/Response_UP_KEGG_deseq2.tsv", sep = "\t")
+# write.table(Response_WIKIPATH_over_down@result, "~/GitHub/Thesis_paper/Results/Transcriptomique/Koichi/Tables/Response_WIKIPATH_over_down_deseq2.tsv", sep = "\t")
+# write.table(Response_WIKIPATH_over_up@result, "~/GitHub/Thesis_paper/Results/Transcriptomique/Koichi/Tables/Response_WIKIPATH_over_up_deseq2.tsv", sep = "\t")
+```
+
+# Networks
+
+## Functions
+
+```{r}
+From_DEG_TF_to_network <- function(DEG, TF, Network){
+  sig_genes <- dplyr::filter(DEG, abs(log2FoldChange) > 1.5 & pvalue < 0.05) %>% .$display_label %>% unique
+  sig_TF <- dplyr::filter(TF, abs(nes) > 1 & pval < 0.05) %>% .$TF %>% unique
+  sig_elements <- c(sig_genes, sig_TF) %>% unique
+  
+  dplyr::filter(Network, tf %in% sig_elements | target %in% sig_elements)
+}
+```
+
+
+```{r}
+# IDH1_IDH2_Network <- From_DEG_TF_to_network(res_IDH1_IDH2_symbol, IDHm_regulonlaml_KOICHI_msvip$mrs_table, regulonlaml)
+# 
+# R_NR_Network <- From_DEG_TF_to_network(res_NR_R_symbol, NR_R_regulonlaml_KOICHI_msvip$mrs_table, regulonlaml)
+# 
+# REL_Baseline_Network <- From_DEG_TF_to_network(res_REL_R_symbol, REL_R_regulonlaml_KOICHI_msvip$mrs_table, regulonlaml)
+
+Response_in_IDH1_Network <- From_DEG_TF_to_network(res_IDH1_symbol,
+                                                   Response_in_IDH1_regulonlaml_KOICHI_msvip_doro$mrs_table, doronet)
+
+Response_in_IDH2_Network <- From_DEG_TF_to_network(res_IDH2_symbol,
+                                                   Response_in_IDH2_regulonlaml_KOICHI_msvip_doro$mrs_table, doronet)
+
+IDH_in_Responder_Network <- From_DEG_TF_to_network(res_IDH_in_Responder_symbol,
+                                                   IDH_in_Responder_regulonlaml_KOICHI_msvip_doro$mrs_table, doronet)
+
+IDH_in_Non_Responder_Network <- From_DEG_TF_to_network(res_IDH_in_Non_Responder_symbol,
+                                                   IDH_in_Non_Responder_regulonlaml_KOICHI_msvip_doro$mrs_table, doronet)
+
+# IDH1_IDH2_Network %>% write.table("~/GitHub/Thesis_paper/Results/Transcriptomique/IDH1_IDH2_Network.tsv", quote = F, sep = "\t", col.names = NA)
+# 
+# R_NR_Network %>% write.table("~/GitHub/Thesis_paper/Results/Transcriptomique/R_NR_Network.tsv", quote = F, sep = "\t", col.names = NA)
+# 
+# REL_Baseline_Network %>% write.table("~/GitHub/Thesis_paper/Results/Transcriptomique/REL_Baseline_Network.tsv", quote = F, sep = "\t", col.names = NA)
+
+Response_in_IDH1_Network %>% write.table("~/GitHub/Thesis_paper/Results/Transcriptomique/Response_in_IDH1_Network.tsv", quote = F, sep = "\t", col.names = NA)
+
+Response_in_IDH2_Network %>% write.table("~/GitHub/Thesis_paper/Results/Transcriptomique/Response_in_IDH2_Network.tsv", quote = F, sep = "\t", col.names = NA)
+
+IDH_in_Responder_Network %>% write.table("~/GitHub/Thesis_paper/Results/Transcriptomique/IDH_in_Responder_Network.tsv", quote = F, sep = "\t", col.names = NA)
+
+IDH_in_Non_Responder_Network %>% write.table("~/GitHub/Thesis_paper/Results/Transcriptomique/IDH_in_Non_Responder_Network.tsv", quote = F, sep = "\t", col.names = NA)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# METAML Data
+```{r}
+Counts_METAML <- read.table("~/GitHub/Thesis_paper/Datasets/Transcriptomics/RNAseq/FEATURECOUNT_RAW_RNASEQ_FULL_TABLE_SARRY.gct", sep = "\t", header = T, row.names = 1, check.names = F)
+
+Pheno_IDH_mutation_TUH_allsample <- read.table("~/GitHub/Thesis_paper/Datasets/Transcriptomics/RNAseq/Pheno_IDH_mutation_TUH_allsamples.tsv", sep = "\t", header = T, row.names = 1) %>% dplyr::filter(Sample %in% colnames(Counts_METAML))
+Correspondance_METAML_Batches <- read.table(file = "~/GitHub/Thesis_paper/Datasets/Transcriptomics/RNAseq/CORRESPONDANCE_PATIENTS_TOULOUSE.tsv", sep = "\t", header = T)
+
+Pheno_IDH_mutation_TUH_allsample <- merge(Pheno_IDH_mutation_TUH_allsample, Correspondance_METAML_Batches, by.x="Sample", by.y = "NAME.RNAseq")
+
+Counts_METAML <- Counts_METAML[,colnames(Counts_METAML) %in% Pheno_IDH_mutation_TUH_allsample$Sample]
+
+
+```
+
+```{r}
+samples_METAML_IDH1 <- dplyr::filter(Pheno_IDH_mutation_TUH_allsample, Pheno_IDH == "mIDH1") %>% .$Sample
+samples_METAML_IDH2 <- dplyr::filter(Pheno_IDH_mutation_TUH_allsample, Pheno_IDH == "mIDH2") %>% .$Sample
+samples_METAML_IDHwt <- dplyr::filter(Pheno_IDH_mutation_TUH_allsample, Pheno_IDH == "wtIDH") %>% .$Sample %>% .[. %in% colnames(Counts_METAML)] %>% sample(size = 7, replace = F)
+```
+
+```{r}
+Samples_2_keep_IDHs_METAML <- colnames(Counts_METAML) %in% c(samples_METAML_IDH1, samples_METAML_IDH2)
+
+Counts_IDH1_IDH2_METAML <- na.omit(Counts_METAML[,Samples_2_keep_IDHs_METAML])
+Pheno_METAML_IDH <- Pheno_IDH_mutation_TUH_allsample %>%
+  na.omit %>%
+  dplyr::filter(Pheno_IDH == "mIDH1" | Pheno_IDH == "mIDH2")
+rownames(Pheno_METAML_IDH) <- Pheno_METAML_IDH$Sample
+Pheno_METAML_IDH <- Pheno_METAML_IDH[colnames(Counts_IDH1_IDH2_METAML),]
+
+ddsTxi_METAML_IDH1_IDH2 <- DESeqDataSetFromMatrix(Counts_IDH1_IDH2_METAML,
+                                   colData = Pheno_METAML_IDH,
+                                   design = ~ BATCH + Pheno_IDH)
+
+dds_METAML_IDH1_IDH2 <- DESeq(ddsTxi_METAML_IDH1_IDH2)
+res_METAML_IDH1_IDH2 <- results(dds_METAML_IDH1_IDH2) 
+res_METAML_IDH1_IDH2
+res_METAML_IDH1_IDH2$ID_ensembl <- rownames(res_METAML_IDH1_IDH2)
+res_METAML_IDH1_IDH2 <- as_tibble(res_METAML_IDH1_IDH2)
+head(res_METAML_IDH1_IDH2)
+
+```
+
+
+```{r}
+diff_IDH1_IDH2_METAML <- dplyr::filter(res_METAML_IDH1_IDH2, abs(log2FoldChange) > 1 & padj < 0.05) 
+
+Top_IDH1_2_IDH2_METAML <- dplyr::filter(diff_IDH1_IDH2_METAML, log2FoldChange < -2.5) %>% .[order(.$log2FoldChange, decreasing = F),] %>% .$ID_ensembl
+
+Top_IDH2_2_IDH1_METAML <- dplyr::filter(diff_IDH1_IDH2_METAML, log2FoldChange > 2.5) %>% .[order(.$log2FoldChange, decreasing = T),] %>% .$ID_ensembl
+
+IDH1_METAML_signature <- Top_IDH1_2_IDH2_METAML %>% .[1:50]
+IDH1_METAML_signature
+
+IDH2_METAML_signature <- Top_IDH2_2_IDH1_METAML %>% .[1:50]
+IDH2_METAML_signature
+```
+
+```{r}
+IDH1_IDH2_METAML_normalized_counts <- vst(dds_METAML_IDH1_IDH2, blind = F) %>% assay
+IDH1_IDH2_METAML_normalized_counts %>%
+  write.table("~/GitHub/Thesis_paper/Datasets/Transcriptomics/RNAseq/METAML_RNAseq_IDH1_IDH2_Normalized.tsv", sep = "\t")
+res.pca_METAML <- prcomp(t(IDH1_IDH2_METAML_normalized_counts))
+p <- fviz_pca_ind(res.pca_METAML, label="all", habillage=Pheno_METAML_IDH[c(2,4)], addEllipses=T, ellipse.level=0.95)
+p <- p + ggtitle("PCA Transcripto")
+p
+
+mat <- limma::removeBatchEffect(IDH1_IDH2_METAML_normalized_counts, batch=Pheno_METAML_IDH$BATCH)
+IDH1_IDH2_METAML_normalized_counts_Batched <- mat
+IDH1_IDH2_METAML_normalized_counts_Batched %>%
+  write.table("~/GitHub/Thesis_paper/Datasets/Transcriptomics/RNAseq/METAML_RNAseq_IDH1_IDH2_Normalized_batched.tsv", sep = "\t")
+res.pca_METAML_batched <- prcomp(t(IDH1_IDH2_METAML_normalized_counts_Batched))
+p <- fviz_pca_ind(res.pca_METAML_batched, label="all", habillage=Pheno_METAML_IDH[c(2,4)], addEllipses=T, ellipse.level=0.95)
+p <- p + ggtitle("PCA Transcripto")
+p
+```
+
+```{r}
+Annotation_color <-  list(Pheno_IDH = c(mIDH1 = "blue", mIDH2 = "red"),
+                          BATCH = c(Batch1 = "red", Batch2 = "green", Batch3 = "blue"))
+
+heat <- Make_heatmap(IDH1_IDH2_METAML_normalized_counts, Pheno_METAML_IDH[,c(2,4)], title = "Test",
+                           annotation_color = Annotation_color, method = "pearson")
+
+heat <- Make_heatmap(IDH1_IDH2_METAML_normalized_counts_Batched, Pheno_METAML_IDH[,c(2,4)], title = "Test",
+                           annotation_color = Annotation_color, method = "pearson")
+
+```
+
+```{r}
+Volcano_IDH1_IDH2_METAML <- EnhancedVolcano(
+      toptable = res_METAML_IDH1_IDH2,
+      lab = res_METAML_IDH1_IDH2$ID_ensembl,
+      x = "log2FoldChange",
+      y = "padj",
+      FCcutoff = 2.5,
+      pCutoff = 0.05,
+      title = "IDH1 vs IDH2",
+      subtitle = NA,
+      subtitleLabSize = 0, ylim = c(0, 5), xlim = c(-10, 10)
+  )
+Volcano_IDH1_IDH2_METAML
+
+```
+
+```{r}
+genes <- getBM(filters = "hgnc_symbol",
+               attributes = c("ensembl_gene_id","entrezgene_id", "hgnc_symbol"),
+               values = res_METAML_IDH1_IDH2$ID_ensembl, 
+               mart = mart)
+```
+
+### IDH
+
+```{r}
+res_IDH1_IDH2_MEATAML_entrez <- merge(res_METAML_IDH1_IDH2, genes, by.x = "ID_ensembl", by.y = "hgnc_symbol", all.y = F, all.x = F) %>% na.omit()
+```
+
+```{r}
+Geneset_METAML_IDH1_vs_IDH2 <- res_IDH1_IDH2_MEATAML_entrez$log2FoldChange
+names(Geneset_METAML_IDH1_vs_IDH2) <- res_IDH1_IDH2_MEATAML_entrez$entrezgene_id
+Geneset_METAML_IDH1_vs_IDH2 <- Geneset_METAML_IDH1_vs_IDH2[order(Geneset_METAML_IDH1_vs_IDH2, decreasing = T)] %>% na.omit
+```
+
+```{r}
+GSEA_IDH1_IDH2_METAML <- gseGO(geneList     = Geneset_METAML_IDH1_vs_IDH2,
+              OrgDb        = org.Hs.eg.db, 
+              keyType = "ENTREZID",
+              ont          = "all",
+              minGSSize    = 1,
+              maxGSSize    = 1000,
+              pvalueCutoff = 0.1,
+              verbose      = T) %>%
+  setReadable(OrgDb = org.Hs.eg.db, keyType = "ENTREZID")
+
+```
+
+```{r}
+dotplot(GSEA_IDH1_IDH2_METAML, split=".sign") + facet_grid(.~.sign)
+
+ggsave("~/GitHub/Thesis_paper/Results/Transcriptomique/METAML/Figures/GO_enrichment_IDH1_vs_IDH2_METAML_deseq2.png", bg = "white", width = 7600, height = 4200, units = "px")
+
+cnetplot(GSEA_IDH1_IDH2_METAML, foldChange=Geneset_METAML_IDH1_vs_IDH2, node_label = "all") 
+
+ggsave("~/GitHub/Thesis_paper/Results/Transcriptomique/METAML/Figures/GO_cnetplot_enrichment_IDH1_vs_IDH2_METAML_deseq2.png", bg = "white", width = 7600, height = 4200, units = "px")
+```
+
+```{r}
+Go_similarities_IDH1_vs_IDH2_METAML <- GO_similarity(GSEA_IDH1_IDH2_METAML@result$ID, ont = "BP")
+```
+
+```{r}
+simplifyGO(Go_similarities_IDH1_vs_IDH2_METAML)
+```
+
+## KEGG
+
+```{r}
+KEGG_IDH_METAML <- gseKEGG(Geneset_METAML_IDH1_vs_IDH2, minGSSize = 2, pvalueCutoff = 0.1, pAdjustMethod = "none", verbose = F, organism = 'hsa', keyType = 'ncbi-geneid') %>%
+  setReadable(OrgDb = org.Hs.eg.db, keyType = "ENTREZID")
+```
+
+
+```{r}
+hsa00982 <- pathview(gene.data  = Geneset_IDH1_vs_IDH2,
+                     pathway.id = "hsa00982",
+                     species    = "hsa",
+                     limit      = list(gene=max(abs(Geneset_IDH1_vs_IDH2)), cpd=1))
+
+hsa04064 <- pathview(gene.data  = Geneset_IDH1_vs_IDH2,
+                     pathway.id = "hsa04064",
+                     species    = "hsa",
+                     limit      = list(gene=max(abs(Geneset_IDH1_vs_IDH2)), cpd=1))
+
+hsa00260 <- pathview(gene.data  = Geneset_IDH1_vs_IDH2,
+                     pathway.id = "hsa00260",
+                     species    = "hsa",
+                     limit      = list(gene=max(abs(Geneset_IDH1_vs_IDH2)), cpd=1))
+
+hsa00983 <- pathview(gene.data  = Geneset_IDH1_vs_IDH2,
+                     pathway.id = "hsa00983",
+                     species    = "hsa",
+                     limit      = list(gene=max(abs(Geneset_IDH1_vs_IDH2)), cpd=1))
+
+
+```
+
+```{r}
+dotplot(KEGG_IDH_METAML, split=".sign") + facet_grid(.~.sign, ) 
+
+ggsave("~/GitHub/Thesis_paper/Results/Transcriptomique/METAML/Figures/KEGG_enrichment_IDH1_vs_IDH2_METAML_Deseq2.png", bg = "white", width = 7600, height = 4200, units = "px")
+
+cnetplot(KEGG_IDH_METAML, foldChange=Geneset_METAML_IDH1_vs_IDH2, node_label = "all") 
+
+ggsave("~/GitHub/Thesis_paper/Results/Transcriptomique/METAML/Figures/KEGG_cnetplot_enrichment_IDH1_vs_IDH2_METAML_Deseq2.png", bg = "white", width = 7600, height = 4200, units = "px")
+```
+
+
+```{r}
+IDH_MKEGG_METAML <- gseMKEGG(geneList = Geneset_METAML_IDH1_vs_IDH2,
+                 organism = 'hsa',
+                 pvalueCutoff = 1) %>%
+  setReadable(OrgDb = org.Hs.eg.db, keyType = "ENTREZID")
+```
+
+```{r}
+dotplot(IDH_MKEGG_METAML, split=".sign") + facet_grid(.~.sign)
+
+ggsave("~/GitHub/Thesis_paper/Results/Transcriptomique/METAML/Figures/MKEGG_enrichment_IDH1_vs_IDH2_METAML_Deseq2.png", bg = "white", width = 7600, height = 4200, units = "px")
+
+cnetplot(IDH_MKEGG_METAML, foldChange=Geneset_METAML_IDH1_vs_IDH2, node_label = "all") 
+
+ggsave("~/GitHub/Thesis_paper/Results/Transcriptomique/METAML/Figures/MKEGG_cnetplot_enrichment_IDH1_vs_IDH2_METAML_Deseq2.png", bg = "white", width = 7600, height = 4200, units = "px")
+```
+
+## Wikipathway
+
+```{r}
+IDH_WIKI_METAML <- gseWP(geneList = Geneset_METAML_IDH1_vs_IDH2,
+                 organism = 'Homo sapiens',
+                 pvalueCutoff = 1)  %>%
+  setReadable(OrgDb = org.Hs.eg.db, keyType = "ENTREZID")
+```
+
+```{r}
+dotplot(IDH_WIKI_METAML, split=".sign") + facet_grid(.~.sign) 
+
+ggsave("~/GitHub/Thesis_paper/Results/Transcriptomique/METAML/Figures/WIKI_enrichment_IDH1_vs_IDH2_METAML_Deseq2.png", bg = "white", width = 7600, height = 4200, units = "px")
+
+cnetplot(IDH_WIKI_METAML, foldChange=Geneset_METAML_IDH1_vs_IDH2, node_label = "all") 
+
+ggsave("~/GitHub/Thesis_paper/Results/Transcriptomique/METAML/Figures/Wiki_cnetplot_enrichment_IDH1_vs_IDH2_METAML_Deseq2.png", bg = "white", width = 7600, height = 4200, units = "px")
+```
+
+
+
+
+## TF
+
+```{r}
+Phenotype_METAML_IDH <- Pheno_METAML_IDH$Pheno_IDH
+ref_IDH1 <- Phenotype_METAML_IDH == "mIDH1"
+ref_IDH2 <- Phenotype_METAML_IDH == "mIDH2"
+
+IDHm_regulonlaml_METAML_msvip <- run_msviper(IDH1_IDH2_METAML_normalized_counts_Batched, regulonlaml, use_aracne = T, ref_IDH2, ref_IDH1, "IDH2", "IDH1", minsize = 4, ges.filter = T)
+METAML_regulonlaml_TF_actitity <- viper(IDH1_IDH2_METAML_normalized_counts_Batched, dorothea2viper_regulons(regulonlaml))
+
+
+IDHm_regulonlaml_METAML_msvip$mrs_table %>%
+  write.table("~/GitHub/Thesis_paper/Results/Transcriptomique/TFs/IDH2_IDH1_METAML_TF_activities.tsv", sep = "\t", col.names = NA)
+
+
+METAML_regulonlaml_TF_actitity %>% write.table("~/GitHub/Thesis_paper/Results/Transcriptomique/TFs/METAML_TF_activities.tsv", sep = "\t", col.names = NA)
+```
+
+```{r}
+png(filename = "~/GitHub/Thesis_paper/Results/Transcriptomique/METAML/Figures/IDHm_regulonlaml_METAML_msvip.png", width = 1920, height = 1080)
+p <- plot(IDHm_regulonlaml_METAML_msvip$mrs, mrs = 50)
+p
+dev.off()
+```
+
+# Compare datasets 
+
+## DEGs
+
+```{r}
+DEGs_Koichi <- dplyr::filter(res_IDH1_IDH2_symbol, abs(log2FoldChange) > 1.5 & pvalue < 0.05)
+DEGs_METAML <- dplyr::filter(res_METAML_IDH1_IDH2, abs(log2FoldChange) > 1.5 & padj < 0.05)
+
+intersect(DEGs_Koichi$display_label, DEGs_METAML$ID_ensembl)
+```
+
+
+
+
+## GO
+
+
+
+
+
+## TF activities
+
+```{r}
+TF_diff_Koichi <- IDHm_regulonlaml_KOICHI_msvip$mrs_table %>%
+  dplyr::filter(pval < 0.05)
+TF_diff_MEATAML <- IDHm_regulonlaml_METAML_msvip$mrs_table %>%
+  dplyr::filter(pval < 0.05)
+
+intersect(TF_diff_Koichi$TF, TF_diff_MEATAML$TF)
+```
+
+
+
+
+
+
+
+

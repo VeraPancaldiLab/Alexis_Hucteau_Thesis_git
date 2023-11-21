@@ -1,0 +1,121 @@
+---
+title: "Analysis of networks"
+author: Alexis Hucteau
+date: "`r Sys.Date()`"
+output:
+    html_document:
+      toc: yes
+      toc_float: yes
+      theme: united
+editor_options:
+  markdown:
+    wrap: sentence
+---
+
+```{r, warning=F}
+rm(DmIALite, DOLite, DOLiteTerm, HsIALite, MmIALite, RnIALite)
+```
+
+# Librairies 
+
+```{r}
+library(dplyr)
+library(ggplot2)
+```
+
+
+# DATA import
+
+## Multi_layer_features 
+
+```{r}
+Multilayer_Aggregate_Koichi_mIDH_community_result <- read.table("../../Results/Multi_layer_IDHm_Koichi/Results/Community_Aggregate_Analysis.tsv", 
+                                  sep ="\t", header = T) %>% .[2:6]
+
+Multilayer_Aggregate_Koichi_mIDH_features <- read.table("../../Results/Multi_layer_IDHm_Koichi/DATA/Koichi_mIDH_layout.txt",
+                                                        sep = " ", header = T)
+```
+
+
+## Chromatine networks features
+
+```{r}
+Chromatine_Pchic_Koichi_mIDH_network <- read.table("../../Results/Chromatine_part/Chromatine_networks/Pchic_KOICHI_mIDH.tsv", 
+                                                   sep = "\t", header = T)
+Chromatine_Pchic_Koichi_mIDH_features <- read.table("../../Results/Chromatine_part/Chromatine_features_datasets/Pchic_KOICHI_mIDH.tsv",
+                                                    sep = "\t", header = T)
+
+```
+
+## GRN 
+
+
+## fPPI
+
+
+## Metabolism
+
+
+# Analysis Function
+
+```{r}
+Plot_flow_by_feature <- function(feature, name_of_feature){
+  ggplot(feature, aes(x = name_of_feature, y = log_flow, label = ID, colour = DEG))+
+    geom_text(check_overlap = T, size = 4, nudge_x = 0.0005, hjust = 0, outlier.size = 0)+
+    geom_point(size = 0.5)+
+    labs(title = paste0("Network-based node prioritization ", title))+
+    xlab("Page Rank (log)")+
+    ylab("Eigen Centrality (log)")+
+    scale_colour_manual(values= color)
+}
+```
+
+```{r}
+Multilayer_Aggregate_Koichi_mIDH_community_result %>% dplyr::filter(log_flow < Inf) %>%
+  ggplot(aes(x = module, y = log_flow, group = module), colour = module)+
+  geom_boxplot()
+```
+
+```{r}
+Multilayer_Aggregate_Koichi_mIDH_community_result %>% dplyr::filter(log_flow < Inf) %>%
+  ggplot(aes(x = layer, y = module, group = layer), colour = layer)+
+  geom_boxplot()
+
+sapply(1:5, function(lay){
+  tmp <- Multilayer_Aggregate_Koichi_mIDH_community_result %>%
+    dplyr::filter(layer == lay)
+  min(tmp$log_flow)
+})
+```
+
+
+```{r}
+res <- sapply(1:max(Multilayer_Aggregate_Koichi_mIDH_community_result$module), function(mod){
+  tmp <- Multilayer_Aggregate_Koichi_mIDH_community_result %>%
+    dplyr::filter(module == mod)
+  min(tmp$log_flow)
+})
+```
+
+
+```{r}
+plot(res, xlab = "module", ylab = "-log_flow_minimum", main = "Flow analysis throught modules")
+abline(a = 8, b = 0, col = "red")
+
+res[res < 8] %>% 
+  plot(xlab = "module", ylab = "-log_flow_minimum", main = "Selected modules based on best flows")
+abline(a = 8, b = 0, col = "red")
+text(8,0, "test", col = 2)
+```
+
+```{r}
+Filtered_modules <- 1:length(res) %>% .[res < 8]
+Filtered_modules %>% write.table("../../Results/Multi_layer_IDHm_Koichi/Results/Filtered_modules.tsv", sep = "\t", row.names = F, quote =F)
+```
+
+```{r}
+Filtered_nodes <- Multilayer_Aggregate_Koichi_mIDH_community_result %>% dplyr::filter(module %in% Filtered_modules & log_flow < Inf)
+Filtered_nodes$Filtered <- T
+Filtered_nodes %>% write.table("../../Results/Multi_layer_IDHm_Koichi/Results/Filtered_nodes.tsv", sep = "\t", row.names = F, quote =F)
+```
+

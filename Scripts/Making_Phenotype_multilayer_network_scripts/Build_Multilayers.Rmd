@@ -1,0 +1,2435 @@
+---
+title: "Build Multilayers"
+author: Alexis Hucteau
+date: "`r Sys.Date()`"
+output:
+    html_document:
+      toc: yes
+      toc_float: yes
+      theme: united
+editor_options:
+  markdown:
+    wrap: sentence
+---
+
+# Libraries
+
+```{r, error=F, warning=F, echo=FALSE, include=F}
+rm(DmIALite, DOLite, DOLiteTerm, HsIALite, MmIALite, RnIALite)
+  
+library(GGally)
+library(dplyr)
+library(RCy3)
+library(igraph)
+library(data.table)
+library(stringr)
+library(clusterProfiler)
+library(ggplot2)
+library(muxViz)
+library(grid)
+library(ggraph)
+library(RColorBrewer)
+library(viridis)
+library(parallel)
+library(ggpubr)
+library(corrplot)
+
+cores2use <- detectCores() -2
+
+"%ni%" <- Negate("%in%")
+```
+
+# Corrected buildMultilayerNetworkFromMuxvizFiles function
+
+```{r}
+buildMultilayerNetworkFromMuxvizFiles_corrected <-
+  function(config.file,
+           isDirected,
+           isWeighted,
+           MultisliceType,
+           LayerCouplingStrength = 1,
+           format = "muxviz edge-colored",
+           verbose = T) {
+    if (format == "muxviz edge-colored") {
+      # Expected format: layer_file;layer_label;layout_file
+      df.config <- utils::read.table(config.file, sep = ";", header = F)
+      colnames(df.config) <-
+        c("layer.file", "layer.label", "layout.file")
+      Layers <- nrow(df.config)
+      layerTensor <-
+        BuildLayersTensor(
+          Layers = Layers,
+          OmegaParameter = LayerCouplingStrength,
+          MultisliceType = MultisliceType
+        )
+      layerLabels <- df.config$layer.label
+      
+      if (verbose)
+        cat(paste("Found", Layers, "layers...\n"))
+      
+      layout.file <- unique(as.character(df.config$layout.file))
+      if (length(layout.file) > 1)
+        stop("More than one layout file specified.")
+      
+      #Expected format: nodeID nodeLabel (optional)
+      df.layout <- utils::read.table(layout.file, sep = " ", header = T)
+      
+      nodeIDs <- df.layout$nodeID
+      nodeLabels <- df.layout$nodeLabel
+      nodeX <- df.layout$nodeX
+      nodeY <- df.layout$nodeY
+      
+      Nodes <- length(nodeIDs)
+      if (verbose)
+        cat(paste("Found", Nodes, "nodes\n"))
+      
+      #Read the edge-colored network
+      nodeTensor <- list()
+      g.list <- list()
+      l <- 1
+      for (input.file in as.character(df.config$layer.file)) {
+        if (verbose)
+          cat(paste("  Reading layer from file", input.file, "...\n"))
+        edges <- utils::read.table(input.file, header = T)
+        if (ncol(edges) == 3) {
+          colnames(edges) <- c("from", "to", "weight")
+          if (!isWeighted) {
+            cat(
+              paste(
+                "  WARNING! You asked for an unweighted network but weights are found. Assigning 1 by default.\n"
+              )
+            )
+            edges$weight <- 1
+          }
+        } else if (ncol(edges) == 2) {
+          colnames(edges) <- c("from", "to")
+          if (isWeighted) {
+            cat(
+              paste(
+                "  WARNING! You assume a weighted network but no weights are found. Assigning 1 by default.\n"
+              )
+            )
+            edges$weight <- 1
+          }
+        }
+        
+        g.list[[l]] <-
+          igraph::graph.data.frame(edges, directed = isDirected, vertices = nodeIDs)
+        #g.list[[l]] <- simplify(g.list[[l]])
+        nodeTensor[[l]] <-
+          igraph::as_adjacency_matrix(g.list[[l]], attr = "weight")
+        l <- l + 1
+      }
+      
+      #Build the multilayer adjacency tensor
+      M <-
+        BuildSupraAdjacencyMatrixFromEdgeColoredMatrices(nodeTensor, layerTensor, Layers, Nodes)
+      
+      #Build the aggregate matrix and network
+      aggregateTensor <- GetAggregateMatrixFromNetworkList(g.list)
+      g.agg <- GetAggregateNetworkFromNetworkList(g.list)
+      
+      return(
+        list(
+          Nodes = Nodes,
+          nodeIDs = nodeIDs,
+          nodeLabels = nodeLabels,
+          nodeX = nodeX,
+          nodeY = nodeY,
+          nodeTensor = nodeTensor,
+          Layers = Layers,
+          layerIDs = 1:Layers,
+          layerLabels = layerLabels,
+          layerTensor = layerTensor,
+          adjacencyTensor = M,
+          g.list = g.list,
+          isDirected = isDirected,
+          isWeighted = isWeighted,
+          aggregateTensor = aggregateTensor,
+          g.agg = g.agg
+        )
+      )
+    } else if (format == "muxviz general") {
+      #Expected format: layers_file;layer_label;layout_file
+      df.config <- utils::read.table(config.file, sep = ";", header = F)
+      colnames(df.config) <-
+        c("layers.file", "layer.label.file", "layout.file")
+      
+      layerLabels <-
+        utils::read.table(as.character(df.config$layer.label.file), header = T)
+      
+      #Expected format: node layer node layer weight
+      mEdges <-
+        utils::read.table(as.character(df.config$layers.file), header = F)
+      
+      inter.edges <- mEdges[mEdges[, 2] != mEdges[, 4], ]
+      intra.edges <- mEdges[mEdges[, 2] == mEdges[, 4], ]
+      
+      Layers <- max(max(mEdges[, 2]), max(mEdges[, 4]))
+      Nodes <- max(max(mEdges[, 1]), max(mEdges[, 3]))
+      
+      if (verbose)
+        cat(paste("Found", Layers, "layers...\n"))
+      
+      if (nrow(inter.edges) == 0) {
+        cat("Warning: no inter-layer links found, input network is edge-colored.\n")
+        cat(
+          paste(
+            "Applying",
+            MultisliceType,
+            "coupling with intensity",
+            LayerCouplingStrength,
+            ".\n"
+          )
+        )
+        layerTensor <-
+          BuildLayersTensor(
+            Layers = Layers,
+            OmegaParameter = LayerCouplingStrength,
+            MultisliceType = MultisliceType
+          )
+      }
+      layerTensor <-
+        BuildLayersTensor(
+          Layers = Layers,
+          OmegaParameter = LayerCouplingStrength,
+          MultisliceType = MultisliceType
+        )
+      
+      layout.file <- unique(as.character(df.config$layout.file))
+      if (length(layout.file) > 1)
+        stop("Error: More than one layout file specified.")
+      
+      #Expected format: nodeID nodeLabel (optional)
+      df.layout <- utils::read.table(layout.file, sep = " ", header = T)
+      
+      nodeIDs <- df.layout$nodeID
+      nodeLabels <- df.layout$nodeLabel
+      nodeX <- df.layout$nodeX
+      nodeY <- df.layout$nodeY
+      
+      Nodes2 <- length(nodeIDs)
+      
+      # if (Nodes != Nodes2) {
+      #   stop("Error: Nodes specified in the layout do not match nodes used in the edges list.\n")
+      # }
+      
+      if (verbose)
+        cat(paste("Found", Nodes, "nodes\n"))
+      
+      if (verbose) {
+        cat(paste("  Inter-links:", nrow(inter.edges), "\n"))
+        cat(paste("  Intra-links:", nrow(intra.edges), "\n"))
+      }
+      
+      #Read the layers
+      nodeTensor <- list()
+      g.list <- list()
+      layerEdges <- list()
+      
+      for (l in 1:Layers) {
+        if (verbose)
+          cat(paste("  Reading layer from file", df.config$layers.file, "...\n"))
+        
+        if (ncol(mEdges) == 5) {
+          layerEdges[[l]] <- mEdges[mEdges[, 2] == l &
+                                      mEdges[, 4] == l, c(1, 3, 5)]
+        } else {
+          layerEdges[[l]] <- mEdges[mEdges[, 2] == l & mEdges[, 4] == l, c(1, 3)]
+        }
+        
+        if (ncol(layerEdges[[l]]) == 3) {
+          colnames(layerEdges[[l]]) <- c("from", "to", "weight")
+          if (!isWeighted) {
+            cat(
+              paste(
+                "  WARNING! You asked for an unweighted network but weights are found. Assigning 1 by default.\n"
+              )
+            )
+            layerEdges[[l]]$weight <- 1
+          }
+        } else if (ncol(layerEdges[[l]]) == 2) {
+          colnames(layerEdges[[l]]) <- c("from", "to")
+          if (isWeighted) {
+            cat(
+              paste(
+                "  WARNING! You assume a weighted network but no weights are found. Assigning 1 by default.\n"
+              )
+            )
+            layerEdges[[l]]$weight <- 1
+          }
+        }
+        
+        g.list[[l]] <-
+          igraph::graph.data.frame(layerEdges[[l]], directed = isDirected, vertices =
+                                     nodeIDs)
+        #g.list[[l]] <- simplify(g.list[[l]])
+        nodeTensor[[l]] <-
+          igraph::as_adjacency_matrix(g.list[[l]], attr = "weight")
+      }
+      
+      #Build the multilayer adjacency tensor
+      M <-
+        BuildSupraAdjacencyMatrixFromExtendedEdgelist(mEdges, Layers, Nodes, isDirected)
+      
+      #Build the aggregate matrix and network
+      aggregateTensor <- GetAggregateMatrixFromNetworkList(g.list)
+      g.agg <- GetAggregateNetworkFromNetworkList(g.list)
+      
+      return(
+        list(
+          Nodes = Nodes,
+          nodeIDs = nodeIDs,
+          nodeLabels = nodeLabels,
+          nodeX = nodeX,
+          nodeY = nodeY,
+          nodeTensor = nodeTensor,
+          Layers = Layers,
+          layerIDs = 1:Layers,
+          layerLabels = layerLabels,
+          layerTensor = layerTensor,
+          adjacencyTensor = M,
+          g.list = g.list,
+          isDirected = isDirected,
+          isWeighted = isWeighted,
+          aggregateTensor = aggregateTensor,
+          g.agg = g.agg
+        )
+      )
+    } else {
+      stop("Format not recognized.")
+    }
+  }
+```
+
+# Loading config path
+
+## all multilayer
+
+```{r, eval = F}
+multilist <- list("Cluster_NR" = "~/GitHub/Thesis_paper/Results/Multi_layer_pheno_like/Cluster_NR/Multi_layer/config.txt", 
+                  "Cluster_R" = "~/GitHub/Thesis_paper/Results/Multi_layer_pheno_like/Cluster_R/Multi_layer/config.txt", 
+                  "mIDH1" = "~/GitHub/Thesis_paper/Results/Multi_layer_pheno_like/mIDH1/Multi_layer/config.txt", 
+                  "mIDH2" = "~/GitHub/Thesis_paper/Results/Multi_layer_pheno_like/mIDH2/Multi_layer/config.txt")
+```
+
+## Filtered multilayer
+
+```{r, eval = F}
+multilist_filtered <- list("Cluster_NR" = "~/GitHub/Thesis_paper/Results/Multi_layer_pheno_like/Cluster_NR_filtered/Multi_layer/config.txt", 
+                  "Cluster_R" = "~/GitHub/Thesis_paper/Results/Multi_layer_pheno_like/Cluster_R_filtered/Multi_layer/config.txt", 
+                  "mIDH1" = "~/GitHub/Thesis_paper/Results/Multi_layer_pheno_like/mIDH1_filtered/Multi_layer/config.txt", 
+                  "mIDH2" = "~/GitHub/Thesis_paper/Results/Multi_layer_pheno_like/mIDH2_filtered/Multi_layer/config.txt",
+                  "Cluster_IDH1_R" = "~/GitHub/Thesis_paper/Results/Multi_layer_pheno_like/Cluster_IDH1_R/Multi_layer/config.txt",  
+                  "Cluster_IDH2_R" = "~/GitHub/Thesis_paper/Results/Multi_layer_pheno_like/Cluster_IDH2_R/Multi_layer/config.txt", 
+                  "Cluster_IDH2_NR" = "~/GitHub/Thesis_paper/Results/Multi_layer_pheno_like/Cluster_IDH2_NR/Multi_layer/config.txt")
+```
+
+```{r}
+multilist_filtered_25k <- list("Cluster_NR_filtered" = "~/GitHub/Thesis_paper/Results/Multi_layer_pheno_like/Cluster_NR_filtered/Multi_layer/config.txt", 
+                  "Cluster_R_filtered" = "~/GitHub/Thesis_paper/Results/Multi_layer_pheno_like/Cluster_R_filtered/Multi_layer/config.txt", 
+                  "mIDH1_filtered" = "~/GitHub/Thesis_paper/Results/Multi_layer_pheno_like/mIDH1_filtered/Multi_layer/config.txt", 
+                  "mIDH2_filtered" = "~/GitHub/Thesis_paper/Results/Multi_layer_pheno_like/mIDH2_filtered/Multi_layer/config.txt",
+                  "Cluster_IDH1_R" = "~/GitHub/Thesis_paper/Results/Multi_layer_pheno_like/Cluster_IDH1_R/Multi_layer/config.txt",  
+                  "Cluster_IDH2_R" = "~/GitHub/Thesis_paper/Results/Multi_layer_pheno_like/Cluster_IDH2_R/Multi_layer/config.txt", 
+                  "Cluster_IDH2_NR" = "~/GitHub/Thesis_paper/Results/Multi_layer_pheno_like/Cluster_IDH2_NR/Multi_layer/config.txt",
+                  "Cluster_NR_filtered_25k" = "~/GitHub/Thesis_paper/Results/Multi_layer_pheno_like/Cluster_NR_filtered_25k/Multi_layer/config.txt", 
+                  "Cluster_R_filtered_25k" = "~/GitHub/Thesis_paper/Results/Multi_layer_pheno_like/Cluster_R_filtered_25k/Multi_layer/config.txt", 
+                  "mIDH1_filtered_25k" = "~/GitHub/Thesis_paper/Results/Multi_layer_pheno_like/mIDH1_filtered_25k/Multi_layer/config.txt", 
+                  "mIDH2_filtered_25k" = "~/GitHub/Thesis_paper/Results/Multi_layer_pheno_like/mIDH2_filtered_25k/Multi_layer/config.txt",
+                  "Cluster_IDH1_R_25k" = "~/GitHub/Thesis_paper/Results/Multi_layer_pheno_like/Cluster_IDH1_R_25k/Multi_layer/config.txt",  
+                  "Cluster_IDH2_R_25k" = "~/GitHub/Thesis_paper/Results/Multi_layer_pheno_like/Cluster_IDH2_R_25k/Multi_layer/config.txt", 
+                  "Cluster_IDH2_NR_25k" = "~/GitHub/Thesis_paper/Results/Multi_layer_pheno_like/Cluster_IDH2_NR_25k/Multi_layer/config.txt")
+```
+
+```{r}
+dir_multi_scaled <- "~/GitHub/Thesis_paper/Results/Multi_layer_pheno_like/Scaled_intra_links/"
+
+multilist_filtered_intra_scaled <- list("Cluster_NR_multilayer_filtered" = paste0(dir_multi_scaled, "Cluster_NR_multilayer_filtered/config.txt"), 
+                  "Cluster_R_multilayer_filtered" = paste0(dir_multi_scaled, "Cluster_R_multilayer_filtered/config.txt"), 
+                  "mIDH1_multilayer_filtered" = paste0(dir_multi_scaled, "mIDH1_multilayer_filtered/config.txt"), 
+                  "mIDH2_multilayer_filtered" =paste0(dir_multi_scaled,"mIDH2_multilayer_filtered/config.txt" ),
+                  "Cluster_mIDH1_R_multilayer_filtered" = paste0(dir_multi_scaled, "Cluster_mIDH1_R_multilayer_filtered/config.txt"),  
+                  "Cluster_mIDH2_R_multilayer_filtered" = paste0(dir_multi_scaled, "Cluster_mIDH2_R_multilayer_filtered/config.txt"), 
+                  "Cluster_mIDH2_NR_multilayer_filtered" = paste0(dir_multi_scaled,"Cluster_mIDH2_NR_multilayer_filtered/config.txt" ))
+```
+
+
+```{r}
+dir_multi_scaled_v2 <- "~/GitHub/Thesis_paper/Results/Multi_layer_pheno_like/Scaled_intra_links_v2/"
+
+multilist_filtered_intra_scaled_v2 <- list("Cluster_NR" = paste0(dir_multi_scaled, "Cluster_NR/config.txt"), 
+                  "Cluster_R" = paste0(dir_multi_scaled, "Cluster_R/config.txt"), 
+                  "NR" = ,
+                  "R" = ,
+                  "mIDH1" = paste0(dir_multi_scaled, "mIDH1/config.txt"), 
+                  "mIDH2" =paste0(dir_multi_scaled,"mIDH2/config.txt" ),
+                  "Cluster_IDH1_R" = paste0(dir_multi_scaled, "Cluster_mIDH1_R/config.txt"),  
+                  "Cluster_IDH2_R" = paste0(dir_multi_scaled, "Cluster_mIDH2_R/config.txt"), 
+                  "Cluster_IDH2_NR" = paste0(dir_multi_scaled,"Cluster_mIDH2_NR/config.txt" ))
+```
+
+
+
+# Building Multilayers
+
+## ARACNe no filter
+
+```{r, eval = F}
+Multilayers <- lapply(multilist, function(multilayer){
+  buildMultilayerNetworkFromMuxvizFiles_corrected(config.file = multilayer, MultisliceType = "categorical", isWeighted = T, isDirected = F, verbose = T, format = "muxviz general")
+})
+```
+
+## Regulonlaml filtered
+
+```{r, eval = F}
+Multilayers_filtered <- mclapply(multilist_filtered, function(multilayer){
+  buildMultilayerNetworkFromMuxvizFiles_corrected(config.file = multilayer, MultisliceType = "categorical", isWeighted = T, isDirected = F, verbose = T, format = "muxviz general")
+}, mc.cores = cores2use)
+```
+
+## Regulonlaml filtered
+
+```{r, eval = F}
+Multilayers_filtered_25k <- mclapply(multilist_filtered_25k, function(multilayer){
+  buildMultilayerNetworkFromMuxvizFiles_corrected(config.file = multilayer, MultisliceType = "categorical", isWeighted = T, isDirected = F, verbose = T, format = "muxviz general")
+}, mc.cores = cores2use)
+```
+
+## Intra scaled 
+
+```{r, eval = F}
+Multilayers_intrascaled <- mclapply(multilist_filtered_intra_scaled, function(multilayer){
+  buildMultilayerNetworkFromMuxvizFiles_corrected(config.file = multilayer, MultisliceType = "categorical", isWeighted = T, isDirected = T, verbose = T, format = "muxviz general")
+}, mc.cores = cores2use)
+```
+
+```{r}
+Multilayers_intrascaled_v2 <- mclapply(multilist_filtered_intra_scaled_v2, function(multilayer){
+  buildMultilayerNetworkFromMuxvizFiles_corrected(config.file = multilayer, MultisliceType = "categorical", isWeighted = T, isDirected = T, verbose = T, format = "muxviz general")
+}, mc.cores = cores2use)
+names(Multilayers_intrascaled_v2) <- names(multilist_filtered_intra_scaled_v2)
+```
+
+# SupraAdjacencyMatrix
+
+## ARACNe no filter
+
+```{r, eval = F}
+M_list <- mclapply(names(Multilayers), function(multi){
+  medges <- read.table(paste0("../../Results/Multi_layer_pheno_like/", multi, "/Multi_layer/Multilayer.edges"), 
+                     sep = " ", header = F, col.names = c("node.from", "layer.from", "node.to", "layer.to", "weight"))
+  BuildSupraAdjacencyMatrixFromExtendedEdgelist(mEdges =medges, Layers = 4, Nodes = Multilayers[[multi]]$Nodes, F)
+}, mc.cores = cores2use)
+names(M_list) <- names(Multilayers)
+```
+
+## Regulonlaml filtered
+
+```{r, eval =F}
+M_list_filtered <- mclapply(names(Multilayers_filtered), function(multi){
+  multi_path <- ifelse(stringr::str_detect(multi, pattern = "_I"), multi, paste0(multi, "_filtered"))
+  medges <- read.table(paste0("../../Results/Multi_layer_pheno_like/", multi_path, "/Multi_layer/Multilayer.edges"), 
+                     sep = " ", header = F, col.names = c("node.from", "layer.from", "node.to", "layer.to", "weight"))
+  BuildSupraAdjacencyMatrixFromExtendedEdgelist(mEdges =medges, Layers = 4, Nodes = Multilayers_filtered[[multi]]$Nodes, F)
+}, mc.cores = cores2use)
+names(M_list_filtered) <- names(Multilayers_filtered)
+```
+
+## Regulonlaml filtered
+
+```{r, eval =F}
+M_list_filtered_25k <- mclapply(names(Multilayers_filtered_25k), function(multi){
+  medges <- read.table(paste0("../../Results/Multi_layer_pheno_like/", multi, "/Multi_layer/Multilayer.edges"), 
+                     sep = " ", header = F, col.names = c("node.from", "layer.from", "node.to", "layer.to", "weight"))
+  BuildSupraAdjacencyMatrixFromExtendedEdgelist(mEdges =medges, Layers = 4, Nodes = Multilayers_filtered_25k[[multi]]$Nodes, F)
+}, mc.cores = cores2use)
+names(M_list_filtered_25k) <- names(Multilayers_filtered_25k)
+```
+
+## Intrascaled
+
+```{r, eval = F}
+M_list_intrascaled <- mclapply(names(Multilayers_intrascaled), function(multi){
+  medges <- read.table(paste0("../../Results/Multi_layer_pheno_like/Scaled_intra_links/", multi, "/Multilayer.edges"), 
+                     sep = " ", header = F, col.names = c("node.from", "layer.from", "node.to", "layer.to", "weight"))
+  BuildSupraAdjacencyMatrixFromExtendedEdgelist(mEdges =medges, Layers = 4, Nodes = Multilayers_intrascaled[[multi]]$Nodes, F)
+}, mc.cores = cores2use)
+names(M_list_intrascaled) <- names(Multilayers_intrascaled)
+```
+
+```{r}
+M_list_intrascaled_v2 <- mclapply(names(Multilayers_intrascaled_v2), function(multi){
+  medges <- read.table(paste0("../../Results/Multi_layer_pheno_like/Scaled_intra_links_v2/", multi, "/Multilayer.edges"), 
+                     sep = " ", header = F, col.names = c("node.from", "layer.from", "node.to", "layer.to", "weight"))
+  BuildSupraAdjacencyMatrixFromExtendedEdgelist(mEdges =medges, Layers = 4, Nodes = Multilayers_intrascaled_v2[[multi]]$Nodes, F)
+}, mc.cores = cores2use)
+names(M_list_intrascaled) <- names(Multilayers_intrascaled_v2)
+```
+
+# Plotting
+
+```{r}
+layer.colors <- brewer.pal(8, "Set2")
+```
+
+
+```{r, eval = F}
+lay.list <- mclapply(Multilayers, function(Multi){
+  layoutMultiplex(Multi$g.list, layout="fr", ggplot.format=F, box=T)
+}, mc.cores = cores2use)
+```
+
+
+```{r, eval = F}
+lay.list_filtered <- lapply(Multilayers_filtered, function(Multi){
+  layoutMultiplex(Multi$g.list, layout="fr", ggplot.format=F, box=T)
+})
+```
+
+```{r, eval = F}
+lay.list_filtered_25k <- lapply(Multilayers_filtered_25k, function(Multi){
+  layoutMultiplex(Multi$g.list, layout="fr", ggplot.format=F, box=T)
+})
+```
+
+## Cluster NR
+
+```{r, eval=F}
+# plot_multiplex3D(Multilayers$Cluster_NR$g.list, layer.layout=lay.list$Cluster_NR, layer.colors=layer.colors,
+                 # layer.shift.x=0.5, layer.space=2,
+                 # layer.labels="auto", layer.labels.cex=1.5,
+                 # node.size.values="auto", node.size.scale=0.8,
+                 # show.aggregate=F)
+
+# rgl::snapshot3d("../../Results/Multi_layer_pheno_like/Cluster_NR/Multi_layer/Plotting.png", fmt="png", width = 1920, height = 1080)
+
+```
+
+## Cluster R
+
+```{r, eval=F}
+# plot_multiplex3D(Multilayers$Cluster_R$g.list, layer.layout=lay.list$Cluster_R, layer.colors=layer.colors,
+#                  layer.shift.x=0.5, layer.space=2,
+#                  layer.labels="auto", layer.labels.cex=1.5,
+#                  node.size.values="auto", node.size.scale=0.8,
+#                  show.aggregate=F)
+# 
+# rgl::snapshot3d("../../Results/Multi_layer_pheno_like/Cluster_R/Multi_layer/Plotting.png", fmt="png", width = 1920, height = 1080)
+
+```
+
+
+## mIDH1
+
+```{r, eval=F}
+# plot_multiplex3D(Multilayers$mIDH1$g.list, layer.layout=lay.list$mIDH1, layer.colors=layer.colors,
+#                  layer.shift.x=0.5, layer.space=2,
+#                  layer.labels="auto", layer.labels.cex=1.5,
+#                  node.size.values="auto", node.size.scale=0.8,
+#                  show.aggregate=F)
+# 
+# rgl::snapshot3d("../../Results/Multi_layer_pheno_like/mIDH1/Multi_layer/Plotting.png", fmt="png", width = 1920, height = 1080)
+
+```
+
+## mIDH2
+
+```{r, eval=F}
+# plot_multiplex3D(Multilayers$mIDH2$g.list, layer.layout=lay.list$mIDH2, layer.colors=layer.colors,
+#                  layer.shift.x=0.5, layer.space=2,
+#                  layer.labels="auto", layer.labels.cex=1.5,
+#                  node.size.values="auto", node.size.scale=0.8,
+#                  show.aggregate=F)
+# 
+# rgl::snapshot3d("../../Results/Multi_layer_pheno_like/mIDH2/Multi_layer/Plotting.png", fmt="png", width = 1920, height = 1080)
+
+```
+
+## Filtered
+
+### Cluster NR
+
+```{r, eval=F}
+# plot_multiplex3D(Multilayers_filtered$Cluster_NR$g.list, layer.layout=lay.list_filtered$Cluster_NR, layer.colors=layer.colors,
+#                  layer.shift.x=0.5, layer.space=2,
+#                  layer.labels="auto", layer.labels.cex=1.5,
+#                  node.size.values="auto", node.size.scale=0.8,
+#                  show.aggregate=F)
+# 
+# rgl::snapshot3d("../../Results/Multi_layer_pheno_like/Cluster_NR_filtered/Plotting.png", fmt="png", width = 1920, height = 1080)
+
+```
+
+### Cluster R
+
+```{r, eval=F}
+# plot_multiplex3D(Multilayers_filtered$Cluster_R$g.list, layer.layout=lay.list_filtered$Cluster_R, layer.colors=layer.colors,
+#                  layer.shift.x=0.5, layer.space=2,
+#                  layer.labels="auto", layer.labels.cex=1.5,
+#                  node.size.values="auto", node.size.scale=0.8,
+#                  show.aggregate=F)
+# 
+# rgl::snapshot3d("../../Results/Multi_layer_pheno_like/Cluster_R/Multi_layer/Plotting.png", fmt="png", width = 1920, height = 1080)
+
+```
+
+
+### mIDH1
+
+```{r, eval=F}
+# plot_multiplex3D(Multilayers$mIDH1$g.list, layer.layout=lay.list$mIDH1, layer.colors=layer.colors,
+#                  layer.shift.x=0.5, layer.space=2,
+#                  layer.labels="auto", layer.labels.cex=1.5,
+#                  node.size.values="auto", node.size.scale=0.8,
+#                  show.aggregate=F)
+# 
+# rgl::snapshot3d("../../Results/Multi_layer_pheno_like/mIDH1/Multi_layer/Plotting.png", fmt="png", width = 1920, height = 1080)
+
+```
+
+### mIDH2
+
+```{r, eval=F}
+# plot_multiplex3D(Multilayers$mIDH2$g.list, layer.layout=lay.list$mIDH2, layer.colors=layer.colors,
+#                  layer.shift.x=0.5, layer.space=2,
+#                  layer.labels="auto", layer.labels.cex=1.5,
+#                  node.size.values="auto", node.size.scale=0.8,
+#                  show.aggregate=F)
+# 
+# rgl::snapshot3d("../../Results/Multi_layer_pheno_like/mIDH2/Multi_layer/Plotting.png", fmt="png", width = 1920, height = 1080)
+
+```
+
+```{r}
+system("say Building done")
+```
+
+
+# Calcul Communities
+
+## Function corrected
+
+```{r}
+GetMultilayerCommunities_Infomap_modified <- function(SupraAdjacencyMatrix,
+           Layers,
+           Nodes,
+           bin.path = NA,
+           isDirected,
+           seed = 12345,
+           includeSelfLinks = F,
+           numTrials = 25,
+           twoLevel = T,
+           preclusterMultiplex = F,
+           addMissingPhysicalNodes = T,
+           hardPartitions = F,
+           verbose = T,
+           addAggregateAnalysis = F,
+           outputPrefix = "multimap",
+           name) {
+    #
+    options(scipen=10)
+    if (is.na(bin.path) || !file.exists(bin.path)) {
+      stop(
+        "Error! You must provide a valid path to the INFOMAP bin.
+        Likely you will find it in the bin/ folder of muxviz, or you must compile it from
+        source in src/ folder. If this is the case, just unzip the infomap archive and
+        run make that will generate executable Infomap.
+        Feel free to move the file where you prefer and provide the full path as an
+        argument to this function."
+      )
+    }
+    tmpname <- outputPrefix
+    message(paste0("outputPrefix = tmpname = ", tmpname))
+    inputFile <- paste0(tmpname, "/", name, "_infomap.edges")
+    layout_data <- read.table(paste0(tmpname, "/layout.txt"), sep = " ", header = T)
+    message(paste0("inputFile = ", inputFile))
+    if (file.exists(inputFile))
+      file.remove(inputFile)
+    fileConn <- file(inputFile, open = "at")
+    cat('1/2 Setting up the algorithms...\n')
+
+    # obtain an extended edgelist representation in format:
+    # node.from layer.from node.to layer.to weight
+    multilayerEdges <- BuildExtendedEdgelistFromSupraAdjacencyMatrix(
+                         SupraAdjacencyMatrix,
+                         Layers,
+                         Nodes,
+                         FALSE
+                       )
+
+    # write in the Infomap multilayer format for general multilayer networks
+    # this part is different from the one in GetMultiplexCommunities_Infomap
+
+    # writeLines(c(paste0("*Vertices ", Nodes), "# node_id name"), fileConn)
+    # 
+    # utils::write.table(
+    #   layout_data,
+    #   file = fileConn,
+    #   row.names = F,
+    #   col.names = F,
+    #   quote = F
+    # )
+    
+    writeLines(c("*Multilayer", "#layer_id node_id layer_id node_id weight", "# intra"), fileConn)
+    multilayer_edges <- read.table(paste0(tmpname, "/Multilayer.edges"), sep = " ", header = T)
+    colnames(multilayer_edges) <- c("node.from", "layer.from", "node.to", "layer.to", "weight")
+    mergedEdgelist <- data.frame()
+    
+    submulti <- dplyr::filter(multilayer_edges, layer.from == layer.to)
+    
+    mergedEdgelist <-
+      rbind(
+        mergedEdgelist,
+        submulti
+      )
+    if (!isDirected) {
+      #this is because multimap requires both directions specified, even for undirected networks
+      mergedEdgelist <-
+        rbind(
+          mergedEdgelist,
+          data.frame(
+            layer.from = submulti$layer.to,
+            node.from = submulti$node.to,
+            layer.to = submulti$layer.from,
+            node.to = submulti$node.from,
+            weight = submulti$weight
+          )
+        )
+    }
+    utils::write.table(
+      mergedEdgelist,
+      file = fileConn,
+      row.names = F,
+      col.names = F,
+      quote = F
+    )
+
+    writeLines(c("# inter"), fileConn)
+    mergedEdgelist <- data.frame()
+    
+    submulti <- dplyr::filter(multilayer_edges, node.from == node.to)
+    
+    Inter <- data.frame(
+          layer.from = submulti$layer.from,
+          node.from = submulti$node.from,
+          layer.to = submulti$layer.to,
+          node.to = submulti$node.to,
+          weight = submulti$weight
+        ) %>%
+      .[.$layer.from != .$layer.to,]
+    
+    mergedEdgelist <-
+      rbind(
+        mergedEdgelist,
+        Inter
+      )
+    if (!isDirected) {
+      Inter <- data.frame(
+          layer.from = submulti$layer.to,
+          node.from = submulti$node.to,
+          layer.to = submulti$layer.from,
+          node.to = submulti$node.from,
+          weight = submulti$weight
+          ) %>%
+      .[.$layer.from != .$layer.to,]
+      #this is because multimap requires both directions specified, even for undirected networks
+      mergedEdgelist <-
+        rbind(
+          mergedEdgelist,
+          Inter
+        )
+    }
+    
+    submulti <- dplyr::filter(multilayer_edges, layer.from != layer.to)
+
+    
+    Inter <- data.frame(
+          layer.from = submulti$layer.from,
+          node.from = submulti$node.from,
+          layer.to = submulti$layer.to,
+          node.to = submulti$node.to,
+          weight = submulti$weight
+        ) %>%
+      .[.$node.from != .$node.to,]
+
+    mergedEdgelist <-
+      rbind(
+        mergedEdgelist,
+        Inter
+      )
+    
+    if (!isDirected) {
+      Inter <- data.frame(
+          layer.from = submulti$layer.to,
+          node.from = submulti$node.to,
+          layer.to = submulti$layer.from,
+          node.to = submulti$node.from,
+          weight = submulti$weight
+          ) %>%
+      .[.$node.from != .$node.to,]
+      #this is because multimap requires both directions specified, even for undirected networks
+      mergedEdgelist <-
+        rbind(
+          mergedEdgelist,
+          Inter
+        )
+    }
+      
+    utils::write.table(
+      mergedEdgelist,
+      file = fileConn,
+      row.names = F,
+      col.names = F,
+      quote = F
+    )
+
+    close(fileConn)
+
+    cat('2/2 Finding communities...\n')
+    cat(' + Multiplex network...\n')
+
+    exePath <- bin.path
+    
+    outname <- name
+    message(paste0("outname = ", outname))
+    outdir <- outputPrefix
+    message(paste0("outdir = outputPrefix = ", outputPrefix))
+
+    #default flags
+    exeFlags <- paste(inputFile, outdir)
+    message(exeFlags)
+    exeFlags <- paste(exeFlags, "--input-format multilayer")
+    message(exeFlags)
+
+    exeFlags <- paste(exeFlags, "--clu --map --tree --expanded")
+    message(exeFlags)
+
+    exeFlags <- paste(exeFlags, "--seed", seed)
+    message(exeFlags)
+
+    exeFlags <- paste(exeFlags, "--num-trials", numTrials)
+    message(exeFlags)
+
+
+    if (isDirected) {
+      exeFlags <- paste(exeFlags, "-d")
+    } else {
+      exeFlags <- paste(exeFlags, "-u")
+    }
+
+    if (includeSelfLinks) {
+      exeFlags <- paste(exeFlags, "--include-self-links")
+    }
+
+    if (twoLevel) {
+      exeFlags <- paste(exeFlags, "--two-level")
+    }
+
+    if (preclusterMultiplex) {
+      exeFlags <- paste(exeFlags, "--pre-cluster-multiplex")
+    }
+
+    if (addMissingPhysicalNodes) {
+      exeFlags <- paste(exeFlags, "--multilayer-add-missing-nodes")
+    }
+
+    if (hardPartitions) {
+      exeFlags <- paste(exeFlags, "--hard-partitions")
+    }
+    if (verbose) {
+      exeFlags <- paste(exeFlags, "-vvv")
+    }
+
+    exeFlags <- paste(exeFlags, "--out-name", outname)
+    message("-----------------")
+    message(paste("Command final = ", exePath, exeFlags))
+    message("-----------------")
+
+    #call infomap
+    system(paste(exePath, exeFlags), intern = T)
+
+
+    #read output. Here I could redirect the output inside the R environment.. but
+    #for compatibility with the rest of the code I prefer to read a file
+    communityList <- list()
+
+    #import the results (clu and modularity value)
+    resultFile <- paste0(outputPrefix, "/", name, "_expanded.clu")
+    message(paste0("resultFile = ", resultFile))
+    wmemb_membership <- utils::read.table(resultFile, header = F, sep = " ")
+
+    communityList$membership.multi <- wmemb_membership
+
+    #if(!hardPartitions){
+    #same columns regardless of this flag
+    colnames(communityList$membership.multi) <-
+      c("layer", "node", "module", "flow")
+    #}
+    #reorder, for easier inspection
+    communityList$membership.multi <-
+      communityList$membership.multi[order(communityList$membership.multi$layer,
+                                           communityList$membership.multi$node), ]
+
+
+    resultFile <- paste0(outputPrefix, "/", name, "_expanded.map")
+    message(paste0("resultFile = ", resultFile))
+
+    wtcod <-
+      as.numeric(strsplit(readLines(resultFile, n = 5), " ")[[5]][3])
+
+    communityList$codelength.multi <- wtcod
+
+    cat(paste("    Code length Multiplex: ", wtcod, "\n"))
+    numComms <- max(wmemb_membership$V3)
+    cat(paste("    Communities Multiplex: ", numComms, "\n"))
+
+    communityList$modules.multi <- numComms
+
+    communityList$msize.multi <-
+      table(communityList$membership.multi$module)
+
+    #depending on flags, Infomap can transform into layer IDs the id of isolated nodes.
+    #let's remove those ones
+    communityList$membership.multi <-
+      communityList$membership.multi[which(communityList$membership.multi$layer <=
+                                             Layers), ]
+
+    #TODO for the future: calculate modularity of the partition. No direct multiplex way from igraph
+    #one possibility is to pass the expanded representation of the network
+    #but in case of edgecolored the supradjacency matrix would empty off-diagonal
+    #resulting in huge modularity due to layers, not modules..
+    #igraph::modularity(x, membership, weights = NULL, ...)
+
+    if (addAggregateAnalysis) {
+      cat(' + Aggregate network...\n')
+
+      #calculate same things for the aggregate using R-igraph infomap
+      g.agg <-
+        GetAggregateNetworkFromSupraAdjacencyMatrix(SupraAdjacencyMatrix, Layers, Nodes)
+
+      infocom <-
+        igraph::cluster_infomap(g.agg, modularity = TRUE)
+      wmemb_membership_aggregate <-
+        as.numeric(igraph::membership(infocom))
+      wtcod_aggregate <- igraph::code_len(infocom)
+
+      communityList$membership.aggr <-
+        data.frame(node = 1:length(wmemb_membership_aggregate),
+                   module = wmemb_membership_aggregate)
+      communityList$codelength.aggr <- wtcod_aggregate
+
+      cat(paste("    Code length Aggregate: ", wtcod_aggregate, "\n"))
+      numCommsAggr <- max(wmemb_membership_aggregate)
+      cat(paste("    Communities Aggregate: ", numCommsAggr, "\n"))
+
+      communityList$modules.aggr <- numCommsAggr
+      communityList$msize.aggr <-
+        table(communityList$membership.aggr$module)
+    }
+
+    cat('Calculation Completed!\n')
+
+    return(communityList)
+}
+```
+
+
+```{r}
+GetMultilayerCommunities_Infomap_modified_2 <- function(SupraAdjacencyMatrix,
+           Layers,
+           Nodes,
+           bin.path = NA,
+           isDirected,
+           seed = 12345,
+           includeSelfLinks = F,
+           numTrials = 25,
+           twoLevel = T,
+           preclusterMultiplex = F,
+           addMissingPhysicalNodes = T,
+           hardPartitions = F,
+           verbose = T,
+           addAggregateAnalysis = F,
+           outputPrefix = "multimap",
+           name) {
+    #
+    options(scipen=10)
+    if (is.na(bin.path) || !file.exists(bin.path)) {
+      stop(
+        "Error! You must provide a valid path to the INFOMAP bin.
+        Likely you will find it in the bin/ folder of muxviz, or you must compile it from
+        source in src/ folder. If this is the case, just unzip the infomap archive and
+        run make that will generate executable Infomap.
+        Feel free to move the file where you prefer and provide the full path as an
+        argument to this function."
+      )
+    }
+    tmpname <- outputPrefix
+    message(paste0("outputPrefix = tmpname = ", tmpname))
+    inputFile <- paste0(tmpname, "/", name, "_infomap2.edges")
+    layout_data <- read.table(paste0(tmpname, "/layout.txt"), sep = " ", header = T)
+    message(paste0("inputFile = ", inputFile))
+    if (file.exists(inputFile))
+      file.remove(inputFile)
+    fileConn <- file(inputFile, open = "at")
+  cat("1/2 Setting up the algorithms...\n")
+  multilayerEdges <- BuildExtendedEdgelistFromSupraAdjacencyMatrix(SupraAdjacencyMatrix, 
+    Layers, Nodes, FALSE)
+  writeLines(c("*Intra", "#layer node node weight"), fileConn)
+  mergedEdgelist <- data.frame()
+  submulti <- multilayerEdges[multilayerEdges$layer.from == 
+    multilayerEdges$layer.to, ]
+  mergedEdgelist <- rbind(mergedEdgelist, data.frame(layer = submulti$layer.from, 
+    from = submulti$node.from, to = submulti$node.to, weight = submulti$weight))
+  if (!isDirected) {
+    mergedEdgelist <- rbind(mergedEdgelist, data.frame(layer = submulti$layer.from, 
+      from = submulti$node.to, to = submulti$node.from, 
+      weight = submulti$weight))
+  }
+  utils::write.table(mergedEdgelist, file = fileConn, row.names = F, 
+    col.names = F, quote = F)
+  writeLines(c("*Inter", "#layer node layer weight"), fileConn)
+  mergedEdgelist <- data.frame()
+  submulti <- multilayerEdges[multilayerEdges$node.from == 
+    multilayerEdges$node.to, ]
+  mergedEdgelist <- rbind(mergedEdgelist, data.frame(from = submulti$layer.from, 
+    node = submulti$node.from, to = submulti$layer.to, weight = submulti$weight))
+  if (!isDirected) {
+    mergedEdgelist <- rbind(mergedEdgelist, data.frame(from = submulti$layer.to, 
+      node = submulti$node.from, to = submulti$layer.from, 
+      weight = submulti$weight))
+  }
+  utils::write.table(mergedEdgelist, file = fileConn, row.names = F, 
+    col.names = F, quote = F)
+  close(fileConn)
+  cat("2/2 Finding communities...\n")
+  cat(" + Multiplex network...\n")
+
+    exePath <- bin.path
+    
+    outname <- name
+    message(paste0("outname = ", outname))
+    outdir <- outputPrefix
+    message(paste0("outdir = outputPrefix = ", outputPrefix))
+
+    #default flags
+    exeFlags <- paste(inputFile, outdir)
+    message(exeFlags)
+    exeFlags <- paste(exeFlags, "--input-format multilayer")
+    message(exeFlags)
+
+    exeFlags <- paste(exeFlags, "--clu --map --tree --expanded")
+    message(exeFlags)
+
+    exeFlags <- paste(exeFlags, "--seed", seed)
+    message(exeFlags)
+
+    exeFlags <- paste(exeFlags, "--num-trials", numTrials)
+    message(exeFlags)
+
+
+    if (isDirected) {
+      exeFlags <- paste(exeFlags, "-d")
+    } else {
+      exeFlags <- paste(exeFlags, "-u")
+    }
+
+    if (includeSelfLinks) {
+      exeFlags <- paste(exeFlags, "--include-self-links")
+    }
+
+    if (twoLevel) {
+      exeFlags <- paste(exeFlags, "--two-level")
+    }
+
+    if (preclusterMultiplex) {
+      exeFlags <- paste(exeFlags, "--pre-cluster-multiplex")
+    }
+
+    if (addMissingPhysicalNodes) {
+      exeFlags <- paste(exeFlags, "--multilayer-add-missing-nodes")
+    }
+
+    if (hardPartitions) {
+      exeFlags <- paste(exeFlags, "--hard-partitions")
+    }
+    if (verbose) {
+      exeFlags <- paste(exeFlags, "-vvv")
+    }
+
+    exeFlags <- paste(exeFlags, "--out-name", outname)
+    message("-----------------")
+    message(paste("Command final = ", exePath, exeFlags))
+    message("-----------------")
+
+    #call infomap
+    system(paste(exePath, exeFlags), intern = T)
+
+
+    #read output. Here I could redirect the output inside the R environment.. but
+    #for compatibility with the rest of the code I prefer to read a file
+    communityList <- list()
+
+    #import the results (clu and modularity value)
+    resultFile <- paste0(outputPrefix, "/", name, "_expanded.clu")
+    message(paste0("resultFile = ", resultFile))
+    wmemb_membership <- utils::read.table(resultFile, header = F, sep = " ")
+
+    communityList$membership.multi <- wmemb_membership
+
+    #if(!hardPartitions){
+    #same columns regardless of this flag
+    colnames(communityList$membership.multi) <-
+      c("layer", "node", "module", "flow")
+    #}
+    #reorder, for easier inspection
+    communityList$membership.multi <-
+      communityList$membership.multi[order(communityList$membership.multi$layer,
+                                           communityList$membership.multi$node), ]
+
+
+    resultFile <- paste0(outputPrefix, "/", name, "_expanded.map")
+    message(paste0("resultFile = ", resultFile))
+
+    wtcod <-
+      as.numeric(strsplit(readLines(resultFile, n = 5), " ")[[5]][3])
+
+    communityList$codelength.multi <- wtcod
+
+    cat(paste("    Code length Multiplex: ", wtcod, "\n"))
+    numComms <- max(wmemb_membership$V3)
+    cat(paste("    Communities Multiplex: ", numComms, "\n"))
+
+    communityList$modules.multi <- numComms
+
+    communityList$msize.multi <-
+      table(communityList$membership.multi$module)
+
+    #depending on flags, Infomap can transform into layer IDs the id of isolated nodes.
+    #let's remove those ones
+    communityList$membership.multi <-
+      communityList$membership.multi[which(communityList$membership.multi$layer <=
+                                             Layers), ]
+
+    #TODO for the future: calculate modularity of the partition. No direct multiplex way from igraph
+    #one possibility is to pass the expanded representation of the network
+    #but in case of edgecolored the supradjacency matrix would empty off-diagonal
+    #resulting in huge modularity due to layers, not modules..
+    #igraph::modularity(x, membership, weights = NULL, ...)
+
+    if (addAggregateAnalysis) {
+      cat(' + Aggregate network...\n')
+
+      #calculate same things for the aggregate using R-igraph infomap
+      g.agg <-
+        GetAggregateNetworkFromSupraAdjacencyMatrix(SupraAdjacencyMatrix, Layers, Nodes)
+
+      infocom <-
+        igraph::cluster_infomap(g.agg, modularity = TRUE)
+      wmemb_membership_aggregate <-
+        as.numeric(igraph::membership(infocom))
+      wtcod_aggregate <- igraph::code_len(infocom)
+
+      communityList$membership.aggr <-
+        data.frame(node = 1:length(wmemb_membership_aggregate),
+                   module = wmemb_membership_aggregate)
+      communityList$codelength.aggr <- wtcod_aggregate
+
+      cat(paste("    Code length Aggregate: ", wtcod_aggregate, "\n"))
+      numCommsAggr <- max(wmemb_membership_aggregate)
+      cat(paste("    Communities Aggregate: ", numCommsAggr, "\n"))
+
+      communityList$modules.aggr <- numCommsAggr
+      communityList$msize.aggr <-
+        table(communityList$membership.aggr$module)
+    }
+
+    cat('Calculation Completed!\n')
+
+    return(communityList)
+}
+
+pathInfomap <- "~/Test_Git/mux/muxViz/src-exe/infomap-0.x/Infomap"
+```
+
+## Multi analysis
+
+### ARACNe no filter
+
+```{r, eval=F}
+CommunitiesResults <- mclapply(names(Multilayers), function(M){
+  nodes <- Multilayers[[M]]$Nodes
+  layers <- Multilayers[[M]]$Layers
+  
+  commResult2_Agregate_analysis <-
+  GetMultilayerCommunities_Infomap_modified(
+    SupraAdjacencyMatrix = M_list[[M]],
+    Layers = layers,
+    Nodes = nodes,
+    bin.path = pathInfomap,
+    isDirected = F,
+    seed = 12345,
+    includeSelfLinks = T,
+    numTrials = 100,
+    twoLevel = T,
+    preclusterMultiplex = F,
+    addMissingPhysicalNodes = F,
+    hardPartitions = F,
+    verbose = T,
+    addAggregateAnalysis = T,
+    outputPrefix = paste0("~/GitHub/Thesis_paper/Results/Multi_layer_pheno_like/", M),
+    name = M
+  )
+}, mc.cores = cores2use)
+
+names(CommunitiesResults) <- names(Multilayers)
+```
+
+### Regulonlaml filtered
+
+```{r, eval = F}
+CommunitiesResults_filtered <- mclapply(names(Multilayers_filtered), function(M){
+  nodes <- Multilayers_filtered[[M]]$Nodes
+  layers <- Multilayers_filtered[[M]]$Layers
+  output_prefix <- "~/GitHub/Thesis_paper/Results/Multi_layer_pheno_like/"
+  test <- stringr::str_detect(M, pattern = "_I")
+  output_prefix <- ifelse(test, paste0(output_prefix, M), paste0(output_prefix, M, "_filtered"))
+  name_outfile <- ifelse(test, M, paste0(M, "_filtered"))
+  commResult2_Agregate_analysis <-
+  GetMultilayerCommunities_Infomap_modified(
+    SupraAdjacencyMatrix = M_list_filtered[[M]],
+    Layers = layers,
+    Nodes = nodes,
+    bin.path = pathInfomap,
+    isDirected = F,
+    seed = 12345,
+    includeSelfLinks = T,
+    numTrials = 100,
+    twoLevel = T,
+    preclusterMultiplex = F,
+    addMissingPhysicalNodes = F,
+    hardPartitions = F,
+    verbose = T,
+    addAggregateAnalysis = F,
+    outputPrefix = output_prefix,
+    name = name_outfile
+  )
+}, mc.cores = cores2use)
+
+names(CommunitiesResults_filtered) <- names(Multilayers_filtered)
+save.image("/media/alexis/DATA/Session/R_session/Thesis_paper_Rsessions/Multi_layer_phenolike/Analysing_Multilayer_combined_pheno3.RData")
+```
+
+```{r, eval = F}
+CommunitiesResults_filtered_2 <- mclapply(names(Multilayers_filtered), function(M){
+  nodes <- Multilayers_filtered[[M]]$Nodes
+  layers <- Multilayers_filtered[[M]]$Layers
+  output_prefix <- "~/GitHub/Thesis_paper/Results/Multi_layer_pheno_like/"
+  test <- stringr::str_detect(M, pattern = "_I")
+  output_prefix <- ifelse(test, paste0(output_prefix, M), paste0(output_prefix, M, "_filtered"))
+  name_outfile <- ifelse(test, M, paste0(M, "_filtered"))
+  commResult2_Agregate_analysis <-
+  GetMultilayerCommunities_Infomap_modified_2(
+    SupraAdjacencyMatrix = M_list_filtered[[M]],
+    Layers = layers,
+    Nodes = nodes,
+    bin.path = pathInfomap,
+    isDirected = F,
+    seed = 12345,
+    includeSelfLinks = T,
+    numTrials = 100,
+    twoLevel = T,
+    preclusterMultiplex = F,
+    addMissingPhysicalNodes = F,
+    hardPartitions = F,
+    verbose = T,
+    addAggregateAnalysis = F,
+    outputPrefix = output_prefix,
+    name = name_outfile
+  )
+}, mc.cores = cores2use)
+
+names(CommunitiesResults_filtered_2) <- names(Multilayers_filtered)
+save.image("/media/alexis/DATA/Session/R_session/Thesis_paper_Rsessions/Multi_layer_phenolike/Analysing_Multilayer_combined_pheno3.RData")
+```
+
+# 25k analysis
+
+```{r, eval = F}
+CommunitiesResults_filtered_2_25k <- mclapply(names(Multilayers_filtered_25k), function(M){
+  nodes <- Multilayers_filtered_25k[[M]]$Nodes
+  layers <- Multilayers_filtered_25k[[M]]$Layers
+  output_prefix <- "~/GitHub/Thesis_paper/Results/Multi_layer_pheno_like/"
+  test <- stringr::str_detect(M, pattern = "_I")
+  output_prefix <- paste0(output_prefix, M)
+  name_outfile <- M
+  commResult2_Agregate_analysis <-
+  GetMultilayerCommunities_Infomap_modified_2(
+    SupraAdjacencyMatrix = M_list_filtered_25k[[M]],
+    Layers = layers,
+    Nodes = nodes,
+    bin.path = pathInfomap,
+    isDirected = F,
+    seed = 12345,
+    includeSelfLinks = T,
+    numTrials = 100,
+    twoLevel = T,
+    preclusterMultiplex = F,
+    addMissingPhysicalNodes = F,
+    hardPartitions = F,
+    verbose = T,
+    addAggregateAnalysis = F,
+    outputPrefix = output_prefix,
+    name = name_outfile
+  )
+}, mc.cores = cores2use)
+
+names(CommunitiesResults_filtered_2_25k) <- names(Multilayers_filtered_25k)
+save.image("/media/alexis/DATA/Session/R_session/Thesis_paper_Rsessions/Multi_layer_phenolike/Analysing_Multilayer_combined_pheno_25k.RData")
+```
+
+# Intrascaled
+
+```{r, eval = F}
+CommunitiesResults_Intrascaled <- mclapply(names(Multilayers_intrascaled), function(M){
+  nodes <- Multilayers_intrascaled[[M]]$Nodes
+  layers <- Multilayers_intrascaled[[M]]$Layers
+  output_prefix <- "~/GitHub/Thesis_paper/Results/Multi_layer_pheno_like/Scaled_intra_links/"
+  test <- stringr::str_detect(M, pattern = "_I")
+  output_prefix <- paste0(output_prefix, M)
+  name_outfile <- M
+  commResult2_Agregate_analysis <-
+  GetMultilayerCommunities_Infomap_modified(
+    SupraAdjacencyMatrix = M_list_intrascaled[[M]],
+    Layers = layers,
+    Nodes = nodes,
+    bin.path = pathInfomap,
+    isDirected = T,
+    seed = 12345,
+    includeSelfLinks = T,
+    numTrials = 100,
+    twoLevel = T,
+    preclusterMultiplex = F,
+    addMissingPhysicalNodes = F,
+    hardPartitions = F,
+    verbose = T,
+    addAggregateAnalysis = F,
+    outputPrefix = output_prefix,
+    name = name_outfile
+  )
+}, mc.cores = cores2use)
+
+names(CommunitiesResults_Intrascaled) <- names(Multilayers_intrascaled)
+save.image("/media/alexis/DATA/Session/R_session/Thesis_paper_Rsessions/Multi_layer_phenolike/Analysing_Multilayer_Intra_scaled.RData")
+```
+
+```{r}
+CommunitiesResults_Intrascaled_v2 <- mclapply(names(Multilayers_intrascaled_v2), function(M){
+  nodes <- Multilayers_intrascaled_v2[[M]]$Nodes
+  layers <- Multilayers_intrascaled_v2[[M]]$Layers
+  output_prefix <- "~/GitHub/Thesis_paper/Results/Multi_layer_pheno_like/Scaled_intra_links_v2/"
+  test <- stringr::str_detect(M, pattern = "_I")
+  output_prefix <- paste0(output_prefix, M)
+  name_outfile <- M
+  commResult2_Agregate_analysis <-
+  GetMultilayerCommunities_Infomap_modified(
+    SupraAdjacencyMatrix = M_list_intrascaled_v2[[M]],
+    Layers = layers,
+    Nodes = nodes,
+    bin.path = pathInfomap,
+    isDirected = T,
+    seed = 12345,
+    includeSelfLinks = T,
+    numTrials = 100,
+    twoLevel = T,
+    preclusterMultiplex = F,
+    addMissingPhysicalNodes = F,
+    hardPartitions = F,
+    verbose = T,
+    addAggregateAnalysis = F,
+    outputPrefix = output_prefix,
+    name = name_outfile
+  )
+}, mc.cores = cores2use)
+
+names(CommunitiesResults_Intrascaled_v2) <- names(Multilayers_intrascaled_v2)
+save.image("/media/alexis/DATA/Session/R_session/Thesis_paper_Rsessions/Multi_layer_phenolike/Analysing_Multilayer_Intra_scaled_v2.RData")
+```
+
+
+# Compare multilayer flow
+
+## Convert node id 2 node label
+
+```{r}
+Conversion_commuresult_node_id_node_label <- function(CommRes, Class){
+  # path <- ifelse(stringr::str_detect(Class, pattern = "_I"), Class, paste0(Class, "_filtered"))
+  convertiser_path <- paste0("../../Results/Multi_layer_pheno_like/Scaled_intra_links/", Class, "/layout.txt")
+  converter <- read.table(convertiser_path, sep = " ", header = T)
+  merge(CommRes[[Class]]$membership.multi, converter, by.x = "node", by.y = "nodeID", all.x = T)
+}
+
+```
+
+## Conversions
+
+### ARACNe
+
+```{r, eval=F}
+Community_flow_result <- mclapply(names(CommunitiesResults), function(Class){
+  res <- Conversion_commuresult_node_id_node_label(CommunitiesResults[[Class]], Class)
+  min_flow <- log10(res$flow) %>% min
+  max_flow <- log10(res$flow) %>% max
+  res$flow_scaled <- sapply(res$flow, function(Flow){
+    log_flow <- log10(Flow)
+    log_flow <- log_flow - min_flow
+    f <- log_flow / (max_flow - min_flow)
+    if(f == -Inf){
+      0
+    }else{
+      f
+    }
+  })
+  res
+}, mc.cores = cores2use)
+names(Community_flow_result) <- names(Multilayers)
+```
+
+```{r, eval=F}
+plot(density(Community_flow_result$Cluster_NR$flow_scaled))
+```
+
+### Saving data
+
+```{r, eval=F}
+Community_flow_result$Cluster_NR %>%
+  write.table("../../Results/Multi_layer_pheno_like/Cluster_NR/Multi_layer/Community_flow_result.tsv", sep = "\t", row.names = F, quote = F)
+```
+
+
+### Regulonlaml filtered 
+
+```{r, eval = F}
+Community_flow_result_filtered <- mclapply(names(CommunitiesResults_filtered), function(Class){
+  res <- Conversion_commuresult_node_id_node_label(CommunitiesResults_filtered, Class)
+  min_flow <- min(res$flow[res$flow != 0]) %>% log10
+  max_flow <- max(res$flow) %>% log10
+  res$flow_scaled <- sapply(res$flow, function(Flow){
+    log_flow <- log10(Flow)
+    log_flow <- log_flow - min_flow
+    f <- log_flow / (max_flow - min_flow)
+    if(f == -Inf){
+      0
+    }else{
+      f
+    }
+  })
+  res
+}, mc.cores = cores2use)
+names(Community_flow_result_filtered) <- names(Multilayers_filtered)
+```
+
+```{r, eval = F}
+Community_flow_result_filtered_2 <- lapply(names(CommunitiesResults_filtered_2), function(Class){
+  res <- Conversion_commuresult_node_id_node_label(CommunitiesResults_filtered_2, Class)
+  min_flow <- min(res$flow[res$flow != 0]) %>% log10
+  max_flow <- max(res$flow) %>% log10
+  res$flow_scaled <- sapply(res$flow, function(Flow){
+    log_flow <- log10(Flow)
+    log_flow <- log_flow - min_flow
+    f <- log_flow / (max_flow - min_flow)
+    if(f == -Inf){
+      0
+    }else{
+      f
+    }
+  })
+  res
+})
+names(Community_flow_result_filtered_2) <- names(Multilayers_filtered)
+```
+
+
+```{r, eval = F}
+plot(density(Community_flow_result_filtered$Cluster_NR$flow_scaled))
+plot(density(Community_flow_result_filtered$Cluster_R$flow_scaled))
+plot(density(Community_flow_result_filtered$mIDH1$flow_scaled))
+plot(density(Community_flow_result_filtered$mIDH2$flow_scaled))
+plot(density(Community_flow_result_filtered$Cluster_IDH1_R$flow_scaled))
+plot(density(Community_flow_result_filtered$Cluster_IDH2_R$flow_scaled))
+plot(density(Community_flow_result_filtered$Cluster_IDH2_NR$flow_scaled))
+```
+
+### 25k Regulonlaml filtered 25k
+
+```{r, eval = F}
+Community_flow_result_filtered_25k <- mclapply(names(CommunitiesResults_filtered_2_25k), function(Class){
+  res <- Conversion_commuresult_node_id_node_label(CommunitiesResults_filtered_2_25k, Class)
+  min_flow <- min(res$flow[res$flow != 0]) %>% log10
+  max_flow <- max(res$flow) %>% log10
+  res$flow_scaled <- sapply(res$flow, function(Flow){
+    log_flow <- log10(Flow)
+    log_flow <- log_flow - min_flow
+    f <- log_flow / (max_flow - min_flow)
+    if(f == -Inf){
+      0
+    }else{
+      f
+    }
+  })
+  res
+}, mc.cores = cores2use)
+names(Community_flow_result_filtered_25k) <- names(Multilayers_filtered_25k)
+```
+
+# Intrascaled
+
+
+```{r}
+Community_flow_Intrascaled_result <- lapply(names(CommunitiesResults_Intrascaled), function(Class){
+  res <- Conversion_commuresult_node_id_node_label(CommunitiesResults_Intrascaled, Class)
+  min_flow <- min(res$flow[res$flow != 0]) %>% log10
+  max_flow <- max(res$flow) %>% log10
+  res$flow_scaled <- sapply(res$flow, function(Flow){
+    log_flow <- log10(Flow)
+    log_flow <- log_flow - min_flow
+    f <- log_flow / (max_flow - min_flow)
+    if(f == -Inf){
+      0
+    }else{
+      f
+    }
+  })
+  res
+})
+names(Community_flow_Intrascaled_result) <- names(Multilayers_intrascaled)
+```
+
+## Plots_flow
+
+```{r}
+Find_best_flow <- function(NodeLabels, Commdata){
+  mclapply(NodeLabels, function(labels){
+    tmp <- dplyr::filter(Commdata, nodeLabel == labels)
+    if(nrow(tmp) == 0){
+      return(data.table(nodeLabel = labels, flow_scaled = 0))
+    }
+    max_flow <- max(tmp$flow_scaled)
+    data.table(nodeLabel = labels, flow_scaled = max_flow)
+  }, mc.cores = cores2use) %>% data.table::rbindlist()
+}
+```
+
+
+```{r}
+Plot_best_flows <- function(Comm_res, Class_1, Class_2){
+  top_flow_1 <- Comm_res[[Class_1]] %>% 
+    dplyr::filter(!stringr::str_detect(nodeLabel, pattern = "chr") & 
+                    !stringr::str_detect(nodeLabel, pattern = "\\[")) %>% .[,"nodeLabel"]
+  top_flow_2 <- Comm_res[[Class_2]] %>% 
+    dplyr::filter(!stringr::str_detect(nodeLabel, pattern = "chr") & 
+                    !stringr::str_detect(nodeLabel, pattern = "\\[")) %>% .[,"nodeLabel"]
+  top_flow <- c(top_flow_1, top_flow_2) %>% unique
+  
+  message("top_flow_list made")
+  message(paste0(length(top_flow), " nodes found"))
+  
+  flow_class_1 <- Find_best_flow(top_flow, Comm_res[[Class_1]])
+  colnames(flow_class_1) <- c("nodeLabel", "flow_class_1")
+  flow_class_2 <- Find_best_flow(top_flow, Comm_res[[Class_2]])
+  colnames(flow_class_2) <- c("nodeLabel", "flow_class_2")
+
+  # flows <- merge(flow_class_1, flow_class_2, by = "nodeLabel", all.x = T, all.y = T) %>% 
+  #   dplyr::filter(flow_class_1 > 0.4 | flow_class_2 > 0.4)
+  message("best_flow_found")
+  
+  
+  
+  flows = { 
+      dt1 <- data.table(flow_class_1, key = "nodeLabel")
+      dt2 <- data.table(flow_class_2, key = "nodeLabel")
+      data.frame(dt1[dt2,list(nodeLabel,flow_class_1,"flow_class_2"=dt2$flow_class_2)] )
+  }
+  
+  message("mergeing done")
+  
+  flows_4_regline <- flows %>% dplyr::filter(abs(flow_class_1 - flow_class_2) < 0.1 & flow_class_1 !=0 & flow_class_2 != 0)
+  
+  reg <-lm(flow_class_2 ~ flow_class_1, data = flows_4_regline)
+  c <- reg$coefficients[1]
+  b <- -1
+  a <- reg$coefficients[2]
+  
+  message("regression done")
+
+  flows$distance <- sapply(1:nrow(flows), function(node){
+    num <- (a*flows[node,"flow_class_2"] + b * flows[node,"flow_class_1"] + c)
+    denum <- sqrt(a**2+b**2)
+    res <- num/denum
+    round(res, digits=4) %>% unlist
+  })
+  flows_plot <- dplyr::filter(flows, flow_class_1 != 0 & flow_class_2 != 0)
+  p <- ggscatter(flows_plot, x = "flow_class_1", y = "flow_class_2",
+              size = 0.5)+
+      labs(x = Class_1,
+           y = Class_2)+
+    geom_abline(intercept = c, slope = a)+
+    stat_regline_equation()+
+    stat_cor(label.y = 0.8)
+  message("distance to reg done")
+  colnames(flows) <- c("nodeLabel", Class_1, Class_2, "distance")
+  return(list(Flow_data = flows, Plot = p))
+}
+
+Distance_plot <- function(Flows, Class_1, distance_thresold){
+  flows_2_plot <- dplyr::filter(Flows, abs(distance) > distance_thresold)
+    p <- ggscatter(flows_2_plot, x = "distance", y = Class_1,
+              label = "nodeLabel", repel = T, size = 0.5,
+                   font.label = c(6, "plain"))+
+      labs(x = "Distance",
+           y = Class_1)
+    p
+}  
+
+```
+
+### ARACNe
+
+#### Clusters "Cluster_R", "Cluster_NR"
+
+```{r, eval=F}
+Flows_Clusters <- Plot_best_flows(Community_flow_result, "Cluster_R", "Cluster_NR")
+```
+
+
+```{r, eval=F}
+plot(density(Flows_Clusters[["Flow_data"]]$distance))
+Flows_Clusters[["Plot"]]
+options(ggrepel.max.overlaps = 25)
+# Distance_plot(Flows_Clusters[["Flow_data"]], "Cluster_NR", 0.1)
+```
+
+#### mIDH "mIDH1", "mIDH2"
+
+```{r, eval=F}
+Flows_mIDH <- Plot_best_flows(Community_flow_result, "mIDH1", "mIDH2")
+```
+
+
+```{r, eval=F}
+Flows_mIDH[["Plot"]]
+plot(density(Flows_mIDH[["Flow_data"]]$distance))
+
+options(ggrepel.max.overlaps = 25)
+# Distance_plot(Flows_mIDH[["Flow_data"]], "mIDH2", 0.05)
+```
+
+### Regulonlaml
+
+ #### Clusters "Cluster_R", "Cluster_NR"
+
+```{r, eval=F}
+Flows_Clusters_filtered <- Plot_best_flows(Community_flow_result_filtered, "Cluster_R", "Cluster_NR")
+Flows_Clusters_filtered_2 <- Plot_best_flows(Community_flow_result_filtered_2, "Cluster_R", "Cluster_NR")
+```
+
+```{r, eval=F}
+plot(density(Flows_Clusters_filtered_2[["Flow_data"]]$distance))
+Flows_Clusters_filtered_2[["Plot"]]
+options(ggrepel.max.overlaps = 25)
+# Distance_plot(Flows_Clusters_filtered_2[["Flow_data"]], "Cluster_NR", 0.2)
+```
+
+#### mIDH "mIDH1", "mIDH2"
+
+```{r, eval=F}
+Flows_mIDH_filtered <- Plot_best_flows(Community_flow_result_filtered, "mIDH1", "mIDH2")
+Flows_mIDH_filtered_2 <- Plot_best_flows(Community_flow_result_filtered_2, "mIDH1", "mIDH2")
+```
+
+
+```{r, eval=F}
+plot(density(Flows_mIDH_filtered[["Flow_data"]]$distance))
+Flows_mIDH_filtered[["Plot"]]
+options(ggrepel.max.overlaps = 50)
+# Distance_plot(Flows_mIDH_filtered[["Flow_data"]], "mIDH2", 0.05)
+```
+
+```{r, eval=F}
+plot(density(Flows_mIDH_filtered_2[["Flow_data"]]$distance))
+Flows_mIDH_filtered_2[["Plot"]]
+options(ggrepel.max.overlaps = 50)
+# Distance_plot(Flows_mIDH_filtered_2[["Flow_data"]], "mIDH2", 0.05)
+```
+
+
+#### mIDH1 R vs mIDH2 R "Cluster_IDH1_R", "Cluster_IDH2_R"
+
+```{r, eval=F}
+Flows_mIDH1_R_vs_mIDH2_R_filtered <- Plot_best_flows(Community_flow_result_filtered, "Cluster_IDH1_R", "Cluster_IDH2_R")
+Flows_mIDH1_R_vs_mIDH2_R_filtered_2 <- Plot_best_flows(Community_flow_result_filtered_2, "Cluster_IDH1_R", "Cluster_IDH2_R")
+```
+
+
+```{r, eval=F}
+plot(density(Flows_mIDH1_R_vs_mIDH2_R_filtered[["Flow_data"]]$distance))
+Flows_mIDH1_R_vs_mIDH2_R_filtered[["Plot"]]
+options(ggrepel.max.overlaps = 50)
+# Distance_plot(Flows_mIDH1_R_vs_mIDH2_R_filtered[["Flow_data"]], "Cluster_IDH2_R", 0.05)
+```
+
+```{r, eval=F}
+plot(density(Flows_mIDH1_R_vs_mIDH2_R_filtered_2[["Flow_data"]]$distance))
+Flows_mIDH1_R_vs_mIDH2_R_filtered_2[["Plot"]]
+options(ggrepel.max.overlaps = 50)
+# Distance_plot(Flows_mIDH1_R_vs_mIDH2_R_filtered_2[["Flow_data"]], "Cluster_IDH2_R", 0.05)
+```
+
+#### mIDH2 R vs mIDH2 NR "Cluster_IDH2_R", "Cluster_IDH2_NR"
+
+```{r, eval=F}
+Flows_mIDH2_R_vs_mIDH2_NR_filtered <- Plot_best_flows(Community_flow_result_filtered, "Cluster_IDH2_R", "Cluster_IDH2_NR")
+Flows_mIDH2_R_vs_mIDH2_NR_filtered_2 <- Plot_best_flows(Community_flow_result_filtered_2, "Cluster_IDH2_R", "Cluster_IDH2_NR")
+```
+
+```{r, eval=F}
+plot(density(Flows_mIDH2_R_vs_mIDH2_NR_filtered[["Flow_data"]]$distance))
+Flows_mIDH2_R_vs_mIDH2_NR_filtered[["Plot"]]
+options(ggrepel.max.overlaps = 50)
+# Distance_plot(Flows_mIDH2_R_vs_mIDH2_NR_filtered[["Flow_data"]], "Cluster_mIDH2_NR", 0.05)
+```
+
+```{r, eval=F}
+plot(density(Flows_mIDH2_R_vs_mIDH2_NR_filtered_2[["Flow_data"]]$distance))
+Flows_mIDH2_R_vs_mIDH2_NR_filtered_2[["Plot"]]
+options(ggrepel.max.overlaps = 50)
+# Distance_plot(Flows_mIDH2_R_vs_mIDH2_NR_filtered_2[["Flow_data"]], "Cluster_mIDH2_NR", 0.05)
+```
+
+### mIDH2 vs Cluster NR
+
+```{r, eval=F}
+Flows_mIDH2_vs_NR_filtered_2 <- Plot_best_flows(Community_flow_result_filtered_2, "Cluster_NR", "mIDH2")
+```
+
+```{r, eval=F}
+plot(density(Flows_mIDH2_vs_NR_filtered_2[["Flow_data"]]$distance))
+Flows_mIDH2_vs_NR_filtered_2[["Plot"]]
+options(ggrepel.max.overlaps = 50)
+# Distance_plot(Flows_mIDH2_vs_NR_filtered_2[["Flow_data"]], "Cluster_NR", 0.05)
+```
+
+### mIDH1 vs Cluster NR
+
+```{r, eval=F}
+Flows_mIDH1_vs_NR_filtered_2 <- Plot_best_flows(Community_flow_result_filtered_2, "Cluster_NR", "mIDH1")
+```
+
+```{r, eval=F}
+plot(density(Flows_mIDH1_vs_NR_filtered_2[["Flow_data"]]$distance))
+Flows_mIDH1_vs_NR_filtered_2[["Plot"]]
+options(ggrepel.max.overlaps = 50)
+# Distance_plot(Flows_mIDH1_vs_NR_filtered_2[["Flow_data"]], "Cluster_NR", 0.05)
+```
+
+
+
+### 25k Regulonlaml 25k "Cluster_R_filtered_25k", "Cluster_NR_filtered_25k"
+
+#### Clusters
+
+```{r, eval = F}
+Flows_Clusters_filtered_25k <- Plot_best_flows(Community_flow_result_filtered_25k, "Cluster_R_filtered_25k", "Cluster_NR_filtered_25k")
+```
+
+```{r, eval = F}
+plot(density(Flows_Clusters_filtered_25k[["Flow_data"]]$distance))
+Flows_Clusters_filtered_25k[["Plot"]]
+options(ggrepel.max.overlaps = 25)
+Distance_plot(Flows_Clusters_filtered_25k[["Flow_data"]], "Cluster_NR_filtered_25k", 0.1)
+```
+
+#### mIDH "mIDH1_filtered_25k", "mIDH2_filtered_25k"
+
+```{r, eval = F}
+Flows_mIDH_filtered_25k <- Plot_best_flows(Community_flow_result_filtered_25k, "mIDH1_filtered_25k", "mIDH2_filtered_25k")
+```
+
+
+```{r, eval = F}
+plot(density(Flows_mIDH_filtered_25k[["Flow_data"]]$distance))
+Flows_mIDH_filtered_25k[["Plot"]]
+options(ggrepel.max.overlaps = 50)
+Distance_plot(Flows_mIDH_filtered_25k[["Flow_data"]], "mIDH2_filtered_25k", 0.05)
+```
+
+#### mIDH1 R vs mIDH2 R "Cluster_IDH1_R_25k", "Cluster_IDH2_R_25k"
+
+```{r, eval = F}
+Flows_mIDH1_R_vs_mIDH2_R_filtered_25k <- Plot_best_flows(Community_flow_result_filtered_25k, "Cluster_IDH1_R_25k", "Cluster_IDH2_R_25k")
+```
+
+
+```{r, eval = F}
+plot(density(Flows_mIDH1_R_vs_mIDH2_R_filtered_25k[["Flow_data"]]$distance))
+Flows_mIDH1_R_vs_mIDH2_R_filtered_25k[["Plot"]]
+options(ggrepel.max.overlaps = 50)
+# Distance_plot(Flows_mIDH1_R_vs_mIDH2_R_filtered_25k[["Flow_data"]], "Cluster_IDH2_R_25k", 0.05)
+```
+
+#### mIDH2 R vs mIDH2 NR "Cluster_IDH2_R_25k", "Cluster_IDH2_NR_25k"
+
+```{r, eval = F}
+Flows_mIDH2_R_vs_mIDH2_NR_filtered_25k <- Plot_best_flows(Community_flow_result_filtered_25k, "Cluster_IDH2_R_25k", "Cluster_IDH2_NR_25k")
+```
+
+```{r, eval = F}
+plot(density(Flows_mIDH2_R_vs_mIDH2_NR_filtered_25k[["Flow_data"]]$distance))
+Flows_mIDH2_R_vs_mIDH2_NR_filtered_25k[["Plot"]]
+options(ggrepel.max.overlaps = 50)
+# Distance_plot(Flows_mIDH2_R_vs_mIDH2_NR_filtered_25k[["Flow_data"]], "Cluster_mIDH2_NR_25k", 0.05)
+```
+
+#### mIDH2 vs Cluster NR "mIDH2_filtered_25k", "Cluster_NR_filtered_25k"
+
+```{r, eval = F}
+Flows_mIDH2_vs_NR_filtered_25k <- Plot_best_flows(Community_flow_result_filtered_25k, "mIDH2_filtered_25k", "Cluster_NR_filtered_25k")
+```
+
+```{r, eval = F}
+plot(density(Flows_mIDH2_vs_NR_filtered_25k[["Flow_data"]]$distance))
+Flows_mIDH2_vs_NR_filtered_25k[["Plot"]]
+options(ggrepel.max.overlaps = 50)
+# Distance_plot(Flows_mIDH2_vs_NR_filtered_25k[["Flow_data"]], "Cluster_NR_25k", 0.05)
+```
+
+#### mIDH1 vs Cluster NR "mIDH1_filtered_25k", "Cluster_NR_filtered_25k"
+
+```{r, eval = F}
+Flows_mIDH1_vs_NR_filtered_25k <- Plot_best_flows(Community_flow_result_filtered_25k, "mIDH1_filtered_25k", "Cluster_NR_filtered_25k")
+```
+
+```{r, eval = F}
+plot(density(Flows_mIDH1_vs_NR_filtered_25k[["Flow_data"]]$distance))
+Flows_mIDH1_vs_NR_filtered_25k[["Plot"]]
+options(ggrepel.max.overlaps = 50)
+# Distance_plot(Flows_mIDH2_vs_NR_filtered_25k[["Flow_data"]], "Cluster_NR_25k", 0.05)
+```
+
+# INTRAscaled
+
+### Cluster R vs Cluster NR
+
+```{r}
+Flows_Cluster_R_NR_intrascaled <- Plot_best_flows(Community_flow_Intrascaled_result, "Cluster_R_multilayer_filtered", "Cluster_NR_multilayer_filtered")
+```
+
+```{r, eval=F}
+plot(density(Flows_Cluster_R_NR_intrascaled[["Flow_data"]]$distance))
+Flows_Cluster_R_NR_intrascaled[["Plot"]]
+options(ggrepel.max.overlaps = 50)
+# Distance_plot(Flows_mIDH2_vs_NR_filtered_2[["Flow_data"]], "Cluster_NR", 0.05)
+```
+
+### mIDH1 vs mIDH2
+
+```{r}
+Flows_mIDH1_2_intrascaled <- Plot_best_flows(Community_flow_Intrascaled_result, "mIDH1_multilayer_filtered", "mIDH2_multilayer_filtered")
+```
+
+```{r, eval=F}
+plot(density(Flows_mIDH1_2_intrascaled[["Flow_data"]]$distance))
+Flows_mIDH1_2_intrascaled[["Plot"]]
+options(ggrepel.max.overlaps = 50)
+# Distance_plot(Flows_mIDH2_vs_NR_filtered_2[["Flow_data"]], "Cluster_NR", 0.05)
+```
+
+### mIDH1 R vs Cluster NR
+
+```{r}
+Flows_mIDH1_Cluster_NR_intrascaled <- Plot_best_flows(CommunitiesResults_Intrascaled, "mIDH1_filtered", "Cluster_NR_filtered")
+```
+
+```{r, eval=F}
+plot(density(Flows_mIDH1_Cluster_NR_intrascaled[["Flow_data"]]$distance))
+Flows_mIDH1_Cluster_NR_intrascaled[["Plot"]]
+options(ggrepel.max.overlaps = 50)
+# Distance_plot(Flows_mIDH2_vs_NR_filtered_2[["Flow_data"]], "Cluster_NR", 0.05)
+```
+
+```{r}
+save.image("/media/alexis/DATA/Session/R_session/Thesis_paper_Rsessions/Multi_layer_phenolike/Analysing_Multilayer_Intrascaled.RData")
+system("bash ~/shutdown_o_clock.sh")
+```
+
+# GO summary
+
+## Clusters
+
+```{r, width = 1080, height = 1920, eval=F}
+Genes_up_Cluster <- Flows_Clusters$Flow_data %>% 
+  dplyr::filter(distance > 0.1) %>% .$nodeLabel %>% .[!stringr::str_detect(., "chr") & !stringr::str_detect(., "MAR0") & !stringr::str_detect(., "MAR1")] %>% unique
+
+Genes_down_Cluster <- Flows_Clusters$Flow_data %>% 
+  dplyr::filter(distance < -0.1) %>% .$nodeLabel %>% .[!stringr::str_detect(., "chr") & !stringr::str_detect(., "MAR0") & !stringr::str_detect(., "MAR1")] %>% unique
+
+universe_Cluster <- Flows_Clusters$Flow_data$nodeLabel %>% unlist %>% .[!stringr::str_detect(., "chr") & !stringr::str_detect(., "MAR0") & !stringr::str_detect(., "MAR1")] %>% unique
+
+Clusters_diff <- list()
+Clusters_diff[["up"]] <- enrichGO(Genes_up_Cluster, OrgDb = "org.Hs.eg.db", keyType = "SYMBOL", ont = "ALL", pAdjustMethod = "none", universe = universe_Cluster, pvalueCutoff = 0.1, qvalueCutoff = 1)
+dir.create("../../Results/Multi_layer_pheno_like/New_regulon_40k/Flow_analysis/", showWarnings = F)
+dir.create("../../Results/Multi_layer_pheno_like/New_regulon_40k/Flow_analysis/Clusters_analysis", showWarnings = F)
+png("../../Results/Multi_layer_pheno_like/New_regulon_40k/Flow_analysis/Clusters_analysis/Go_up_Clusters.png", width = 1080, height = 1920)
+dotplot(Clusters_diff[["up"]], showCategory=50)
+dev.off()
+Clusters_diff[["down"]] <- enrichGO(Genes_down_Cluster, OrgDb = "org.Hs.eg.db", keyType = "SYMBOL", ont = "ALL", pAdjustMethod = "none", universe = universe_Cluster, pvalueCutoff = 0.1, qvalueCutoff = 1)
+png("../../Results/Multi_layer_pheno_like/New_regulon_40k/Flow_analysis/Clusters_analysis/Go_down_Clusters.png", width = 1080, height = 1920)
+dotplot(Clusters_diff[["down"]], showCategory=50)
+dev.off()
+dotplot(Clusters_diff[["up"]], showCategory=25)
+dotplot(Clusters_diff[["down"]], showCategory=25)
+```
+
+## mIDH
+
+```{r, width = 1920, height = 1080, eval=F}
+Genes_up_mIDH <- Flows_mIDH$Flow_data %>% 
+  dplyr::filter(distance > 0.1) %>% .$nodeLabel %>% .[!stringr::str_detect(., "chr") & !stringr::str_detect(., "MAR0") & !stringr::str_detect(., "MAR1")] %>% unique
+
+Genes_down_mIDH <- Flows_mIDH$Flow_data %>% 
+  dplyr::filter(distance < -0.1) %>% .$nodeLabel %>% .[!stringr::str_detect(., "chr") & !stringr::str_detect(., "MAR0") & !stringr::str_detect(., "MAR1")] %>% unique
+
+universe <- c(Community_flow_result$mIDH1$nodeLabel, Community_flow_result$mIDH2$nodeLabel) %>% unlist %>% .[!stringr::str_detect(., "chr") & !stringr::str_detect(., "MAR0") & !stringr::str_detect(., "MAR1")] %>% unique
+
+mIDH_diff <- list()
+mIDH_diff[["up"]] <- enrichGO(Genes_up_mIDH, OrgDb = "org.Hs.eg.db", keyType = "SYMBOL", ont = "ALL", pAdjustMethod = "none", universe = universe, pvalueCutoff = 0.1, qvalueCutoff = 1)
+mIDH_diff[["down"]] <- enrichGO(Genes_down_mIDH, OrgDb = "org.Hs.eg.db", keyType = "SYMBOL", ont = "ALL", pAdjustMethod = "none", universe = universe, pvalueCutoff = 0.1, qvalueCutoff = 1)
+dotplot(mIDH_diff[["up"]])
+dotplot(mIDH_diff[["down"]])
+dir.create("../../Results/Multi_layer_pheno_like/New_regulon_40k/Flow_analysis/", showWarnings = F)
+dir.create("../../Results/Multi_layer_pheno_like/New_regulon_40k/Flow_analysis/mIDH_analysis", showWarnings = F)
+png("../../Results/Multi_layer_pheno_like/New_regulon_40k/Flow_analysis/mIDH_analysis/GO_up_mIDH.png", width = 1080, height = 1920)
+dotplot(mIDH_diff[["up"]], showCategory=50)
+dev.off()
+png("../../Results/Multi_layer_pheno_like/New_regulon_40k/Flow_analysis/mIDH_analysis/GO_down_mIDH.png", width = 1080, height = 1920)
+dotplot(mIDH_diff[["down"]], showCategory=50)
+dev.off()
+```
+
+## Saving data table
+
+```{r, eval = F}
+Clusters_diff[["up"]]@result %>%
+  write.table("../../Results/Multi_layer_pheno_like/New_regulon_40k/Flow_analysis/Clusters_analysis/Go_up_Clusters.tsv", sep = "\t", quote = F, col.names = NA)
+Clusters_diff[["down"]]@result %>%
+  write.table("../../Results/Multi_layer_pheno_like/New_regulon_40k/Flow_analysis/Clusters_analysis/Go_down_Clusters.tsv", sep = "\t", quote = F, col.names = NA)
+mIDH_diff[["up"]]@result %>%
+  write.table("../../Results/Multi_layer_pheno_like/New_regulon_40k/Flow_analysis/mIDH_analysis/Go_up_mIDH.tsv", sep = "\t", quote = F, col.names = NA)
+mIDH_diff[["down"]]@result %>%
+  write.table("../../Results/Multi_layer_pheno_like/New_regulon_40k/Flow_analysis/mIDH_analysis/Go_down_mIDH.tsv", sep = "\t", quote = F, col.names = NA)
+```
+
+## GO comparison
+
+```{r, eval = F}
+Genes_up_Cluster <- Flows_Clusters$Flow_data %>% 
+  dplyr::filter(distance > 0.1) %>% .$nodeLabel %>% .[!stringr::str_detect(., "chr") & !stringr::str_detect(., "MAR0") & !stringr::str_detect(., "MAR1")] %>% unique
+Genes_down_Cluster <- Flows_Clusters$Flow_data %>% 
+  dplyr::filter(distance < -0.1) %>% .$nodeLabel %>% .[!stringr::str_detect(., "chr") & !stringr::str_detect(., "MAR0") & !stringr::str_detect(., "MAR1")] %>% unique
+
+
+Genes_up_mIDH <- Flows_mIDH$Flow_data %>% 
+  dplyr::filter(distance > 0.1) %>% .$nodeLabel %>% .[!stringr::str_detect(., "chr") & !stringr::str_detect(., "MAR0") & !stringr::str_detect(., "MAR1")] %>% unique
+Genes_down_mIDH <- Flows_mIDH$Flow_data %>% 
+  dplyr::filter(distance < -0.1) %>% .$nodeLabel %>% .[!stringr::str_detect(., "chr") & !stringr::str_detect(., "MAR0") & !stringr::str_detect(., "MAR1")] %>% unique
+
+
+genelists <- list(
+ "Cluster NR" = Genes_up_Cluster,
+ "Cluster R" = Genes_down_Cluster,
+ "mIDH2" = Genes_up_mIDH,
+ "mIDH1" = Genes_down_mIDH
+)
+
+ck_GO <- mclapply(c("BP", "CC", "MF"), function(onto){
+  compareCluster(genelists, fun = "enrichGO", OrgDb = "org.Hs.eg.db", keyType = "SYMBOL", ont = onto, pAdjustMethod = "none", pvalueCutoff = 0.1, qvalueCutoff = 1)
+}, mc.cores = cores2use)
+names(ck_GO) <- c("BP", "CC", "MF")
+
+GO_list <- list(
+  "Cluster R" = Clusters_diff$down@result,
+  "Cluster NR" = Clusters_diff$up@result,
+  "mIDH2" = mIDH_diff$up@result,
+  "mIDH1" = mIDH_diff$down@result
+)
+
+bind_Go <- function(GO_list, Name_A, Name_B){
+  rbind(GO_list[[Name_A]], GO_list[[Name_B]])
+}
+
+ck_modified <- lapply(c("BP", "CC", "MF"), function(onto){
+  temp <- ck_GO[[onto]]
+  Classes_GO <- mclapply(names(GO_list), function(GO){
+    res <- dplyr::filter(GO_list[[GO]], ONTOLOGY == onto)
+    res$Cluster <- GO
+    res[,c(11,2:10)]
+  }, mc.cores = cores2use)
+  names(Classes_GO) <- names(GO_list)
+  temp@compareClusterResult <- rbind(Classes_GO[[names(Classes_GO)[1]]], Classes_GO[[names(Classes_GO)[2]]]) %>%
+    rbind(Classes_GO[[names(Classes_GO)[3]]]) %>% rbind(Classes_GO[[names(Classes_GO)[4]]])
+  temp
+})
+names(ck_modified) <- c("BP", "CC", "MF")
+```
+
+### Saving GO data
+
+```{r, eval = F}
+GO_plot_flow_analysis_comparison <- mclapply(c("BP", "CC", "MF"), function(onto){
+  dplot <- dotplot(ck_modified[[onto]], showCategory = 50)
+  cplot <- cnetplot(ck_modified[[onto]])
+  ggsave(paste0("../../Results/Multi_layer_pheno_like/New_regulon_40k/Flow_analysis/", onto, "_dotplot_GO_plot_flow_analysis.png"), dplot, width = 10000, height = 10000, limitsize = FALSE, units = "px")
+  ggsave(paste0("../../Results/Multi_layer_pheno_like/New_regulon_40k/Flow_analysis/", onto, "_cnetplot_GO_plot_flow_analysis.png"), cplot, width = 10000, height = 10000, limitsize = FALSE, units = "px")
+  list("dotplot" = dplot, "cnetplot" = cplot)
+  ck_modified[[onto]]@compareClusterResult %>%
+    write.table(paste0("../../Results/Multi_layer_pheno_like/New_regulon_40k/Flow_analysis/", onto, "_cnetplot_GO_plot_flow_analysis.tsv"), sep = "\t", row.names = T, quote = T)
+}, mc.cores = cores2use)
+```
+
+### GO gene lists
+
+```{r, eval = F}
+Clusters_diff[["up"]]@gene %>% write.table("../../Results/Multi_layer_pheno_like/New_regulon_40k/Flow_analysis/Clusters_analysis/genes_up.tsv", quote= F, sep = "\t", row.names = F, col.names = "geneset")
+Clusters_diff[["down"]]@gene %>% write.table("../../Results/Multi_layer_pheno_like/New_regulon_40k/Flow_analysis/Clusters_analysis/genes_down.tsv", quote= F, sep = "\t", row.names = F, col.names = "geneset")
+mIDH_diff[["up"]]@gene %>% write.table("../../Results/Multi_layer_pheno_like/New_regulon_40k/Flow_analysis/mIDH_analysis/genes_up.tsv", quote= F, sep = "\t", row.names = F, col.names = "geneset")
+mIDH_diff[["down"]]@gene %>% write.table("../../Results/Multi_layer_pheno_like/New_regulon_40k/Flow_analysis/mIDH_analysis/genes_down.tsv", quote= F, sep = "\t", row.names = F, col.names = "geneset")
+
+```
+
+# Filtered
+
+## Clusters
+
+```{r, eval = F}
+Genes_up_Cluster <- Flows_Clusters_filtered$Flow_data %>% 
+  dplyr::filter(distance > 0.2) %>% .$nodeLabel %>% .[!stringr::str_detect(., "chr") & !stringr::str_detect(., "MAR0") & !stringr::str_detect(., "MAR1")] %>% unique
+Genes_down_Cluster <- Flows_Clusters_filtered$Flow_data %>% 
+  dplyr::filter(distance < -0.2) %>% .$nodeLabel %>% .[!stringr::str_detect(., "chr") & !stringr::str_detect(., "MAR0") & !stringr::str_detect(., "MAR1")] %>% unique
+
+Clusters_diff_up_filtered <- enrichGO(Genes_up_Cluster, OrgDb = "org.Hs.eg.db", keyType = "SYMBOL", ont = "ALL", pAdjustMethod = "none")
+Clusters_diff_down_filtered <- enrichGO(Genes_down_Cluster, OrgDb = "org.Hs.eg.db", keyType = "SYMBOL", ont = "ALL", pAdjustMethod = "none")
+dotplot(Clusters_diff_up_filtered)
+dotplot(Clusters_diff_down_filtered)
+```
+
+```{r, eval = F}
+png("../../Results/Multi_layer_pheno_like/New_regulon_40k/Flow_analysis/Clusters_analysis/GO_up_Cluster_NR.png", width = 1080, height = 1920)
+dotplot(Clusters_diff_up_filtered, showCategory=50)
+dev.off()
+
+png("../../Results/Multi_layer_pheno_like/New_regulon_40k/Flow_analysis/Clusters_analysis/GO_down_Cluster_R.png", width = 1080, height = 1920)
+dotplot(Clusters_diff_down_filtered, showCategory=50)
+dev.off()
+```
+
+
+
+
+## mIDH
+
+```{r, eval = F}
+Genes_down <- Flows_mIDH_filtered$Flow_data %>% 
+  dplyr::filter(distance < -0.1) %>% .$nodeLabel %>% .[!stringr::str_detect(., "chr") & !stringr::str_detect(., "MAR0") & !stringr::str_detect(., "MAR1")] %>% unique
+Genes <- Flows_mIDH_filtered$Flow_data %>% 
+  dplyr::filter(distance > 0.1) %>% .$nodeLabel %>% .[!stringr::str_detect(., "chr") & !stringr::str_detect(., "MAR0") & !stringr::str_detect(., "MAR1")] %>% unique
+universe <- c(Community_flow_result_filtered$mIDH1$nodeLabel, Community_flow_result_filtered$mIDH2$nodeLabel) %>% unlist %>% .[!stringr::str_detect(., "chr") & !stringr::str_detect(., "MAR0") & !stringr::str_detect(., "MAR1")] %>% unique
+
+mIDH_diff_filtered <- enrichGO(Genes, OrgDb = "org.Hs.eg.db", keyType = "SYMBOL", ont = "ALL", pAdjustMethod = "none", pvalueCutoff = 0.1)
+
+mIDH_diff_down_filtered <- enrichGO(Genes_down, OrgDb = "org.Hs.eg.db", keyType = "SYMBOL", ont = "ALL", pAdjustMethod = "none", pvalueCutoff = 0.1)
+dotplot(mIDH_diff_filtered)
+dotplot(mIDH_diff_down_filtered)
+```
+
+## GO comparison
+
+```{r, eval = F}
+Genes_up_Cluster <- Flows_Clusters_filtered$Flow_data %>% 
+  dplyr::filter(distance > 0.1) %>% .$nodeLabel %>% .[!stringr::str_detect(., "chr") & !stringr::str_detect(., "MAR0") & !stringr::str_detect(., "MAR1")] %>% unique
+Genes_down_Cluster <- Flows_Clusters_filtered$Flow_data %>% 
+  dplyr::filter(distance < -0.1) %>% .$nodeLabel %>% .[!stringr::str_detect(., "chr") & !stringr::str_detect(., "MAR0") & !stringr::str_detect(., "MAR1")] %>% unique
+
+
+Genes_up_mIDH <- Flows_mIDH_filtered$Flow_data %>% 
+  dplyr::filter(distance > 0.1) %>% .$nodeLabel %>% .[!stringr::str_detect(., "chr") & !stringr::str_detect(., "MAR0") & !stringr::str_detect(., "MAR1")] %>% unique
+Genes_down_mIDH <- Flows_mIDH_filtered$Flow_data %>% 
+  dplyr::filter(distance < -0.1) %>% .$nodeLabel %>% .[!stringr::str_detect(., "chr") & !stringr::str_detect(., "MAR0") & !stringr::str_detect(., "MAR1")] %>% unique
+
+
+genelists <- list(
+ "Cluster NR" = Genes_up_Cluster,
+ "Cluster R" = Genes_down_Cluster,
+ "mIDH2" = Genes_up_mIDH,
+ "mIDH1" = Genes_down_mIDH
+)
+
+ck_GO <- mclapply(c("BP", "CC", "MF"), function(onto){
+  compareCluster(genelists, fun = "enrichGO", OrgDb = "org.Hs.eg.db", keyType = "SYMBOL", ont = onto, pAdjustMethod = "none", pvalueCutoff = 0.1, qvalueCutoff = 1)
+}, mc.cores = cores2use)
+names(ck_GO) <- c("BP", "CC", "MF")
+```
+
+### Saving GO data
+
+```{r, eval = F}
+GO_plot_flow_analysis_comparison <- mclapply(c("BP", "CC", "MF"), function(onto){
+  dplot <- dotplot(ck_GO[[onto]])
+  cplot <- cnetplot(ck_GO[[onto]])
+  ggsave(paste0("../../Results/Multi_layer_pheno_like/New_regulon_40k/Flow_analysis/", onto, "_dotplot_GO_plot_flow_analysis.png"), dplot, width = 10000, height = 10000, limitsize = FALSE, units = "px")
+  ggsave(paste0("../../Results/Multi_layer_pheno_like/New_regulon_40k/Flow_analysis/", onto, "_cnetplot_GO_plot_flow_analysis.png"), cplot, width = 10000, height = 10000, limitsize = FALSE, units = "px")
+  list("dotplot" = dplot, "cnetplot" = cplot)
+  ck_GO[[onto]]@compareClusterResult %>%
+    write.table(paste0("../../Results/Multi_layer_pheno_like/New_regulon_40k/Flow_analysis/", onto, "_cnetplot_GO_plot_flow_analysis.tsv"), sep = "\t", row.names = T, quote = T)
+}, mc.cores = cores2use)
+```
+
+# Saving Flow data
+
+## Clusters
+
+```{r, eval = F}
+Flows_Clusters$Flow_data %>%  .[order(.$distance, decreasing = T),] %>%
+  write.table("../../Results/Multi_layer_pheno_like/New_regulon_40k/Flow_analysis/Clusters_analysis/Flow_Clusters.tsv", sep = "\t", quote = F, row.names = F)
+```
+
+## mIDH
+
+```{r, eval = F}
+Flows_mIDH$Flow_data %>%  .[order(.$distance, decreasing = T),] %>%
+  write.table("../../Results/Multi_layer_pheno_like/New_regulon_40k/Flow_analysis/mIDH_analysis/Flow_mIDH.tsv", sep = "\t", quote = F, row.names = F)
+```
+
+## Clusters filered
+
+```{r, eval = F}
+Flows_Clusters_filtered$Flow_data %>%  .[order(.$distance, decreasing = T),] %>%
+  write.table("../../Results/Multi_layer_pheno_like/New_regulon_40k/Flow_analysis/Clusters_analysis/Flow_Clusters_filtered.tsv", sep = "\t", quote = F, row.names = F)
+Flows_Clusters_filtered_2$Flow_data %>%  .[order(.$distance, decreasing = T),] %>%
+  write.table("../../Results/Multi_layer_pheno_like/New_regulon_40k/Flow_analysis/Clusters_analysis/Flow_Clusters_filtered_2.tsv", sep = "\t", quote = F, row.names = F)
+```
+
+## mIDH filered
+
+```{r, eval = F}
+Flows_mIDH_filtered$Flow_data %>%  .[order(.$distance, decreasing = T),] %>%
+  write.table("../../Results/Multi_layer_pheno_like/New_regulon_40k/Flow_analysis/mIDH_analysis/Flows_mIDH_filtered.tsv", sep = "\t", quote = F, row.names = F)
+Flows_mIDH_filtered_2$Flow_data %>%  .[order(.$distance, decreasing = T),] %>%
+  write.table("../../Results/Multi_layer_pheno_like/New_regulon_40k/Flow_analysis/mIDH_analysis/Flows_mIDH_filtered_2.tsv", sep = "\t", quote = F, row.names = F)
+```
+
+## mIDH1_R_vs_mIDH2_R filered
+
+```{r, eval = F}
+dir.create("../../Results/Multi_layer_pheno_like/New_regulon_40k/Flow_analysis/mIDH1_R_vs_mIDH2_R/", showWarnings = F)
+
+Flows_mIDH1_R_vs_mIDH2_R_filtered$Flow_data %>%  .[order(.$distance, decreasing = T),] %>%
+  write.table("../../Results/Multi_layer_pheno_like/New_regulon_40k/Flow_analysis/mIDH1_R_vs_mIDH2_R/Flow_mIDH1_R_vs_mIDH2_R_filtered.tsv", sep = "\t", quote = F, row.names = F)
+Flows_mIDH1_R_vs_mIDH2_R_filtered_2$Flow_data %>%  .[order(.$distance, decreasing = T),] %>%
+  write.table("../../Results/Multi_layer_pheno_like/New_regulon_40k/Flow_analysis/mIDH1_R_vs_mIDH2_R/Flow_mIDH1_R_vs_mIDH2_R_filtered_2.tsv", sep = "\t", quote = F, row.names = F)
+```
+
+## mIDH2_R_vs_mIDH2_NR filered
+
+```{r, eval = F}
+dir.create("../../Results/Multi_layer_pheno_like/New_regulon_40k/Flow_analysis/mIDH2_R_vs_mIDH2_NR/", showWarnings = F)
+
+Flows_mIDH2_R_vs_mIDH2_NR_filtered$Flow_data %>%  .[order(.$distance, decreasing = T),] %>%
+  write.table("../../Results/Multi_layer_pheno_like/New_regulon_40k/Flow_analysis/mIDH2_R_vs_mIDH2_NR/Flow_mIDH2_R_vs_mIDH2_NR_filtered.tsv", sep = "\t", quote = F, row.names = F)
+Flows_mIDH2_R_vs_mIDH2_NR_filtered_2$Flow_data %>%  .[order(.$distance, decreasing = T),] %>%
+  write.table("../../Results/Multi_layer_pheno_like/New_regulon_40k/Flow_analysis/mIDH2_R_vs_mIDH2_NR/Flow_mIDH2_R_vs_mIDH2_NR_filtered_2.tsv", sep = "\t", quote = F, row.names = F)
+```
+
+## mIDH2_vs_Cluster_NR
+
+```{r, eval = F}
+dir.create("../../Results/Multi_layer_pheno_like/New_regulon_40k/Flow_analysis/mIDH2_vs_Cluster_NR/", showWarnings = F)
+
+Flows_mIDH2_vs_NR_filtered_2$Flow_data %>%  .[order(.$distance, decreasing = T),] %>%
+  write.table("../../Results/Multi_layer_pheno_like/New_regulon_40k/Flow_analysis/mIDH2_vs_Cluster_NR/Flow_mIDH2_vs_Cluster_NR_filtered_2.tsv", sep = "\t", quote = F, row.names = F)
+```
+
+# 25k
+
+## Clusters filered
+
+```{r}
+Flows_Clusters_filtered_25k$Flow_data %>%  .[order(.$distance, decreasing = T),] %>%
+  write.table("../../Results/Multi_layer_pheno_like/New_regulon_40k/Flow_analysis/Clusters_analysis/Flow_Clusters_filtered_25k.tsv", sep = "\t", quote = F, row.names = F)
+```
+
+## mIDH filered
+
+```{r}
+Flows_mIDH_filtered_25k$Flow_data %>%  .[order(.$distance, decreasing = T),] %>%
+  write.table("../../Results/Multi_layer_pheno_like/New_regulon_40k/Flow_analysis/mIDH_analysis/Flows_mIDH_filtered_25k.tsv", sep = "\t", quote = F, row.names = F)
+```
+
+## mIDH1_R_vs_mIDH2_R filered
+
+```{r}
+dir.create("../../Results/Multi_layer_pheno_like/New_regulon_40k/Flow_analysis/mIDH1_R_vs_mIDH2_R/", showWarnings = F)
+
+Flows_mIDH1_R_vs_mIDH2_R_filtered_25k$Flow_data %>%  .[order(.$distance, decreasing = T),] %>%
+  write.table("../../Results/Multi_layer_pheno_like/New_regulon_40k/Flow_analysis/mIDH1_R_vs_mIDH2_R/Flow_mIDH1_R_vs_mIDH2_R_filtered_25k.tsv", sep = "\t", quote = F, row.names = F)
+```
+
+## mIDH2_R_vs_mIDH2_NR filered
+
+```{r}
+dir.create("../../Results/Multi_layer_pheno_like/New_regulon_40k/Flow_analysis/mIDH2_R_vs_mIDH2_NR/", showWarnings = F)
+
+Flows_mIDH2_R_vs_mIDH2_NR_filtered_25k$Flow_data %>%  .[order(.$distance, decreasing = T),] %>%
+  write.table("../../Results/Multi_layer_pheno_like/New_regulon_40k/Flow_analysis/mIDH2_R_vs_mIDH2_NR/Flow_mIDH2_R_vs_mIDH2_NR_filtered_25k.tsv", sep = "\t", quote = F, row.names = F)
+```
+
+## mIDH2_vs_Cluster_NR
+
+```{r}
+dir.create("../../Results/Multi_layer_pheno_like/New_regulon_40k/Flow_analysis/mIDH2_vs_Cluster_NR/", showWarnings = F)
+
+Flows_mIDH2_vs_NR_filtered_25k$Flow_data %>%  .[order(.$distance, decreasing = T),] %>%
+  write.table("../../Results/Multi_layer_pheno_like/New_regulon_40k/Flow_analysis/mIDH2_vs_Cluster_NR/Flow_mIDH2_vs_Cluster_NR_filtered_25k.tsv", sep = "\t", quote = F, row.names = F)
+```
+
+```{r}
+save.image("/media/alexis/DATA/Session/R_session/Thesis_paper_Rsessions/Multi_layer_phenolike/Analysing_Multilayer_combined_pheno_25k.RData")
+system("bash ~/shutdown_o_clock.sh")
+```
+
+## mIDH1_vs_Cluster_NR
+
+```{r}
+dir.create("../../Results/Multi_layer_pheno_like/New_regulon_40k/Flow_analysis/mIDH1_vs_Cluster_NR/", showWarnings = F)
+
+Flows_mIDH1_vs_NR_filtered_25k$Flow_data %>%  .[order(.$distance, decreasing = T),] %>%
+  write.table("../../Results/Multi_layer_pheno_like/New_regulon_40k/Flow_analysis/mIDH1_vs_Cluster_NR/Flow_mIDH1_vs_Cluster_NR_filtered_25k.tsv", sep = "\t", quote = F, row.names = F)
+```
+
+```{r}
+save.image("/media/alexis/DATA/Session/R_session/Thesis_paper_Rsessions/Multi_layer_phenolike/Analysing_Multilayer_combined_pheno_25k.RData")
+system("bash ~/shutdown_o_clock.sh")
+```
+
+# Versatility
+
+## Function
+
+```{r, eval = F}
+Versatility_analysis <- function(Multilay, Class){
+ 
+  res <- list()
+  res[["degree"]] <- data.frame()
+  res[["strength"]] <- data.frame()
+  res[["pagerank"]] <- data.frame()
+  # res[["closeness"]] <- data.frame()
+  res[["hub"]] <- data.frame()
+  res[["authority"]] <- data.frame()
+  
+  ##################
+  #Multilayer analysis
+  ##################
+  mux <- Multilay[[Class]]
+  # Degree versatility
+  # deg.mux <- GetMultiDegree_modif(mux$adjacencyTensor, mux$Layers, 
+      # mux$Nodes, isDirected = mux$isDirected)
+  
+  # Strength versatility
+  str.mux <- GetMultiStrength(mux$adjacencyTensor, mux$Layers, 
+      length(mux$nodeIDs), isDirected = mux$isDirected)
+  
+  # PageRank versatility
+  # pr.mux <- getVersatilityProfile(mux, type="pagerank")
+  
+  #Closeness versatility 
+  # cl.mux <- getVersatilityProfile(mux, type="closeness")
+  
+  # HITS versatilities
+  # hub.mux <- getVersatilityProfile(mux, type="hub")
+  # auth.mux <- getVersatilityProfile(mux, type="authority")
+  
+  # res[["pagerank"]] <- data.frame(node=mux$nodeIDs, mux=pr.mux)
+  res[["strength"]] <- data.frame(node=mux$nodeIDs, mux=str.mux)
+  # res[["closeness"]] <- data.frame(node=mux$nodeIDs, mux=cl.mux)
+  # res[["hub"]] <- data.frame(node=mux$nodeIDs, mux=hub.mux)
+  # res[["authority"]] <- data.frame(node=mux$nodeIDs, mux=auth.mux)
+  
+  ##################
+  #Aggregate analysis
+  ##################
+  
+  #Using standard igraph library for this
+  
+  #Degree centrality
+  deg.agg <- igraph::degree(mux$g.agg)
+  
+  #Strength centrality
+  str.agg <- igraph::strength(mux$g.agg)
+  
+  #PageRank centrality 
+  pr.agg <- igraph::page_rank(mux$g.agg)$vector
+  pr.agg <- pr.agg/max(pr.agg)
+  
+  #Closeness centrality 
+  # cl.agg <- igraph::closeness(mux$g.agg, normalized=T)
+  
+  #HITS centrality
+  hub.agg <- igraph::hub_score(mux$g.agg)$vector
+  auth.agg <- igraph::authority_score(mux$g.agg)$vector
+  
+  res[["degree"]] <- data.frame(node=mux$nodeIDs, agg=deg.agg)
+  res[["strength"]]$agg <- str.agg
+  res[["pagerank"]] <-  data.frame(node=mux$nodeIDs, agg=pr.agg)
+  # res[["closeness"]] <- data.frame(node=mux$nodeIDs, agg=cl.agg)
+  res[["hub"]] <-  data.frame(node=mux$nodeIDs, agg=hub.agg) 
+  res[["authority"]] <-  data.frame(node=mux$nodeIDs, agg=auth.agg) 
+  
+  ##################
+  #Single-layer analysis
+  ##################
+  
+  #Using standard igraph library for this
+  single_layer <- mclapply(1:mux$Layers, function(l){
+    #Degree centrality
+      deg.l <- igraph::degree(mux$g.list[[l]])
+  
+      #Strength centrality
+      str.l <- igraph::strength(mux$g.list[[l]])
+  
+      #PageRank centrality 
+      pr.l <- igraph::page_rank(mux$g.list[[l]])$vector
+      pr.l <- pr.l/max(pr.l)
+  
+      #Closeness centrality 
+      # cl.l <- igraph::closeness(mux$g.list[[l]], normalized=T)
+  
+      #HITS centrality
+      hub.l <- igraph::hub_score(mux$g.list[[l]])$vector
+      auth.l <- igraph::authority_score(mux$g.list[[l]])$vector
+      
+      list("degree" = deg.l, "strength" = str.l, "pagerank" = pr.l, "hub" = hub.l, "authority" = auth.l)
+  }, mc.cores = cores2use)
+  
+  message("single done")
+  single_layer <- Single_layer_analysis_to_list(single_layer)
+  message("converting single results done")
+  res <- mclapply(names(res), function(stat){
+    cbind(res[[stat]], single_layer[[stat]])
+  }, mc.cores = cores2use)
+  names(res) <- c("degree", "strength", "pagerank", "hub", "authority")
+  res
+}
+
+Single_layer_analysis_to_list <- function(Single_analysis){
+  res <- mclapply(c("degree", "strength", "pagerank", "hub", "authority"), function(Stat){
+    tmp <- lapply(1:4, function(L){
+      Single_analysis[[L]][[Stat]]
+    }) %>% purrr::reduce(., .f = cbind)
+    colnames(tmp) <- paste0("layer",1:4)
+    tmp
+  }, mc.cores = cores2use)
+  names(res) <- c("degree", "strength", "pagerank",  "hub", "authority")
+  res
+}
+```
+
+## ARACNe
+
+```{r, eval = F}
+Versatility_analysis_mutli <- list()
+
+Versatility_analysis_mutli <- mclapply(names(Multilayers_filtered_25k), function(Class){
+  Versatility_analysis(Multilayers_filtered_25k, Class)
+}, mc.cores = cores2use)
+names(Versatility_analysis_mutli) <- names(Multilayers_filtered_25k)
+```
+
+## Filtered
+
+
+```{r, eval = F}
+Versatility_analysis_mutli_filtered <- mclapply(c("Cluster_NR", "Cluster_R", "mIDH1", "mIDH2"), function(Class){
+  Versatility_analysis(Multilayers_filtered, Class)
+}, mc.cores = cores2use)
+names(Versatility_analysis_mutli_filtered) <- c("Cluster_NR", "Cluster_R", "mIDH1", "mIDH2")
+```
+
+```{r}
+save.image("/media/alexis/DATA/Session/R_session/Thesis_paper_Rsessions/Multi_layer_phenolike/Analysing_versa_all_Multilayer.RData")
+system("bash ~/shutdown_o_clock.sh")
+```
+
+# Saving data
+
+```{r, eval = F}
+lapply(names(Versatility_analysis_mutli), function(Class){ 
+  lapply(c("degree", "strength", "pagerank",  "hub", "authority"), function(Stat){
+    dir.create(paste0("../../Results/Multi_layer_pheno_like/New_regulon_40k/Versatility_analysis/", Class), showWarnings = F)
+    Versatility_analysis_mutli[[Class]][[Stat]] %>% .[order(.[2], decreasing = T),] %>% 
+      write.table(paste0("../../Results/Multi_layer_pheno_like/New_regulon_40k/Versatility_analysis/", Class, "/New_", Stat, "_network_analysis.tsv"), sep = "\t", row.names = F, quote = F)
+  })
+})
+```
+
+# From GO to pathways
+
+## Function
+
+```{r, eval = F}
+Find_modules_associated_to_GO <- function(GO_result, ID_GO, Class, Community_restult){
+  gene_list <- GO_result[ID_GO, "geneID"] %>% stringr::str_split(pattern = "\\/") %>% unlist
+  convertiser_path <- paste0("../../Results/Multi_layer_pheno_like/", Class, "/Multi_layer/layout.txt")
+  converter <- read.table(convertiser_path, sep = " ", header = T)
+  gene_converted <- dplyr::filter(converter, nodeLabel %in% gene_list)
+  print(head(gene_converted))
+  modules <- dplyr::filter(Community_restult, node %in% gene_converted$nodeID)$module %>% unique
+  print(head(modules))
+  nodes_in_modules <- dplyr::filter(Community_restult, module %in% modules & flow > 10**(-5))$node
+  print(head(nodes_in_modules))
+  gene_in_modules <- dplyr::filter(converter, nodeID %in% nodes_in_modules)$nodeLabel %>% unique
+  print(head(gene_in_modules))
+  enrichGO(gene_in_modules, OrgDb = "org.Hs.eg.db", keyType = "SYMBOL", ont = "ALL", pAdjustMethod = "none", pvalueCutoff = 0.1)
+}
+```
+
+
+```{r, eval = F}
+GO_0070372 <-Find_modules_associated_to_GO(Clusters_diff$up@result, "GO:0070372", "Cluster_NR", CommunitiesResults$Cluster_NR$membership.multi)
+
+GO_2000191 <-Find_modules_associated_to_GO(Clusters_diff$up@result, "GO:2000191", "Cluster_NR", CommunitiesResults$Cluster_NR$membership.multi)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+```{r}
+save.image("/media/alexis/DATA/Session/R_session/Thesis_paper_Rsessions/Multi_layer_phenolike/Analysing_Multilayer_combined_pheno2.RData")
+system("bash ~/shutdown_o_clock.sh")
+```
+
+
+
+
+
+
+
+
+

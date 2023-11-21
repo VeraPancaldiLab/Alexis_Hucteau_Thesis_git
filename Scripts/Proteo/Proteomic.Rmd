@@ -1,0 +1,1006 @@
+---
+title: "Proteomic"
+author: Alexis Hucteau
+date: "`r Sys.Date()`"
+output:
+    html_document:
+      toc: yes
+      toc_float: yes
+      theme: united
+editor_options:
+  markdown:
+    wrap: sentence
+---
+
+# Library
+
+```{r}
+rm(DmIALite, DOLite, DOLiteTerm, HsIALite, MmIALite, RnIALite)
+
+library(dplyr)
+library(FactoMineR)
+library(factoextra)
+library(sva)
+library(xlsx)
+library(clusterProfiler)
+library(pheatmap)
+library(rdist)
+library(DEP)
+library(SummarizedExperiment)
+library(org.Hs.eg.db)
+library(pathview)
+library(enrichplot)
+library(DOSE)
+library(biomaRt)
+library(EnhancedVolcano)
+library(parallel)
+library(simplifyEnrichment)
+
+cores2use <- detectCores() -2
+
+
+deal_with_NA <- function(df, column, value_to_change, final_value){
+  for (i in column){
+    print(i)
+    data.table::set(df,which(df[[i]] == value_to_change), i, final_value)
+  }
+}
+
+"%ni%" <- Negate("%in%")
+```
+
+# Initialisation
+
+## Data loading
+
+```{r}
+data.dir <- "/media/alexis/DATA/Proteomic/"
+
+Discovery_Cohort_Proteomic <- read.csv(paste0(data.dir,"Discovery_cohort.csv"))
+
+Discovery_Cohort_Proteomic_unimputed <- read.csv(paste0(data.dir,"Discovery_cohort_unimputed.csv"), check.names = F)
+
+Cell_lines_Proteomic <- read.csv(paste0(data.dir,"Cell_lines.csv"))
+
+CD34_Proteomic <- read.csv(paste0(data.dir,"CD34.csv"), check.names = F)
+
+Validation_cohort_Proteomic <- read.csv(paste0(data.dir,"Validation_cohort.csv"), dec = ",")
+```
+
+## Clinicals loading
+
+```{r}
+Discovery_clinicals <- readxl::read_excel("/media/alexis/DATA/Proteomic/1-s2.0-S1535610822000587-mmc7/Data_S1_Discovery_Cohort.xlsx", sheet = "Clinical Characteristics")
+
+Discovery_Genotype <- readxl::read_excel("/media/alexis/DATA/Proteomic/1-s2.0-S1535610822000587-mmc7/Data_S1_Discovery_Cohort.xlsx", sheet = "PanelSeq I")
+
+Discovery_Genotype_II <- readxl::read_excel("/media/alexis/DATA/Proteomic/1-s2.0-S1535610822000587-mmc7/Data_S1_Discovery_Cohort.xlsx", sheet = "PanelSeq II")
+
+Discovery_Genotype_II <- Discovery_Genotype_II[,c(1,3,4,2)]
+colnames(Discovery_Genotype_II) <- c("Pat_ID", "Type", "Frequency", "Gene")
+
+Discovery_Genotype <- rbind(Discovery_Genotype, Discovery_Genotype_II)
+rm(Discovery_Genotype_II)
+```
+
+## Phenotyping
+
+### Functions
+
+```{r}
+Make_mutation_subgroups <- function(mutations_of_interest_A, mutations_of_interest_B, mutations_to_skip, genotype = Discovery_Genotype, no_mutated_patients = c("F126", "F86", "F129", "F30")){
+  genotype_of_interest_A <- dplyr::filter(genotype, Gene %in% mutations_of_interest_A) %>% .$Pat_ID %>% unique()
+  genotype_of_interest_B <- dplyr::filter(genotype, Gene %in% mutations_of_interest_B) %>% .$Pat_ID %>% unique()
+
+  patient_to_skip <- dplyr::filter(genotype, Gene %in% mutations_to_skip) %>% .$Pat_ID %>% unique()
+  genotype_control <- genotype$Pat_ID[genotype$Pat_ID %ni% patient_to_skip] %>% unique()
+  genotype_of_interest_A <- intersect(genotype_of_interest_A, genotype_control)
+  genotype_of_interest_B <- intersect(genotype_of_interest_B, genotype_control)
+
+  genotype_control <- c(genotype_control[genotype_control %ni% genotype_of_interest_A & genotype_control %ni% genotype_of_interest_B], no_mutated_patients)
+  
+  pheno <- data.frame(Patient_ID = c(genotype_of_interest_A, genotype_of_interest_B, patient_to_skip, genotype_control), 
+                      pheno = c(rep(mutations_of_interest_A, length(genotype_of_interest_A)), rep(mutations_of_interest_B, length(genotype_of_interest_B)), rep("Others", length(patient_to_skip)), rep("Group_control", length(genotype_control))))
+  return(pheno)  
+}
+```
+
+```{r}
+Pheno <- Make_mutation_subgroups("IDH1", "IDH2",c())
+rownames(Pheno) <- Pheno$Patient_ID
+
+Pheno <- Pheno[colnames(Discovery_Cohort_Proteomic)[1:177],]
+Pheno$pheno %>% table
+```
+
+# Preparing analysis
+
+## Making sub-data
+
+```{r}
+data <- Discovery_Cohort_Proteomic_unimputed
+data$PG.Genes %>% duplicated() %>% any()
+
+data %>% group_by(PG.Genes) %>% summarize(frequency = n()) %>% arrange(desc(frequency)) %>% filter(frequency > 1)
+data_unique <- make_unique(data, "PG.Genes", "PG.UniProtIds", delim = ";")
+
+data_unique_log_reverted <- sapply(data_unique[,1:177], function(x){
+  sapply(x, function(y){
+    exp(y)
+  })
+})
+
+IDHwt_samples <- dplyr::filter(Pheno, pheno == "Group_control") %>% .$Patient_ID
+# IDH1
+
+sampling_IDHwt_IDH1 <- (Pheno$pheno == "IDH1") %>% table %>% .[2] %>% sample(IDHwt_samples, ., replace = F)
+data_unique_log_reverted_IDH1_IDHwt <- data_unique_log_reverted[,(Pheno$pheno == "IDH1" | Pheno$Patient_ID %in% sampling_IDHwt_IDH1)]
+data_unique_log_reverted_IDH1_IDHwt <- cbind(data_unique_log_reverted_IDH1_IDHwt, data_unique[,178:183])
+Pheno_IDH1_wt <- Pheno[Pheno$pheno == "IDH1" | Pheno$Patient_ID %in% sampling_IDHwt_IDH1,]
+Pheno_IDH1_wt$pheno <- sapply(Pheno_IDH1_wt$pheno, function(sample){
+  ifelse(stringr::str_detect(sample, "IDH1"), "mIDH1", "wtIDH")
+})
+pheno_se <- data.frame("label" = colnames(data)[1:177], condition = Pheno$pheno, replicate = 1:177)
+pheno_se_idh1_wt <- pheno_se[pheno_se$condition == "IDH1" | pheno_se$label %in% sampling_IDHwt_IDH1,]
+data_se_idh1_wt <- make_se(data_unique_log_reverted_IDH1_IDHwt, 1:nrow(Pheno_IDH1_wt), pheno_se_idh1_wt)
+data_se_idh1_wt
+plot_frequency(data_se_idh1_wt)
+
+# IDH2
+
+sampling_IDHwt_IDH2 <- (Pheno$pheno == "IDH2") %>% table %>% .[2] %>% sample(IDHwt_samples, ., replace = F)
+data_unique_log_reverted_IDH2_IDHwt <- data_unique_log_reverted[,(Pheno$pheno == "IDH2" | Pheno$Patient_ID %in% sampling_IDHwt_IDH2)]
+data_unique_log_reverted_IDH2_IDHwt <- cbind(data_unique_log_reverted_IDH2_IDHwt, data_unique[,178:183])
+Pheno_IDH2_wt <- Pheno[Pheno$pheno == "IDH2" | Pheno$Patient_ID %in% sampling_IDHwt_IDH2,]
+Pheno_IDH2_wt$pheno <- sapply(Pheno_IDH2_wt$pheno, function(sample){
+  ifelse(stringr::str_detect(sample, "IDH2"), "mIDH2", "wtIDH")
+})
+pheno_se_idh2_wt <- pheno_se[pheno_se$condition == "IDH2" | pheno_se$label %in% sampling_IDHwt_IDH2,]
+data_se_idh2_wt <- make_se(data_unique_log_reverted_IDH2_IDHwt, 1:nrow(Pheno_IDH2_wt), pheno_se_idh2_wt)
+data_se_idh2_wt
+plot_frequency(data_se_idh2_wt)
+
+# IDH1 vs IDH2
+
+data_unique_log_reverted_IDH1_IDH2 <- data_unique_log_reverted[,Pheno$pheno == "IDH1" | Pheno$pheno == "IDH2"]
+data_unique_log_reverted_IDH1_IDH2 <- cbind(data_unique_log_reverted_IDH1_IDH2, data_unique[,178:183])
+Pheno_IDH <- Pheno[Pheno$pheno == "IDH1" | Pheno$pheno == "IDH2",]
+pheno_se_IDH <- pheno_se[pheno_se$condition == "IDH1" | pheno_se$condition == "IDH2",]
+data_se_IDH <- make_se(data_unique_log_reverted_IDH1_IDH2, 1:nrow(Pheno_IDH), pheno_se_IDH)
+data_se_IDH
+plot_frequency(data_se_IDH)
+```
+
+## Looking at missing values
+
+```{r}
+data_filt_IDH1 <- filter_missval(data_se_idh1_wt, thr = 0)
+data_filt_IDH2 <- filter_missval(data_se_idh2_wt, thr = 0)
+data_filt_IDH <- filter_missval(data_se_IDH, thr = 0)
+
+plot_numbers(data_filt_IDH1)
+plot_numbers(data_filt_IDH2)
+plot_numbers(data_filt_IDH)
+```
+
+```{r}
+plot_coverage(data_filt_IDH1)
+plot_coverage(data_filt_IDH2)
+plot_coverage(data_filt_IDH)
+```
+
+## Normalisation
+
+```{r}
+for (i in colnames(data_filt_IDH1@assays@data@listData[[1]])){
+    data_filt_IDH1@assays@data@listData[[1]][,i][is.nan(data_filt_IDH1@assays@data@listData[[1]][,i])]<-NA
+}
+
+for (i in colnames(data_filt_IDH2@assays@data@listData[[1]])){
+    data_filt_IDH2@assays@data@listData[[1]][,i][is.nan(data_filt_IDH2@assays@data@listData[[1]][,i])]<-NA
+}
+for (i in colnames(data_filt_IDH@assays@data@listData[[1]])){
+    data_filt_IDH@assays@data@listData[[1]][,i][is.nan(data_filt_IDH@assays@data@listData[[1]][,i])]<-NA
+}
+
+data_norm_IDH1 <- normalize_vsn(data_filt_IDH1)
+data_norm_IDH2 <- normalize_vsn(data_filt_IDH2)
+data_norm_IDH <- normalize_vsn(data_filt_IDH)
+
+plot_normalization(data_filt_IDH1[,1:5], data_norm_IDH1[,1:5])
+plot_normalization(data_filt_IDH2[,1:5], data_norm_IDH2[,1:5])
+plot_normalization(data_filt_IDH[,1:5], data_norm_IDH[,1:5])
+
+```
+
+```{r}
+plot_missval(data_filt_IDH1[, 1:10])
+plot_missval(data_filt_IDH2[, 1:10])
+plot_missval(data_filt_IDH[, 1:10])
+```
+
+```{r}
+plot_detect(data_filt_IDH1)
+plot_detect(data_filt_IDH2)
+plot_detect(data_filt_IDH)
+```
+
+## Imputation of missing values
+
+```{r}
+data_imp_IDH1 <- impute(data_norm_IDH1, fun = "MinProb", q = 0.01)
+data_imp_IDH2 <- impute(data_norm_IDH2, fun = "MinProb", q = 0.01)
+data_imp_IDH <- impute(data_norm_IDH, fun = "MinProb", q = 0.01)
+
+data_imp_IDH1@assays@data@listData[[1]] %>%
+  write.table("~/GitHub/Thesis_paper/Datasets/Proteomic/mIDH1_data.tsv", 
+              sep = "\t", row.names = T, col.names = NA, quote = F)
+data_imp_IDH2@assays@data@listData[[1]] %>%
+  write.table("~/GitHub/Thesis_paper/Datasets/Proteomic/mIDH2_data.tsv", 
+              sep = "\t", row.names = T, col.names = NA, quote = F)
+data_imp_IDH@assays@data@listData[[1]] %>%
+  write.table("~/GitHub/Thesis_paper/Datasets/Proteomic/mIDH_data.tsv", 
+              sep = "\t", row.names = T, col.names = NA, quote = F)
+
+plot_imputation(data_norm_IDH1, data_imp_IDH1)
+plot_imputation(data_norm_IDH2, data_imp_IDH2)
+plot_imputation(data_norm_IDH, data_imp_IDH)
+```
+
+# Comparison of pheno analysis
+
+## DEG
+
+```{r}
+data_diff_IDH1 <- test_diff(data_imp_IDH1, type = "control", control = "Group_control")
+data_diff_IDH2 <- test_diff(data_imp_IDH2, type = "control", control = "Group_control")
+data_diff_IDH <- test_diff(data_imp_IDH, type = "control", control = "IDH1")
+
+dep_IDH1 <- add_rejections(data_diff_IDH1, alpha = 0.05, lfc = 0.5)
+dep_IDH2 <- add_rejections(data_diff_IDH2, alpha = 0.05, lfc = 0.5)
+dep_IDH <- add_rejections(data_diff_IDH, alpha = 0.05, lfc = 0.5)
+```
+
+## PCA
+
+```{r}
+plot_pca(dep_IDH1, n = 500, point_size = 4, label = F, indicate = "condition")
+plot_pca(dep_IDH2, n = 500, point_size = 4, label = F, indicate = "condition")
+plot_pca(dep_IDH, n = 500, point_size = 4, label = F, indicate = "condition")
+
+```
+
+## Heatmap
+
+```{r}
+plot_cor(dep_IDH1, significant = FALSE, lower = 0.75, upper = 1, pal = "Reds")
+plot_cor(dep_IDH2, significant = FALSE, lower = 0.75, upper = 1, pal = "Reds")
+plot_cor(dep_IDH, significant = FALSE, lower = 0.75, upper = 1, pal = "Reds")
+```
+
+```{r}
+plot_heatmap(dep_IDH1, type = "centered", kmeans = FALSE, 
+             k = 2, show_row_names = FALSE,
+             indicate = "condition")
+plot_heatmap(dep_IDH2, type = "centered", kmeans = FALSE, 
+             k = 2, show_row_names = FALSE,
+             indicate = "condition")
+plot_heatmap(dep_IDH, type = "centered", kmeans = FALSE, 
+             k = 2, show_row_names = FALSE,
+             indicate = "condition")
+```
+
+## Volcano
+
+```{r}
+plot_volcano(dep_IDH1, contrast = "IDH1_vs_Group_control", label_size = 5, add_names = TRUE, adjusted = F)
+plot_volcano(dep_IDH2, contrast = "IDH2_vs_Group_control", label_size = 5, add_names = TRUE, adjusted = F)
+plot_volcano(dep_IDH, contrast = "IDH2_vs_IDH1", label_size = 5, add_names = TRUE, adjusted = F)
+```
+
+```{r}
+plot_single(dep_IDH1, proteins = "CEBPA", type = "centered") + theme(legend.position = "none")
+#plot_single(dep_IDH2, proteins = "CEBPZ", type = "centered") + theme(legend.position = "none")
+plot_single(dep_IDH, proteins = "", type = "centered") + theme(legend.position = "none")
+
+plot_single(dep_IDH1, proteins = "HDGFRP2", type = "centered") + theme(legend.position = "none")
+plot_single(dep_IDH2, proteins = "HDGFRP2", type = "centered") + theme(legend.position = "none")
+plot_single(dep_IDH, proteins = "HDGFRP2", type = "centered") + theme(legend.position = "none")
+```
+
+```{r}
+df_long_IDH1 <- get_df_long(dep_IDH1)
+df_long_IDH2 <- get_df_long(dep_IDH2)
+df_long_IDH <- get_df_long(dep_IDH)
+```
+
+## Saving DEG
+
+```{r}
+Diff_Prot_exp_IDH1 <- dep_IDH1@elementMetadata@listData %>% 
+  as.data.frame() %>%
+  dplyr::select(c("name", "IDH1_vs_Group_control_diff", "IDH1_vs_Group_control_p.val"))
+
+Diff_Prot_exp_IDH2 <- dep_IDH2@elementMetadata@listData %>% 
+  as.data.frame() %>%
+  dplyr::select(c("name", "IDH2_vs_Group_control_diff", "IDH2_vs_Group_control_p.val"))
+
+Diff_Prot_exp_IDH <- dep_IDH@elementMetadata@listData %>% 
+  as.data.frame() %>%
+  dplyr::select(c("name", "IDH2_vs_IDH1_diff", "IDH2_vs_IDH1_p.val"))
+
+write.table(Diff_Prot_exp_IDH1, "~/GitHub/Thesis_paper/Results/Proteo/Diff_Prot_exp_IDH1_IDHwt.tsv", quote = F, row.names = F, sep = "\t")
+Diff_Prot_exp_IDH1_sig <- Diff_Prot_exp_IDH1 %>% 
+  dplyr::filter(IDH1_vs_Group_control_p.val < 0.05 & abs(IDH1_vs_Group_control_diff) > 0.5)
+  
+Diff_Prot_exp_IDH1_sig %>%
+  write.table("~/GitHub/Thesis_paper/Results/Proteo/Diff_sig_Prot_exp_IDH1_IDHwt.tsv", quote = F, row.names = F, sep = "\t")
+
+
+
+
+write.table(Diff_Prot_exp_IDH2, "~/GitHub/Thesis_paper/Results/Proteo/Diff_Prot_exp_IDH2_IDHwt.tsv", quote = F, row.names = F, sep = "\t")
+Diff_Prot_exp_IDH2_sig <- Diff_Prot_exp_IDH2 %>% 
+  dplyr::filter(IDH2_vs_Group_control_p.val < 0.05 & abs(IDH2_vs_Group_control_diff) > 0.5) 
+Diff_Prot_exp_IDH2_sig %>%
+  write.table("~/GitHub/Thesis_paper/Results/Proteo/Diff_sig_Prot_exp_IDH2_IDHwt.tsv", quote = F, row.names = F, sep = "\t")
+
+
+
+
+write.table(Diff_Prot_exp_IDH, "~/GitHub/Thesis_paper/Results/Proteo/Diff_Prot_exp_IDH2_IDH1.tsv", quote = F, row.names = F, sep = "\t")
+Diff_Prot_exp_IDH_sig <- Diff_Prot_exp_IDH %>% 
+  dplyr::filter(IDH2_vs_IDH1_p.val < 0.05 & abs(IDH2_vs_IDH1_diff) > 0.5) 
+Diff_Prot_exp_IDH_sig %>% 
+  write.table("~/GitHub/Thesis_paper/Results/Proteo/Diff_sig_Prot_exp_IDH2_IDH1.tsv", quote = F, row.names = F, sep = "\t")
+
+
+Diff_Prot_exp_IDH1 %>% 
+  dplyr::filter(IDH1_vs_Group_control_p.val < 0.05 & abs(IDH1_vs_Group_control_diff) > 0.5) %>%
+  .$IDH1_vs_Group_control_diff %>% hist(breaks = 20)
+Diff_Prot_exp_IDH2 %>% 
+  dplyr::filter(IDH2_vs_Group_control_p.val < 0.05 & abs(IDH2_vs_Group_control_diff) > 0.5) %>%
+  .$IDH2_vs_Group_control_diff %>% hist(breaks = 20)
+Diff_Prot_exp_IDH %>% 
+  dplyr::filter(IDH2_vs_IDH1_p.val < 0.05 & abs(IDH2_vs_IDH1_diff) > 0.5) %>%
+  .$IDH2_vs_IDH1_diff %>% hist(breaks = 20)
+```
+
+## Volcano
+
+```{r}
+plot_volcano(dep_IDH1, contrast = "IDH1_vs_Group_control", label_size = 5, add_names = TRUE, adjusted = F)
+plot_volcano(dep_IDH2, contrast = "IDH2_vs_Group_control", label_size = 5, add_names = TRUE, adjusted = F)
+plot_volcano(dep_IDH, contrast = "IDH2_vs_IDH1", label_size = 5, add_names = TRUE, adjusted = F)
+```
+
+
+```{r}
+Diff_Prot_exp_IDH1_4_volcano_fig <- Diff_Prot_exp_IDH1
+Diff_Prot_exp_IDH1_4_volcano_fig$IDH1_vs_Group_control_diff <- -Diff_Prot_exp_IDH1_4_volcano_fig$IDH1_vs_Group_control_diff
+
+Volcano_IDH1_IDHwt <- EnhancedVolcano(
+      toptable = Diff_Prot_exp_IDH1_4_volcano_fig,
+      lab = Diff_Prot_exp_IDH1_4_volcano_fig$name,
+      x = "IDH1_vs_Group_control_diff",
+      y = "IDH1_vs_Group_control_p.val",
+      FCcutoff = 0.5,
+      pCutoff = 0.05,
+      title = "IDHwt vs IDH1",
+      subtitle = NA,
+      subtitleLabSize = 0, ylim = c(0, 5), xlim=c(-4, 5)
+  )
+
+Volcano_IDH1_IDHwt %>% ggsave(filename = "~/GitHub/Thesis_paper/Results/Proteo/Figures/Volcano/Volcano_IDH1_IDHwt.png", bg = "white", width = 7600, height = 4200, units = "px")
+
+Volcano_IDH2_IDHwt <- EnhancedVolcano(
+      toptable = Diff_Prot_exp_IDH2,
+      lab = Diff_Prot_exp_IDH2$name,
+      x = "IDH2_vs_Group_control_diff",
+      y = "IDH2_vs_Group_control_p.val",
+      FCcutoff = 0.5,
+      pCutoff = 0.05,
+      title = "IDH2 vs IDHwt",
+      subtitle = NA,
+      subtitleLabSize = 0, ylim = c(0, 5), xlim = c(-4, 5)
+  )
+
+Volcano_IDH2_IDHwt %>% ggsave(filename = "~/GitHub/Thesis_paper/Results/Proteo/Figures/Volcano/Volcano_IDH2_IDHwt.png", bg = "white", width = 7600, height = 4200, units = "px")
+
+Volcano_IDH2_IDH1 <- EnhancedVolcano(
+      toptable = Diff_Prot_exp_IDH,
+      lab = Diff_Prot_exp_IDH$name,
+      x = "IDH2_vs_IDH1_diff",
+      y = "IDH2_vs_IDH1_p.val",
+      FCcutoff = 0.5,
+      pCutoff = 0.05,
+      title = "IDH2 vs IDH1",
+      subtitle = NA,
+      subtitleLabSize = 0, ylim = c(0, 5), xlim = c(-3, 4)
+  )
+
+
+Volcano_IDH2_IDH1 %>% ggsave(filename = "~/GitHub/Thesis_paper/Results/Proteo/Figures/Volcano/Volcano_IDH2_IDH1.png", bg = "white", width = 7600, height = 4200, units = "px")
+```
+
+
+```{r}
+Volcano_IDH1_IDHwt
+Volcano_IDH2_IDHwt
+Volcano_IDH2_IDH1
+```
+
+# GO KEGG WP Enrichments
+
+## Functions
+
+```{r}
+GO_KEGG_WP_MKEGG <- function(List_positive, List_negative){
+  list_enrichments <- list()
+  list_enrichments[["GO_positive"]] <- enrichGO(List_positive, OrgDb = org.Hs.eg.db, universe = GO_universe, keyType = "SYMBOL", pvalueCutoff = 0.2)
+  list_enrichments[["GO_negative"]] <- enrichGO(List_negative, OrgDb = org.Hs.eg.db, universe = GO_universe, keyType = "SYMBOL", pvalueCutoff = 0.2)
+  
+  entrez_id_positive <- dplyr::filter(genes, hgnc_symbol %in% List_positive) %>%
+    .$entrezgene_id %>% unique
+  entrez_id_negative <- dplyr::filter(genes, hgnc_symbol %in% List_negative) %>%
+    .$entrezgene_id %>% unique
+  universe_entrez <- dplyr::filter(genes, hgnc_symbol %in% GO_universe) %>%
+    .$entrezgene_id %>% unique
+  
+  list_enrichments[["KEGG_positive"]] <- enrichKEGG(entrez_id_positive, organism = "hsa", 
+                                                  keyType = 'ncbi-geneid', pvalueCutoff = 0.1, 
+                                                  pAdjustMethod = "none", universe = universe_entrez)
+  list_enrichments[["KEGG_negative"]] <- enrichKEGG(entrez_id_negative, organism = "hsa", 
+                                                    keyType = 'ncbi-geneid', pvalueCutoff = 0.1, 
+                                                    pAdjustMethod = "none", universe = universe_entrez)
+  
+  list_enrichments[["MKEGG_positive"]] <- enrichMKEGG(entrez_id_positive, organism = "hsa", 
+                                                    keyType = 'ncbi-geneid', pvalueCutoff = 0.1, 
+                                                    pAdjustMethod = "none", universe = universe_entrez)
+  list_enrichments[["MKEGG_negative"]] <- enrichMKEGG(entrez_id_negative, organism = "hsa", 
+                                                      keyType = 'ncbi-geneid', pvalueCutoff = 0.1, 
+                                                      pAdjustMethod = "none", universe = universe_entrez)  
+  
+  list_enrichments[["WP_positive"]] <- enrichWP(entrez_id_positive, organism = "Homo sapiens", 
+                                              universe = universe_entrez)
+  list_enrichments[["WP_negative"]] <- enrichWP(entrez_id_negative, organism = "Homo sapiens", 
+                                                universe = universe_entrez)
+  
+  res <- lapply(names(list_enrichments), function(onto){
+    list_enrichments[[onto]]@result$qvalue <- list_enrichments[[onto]]@result$pvalue
+    list_enrichments[[onto]]@result$p.adjust <- list_enrichments[[onto]]@result$pvalue
+    list_enrichments[[onto]]
+  })
+  
+  names(res) <- names(list_enrichments)
+  
+  return(res)
+}
+
+Make_enrich_plot <- function(enrichment, path){
+  n_enrich <- nrow(dplyr::filter(enrichment@result, pvalue < 0.1))
+  if(n_enrich == 0){
+    return(NULL)
+  }
+  height_plot <- 200 + (n_enrich *120)
+  p <- dotplot(enrichment, showCategory = n_enrich)
+  ggsave(path, p, bg = "white", width = 3800, height = height_plot, units = "px", limitsize = FALSE)
+  p
+}
+```
+
+```{r}
+mart <- biomaRt::useMart(biomart = "ENSEMBL_MART_ENSEMBL",
+                         dataset = "hsapiens_gene_ensembl")
+
+GO_universe <- Diff_Prot_exp_IDH1$name %>% unique
+
+genes <- getBM(filters = "hgnc_symbol",
+               attributes = c("ensembl_gene_id","entrezgene_id", "hgnc_symbol"),
+               values = GO_universe, 
+               mart = mart)
+```
+
+
+## Diff prot
+
+```{r}
+hs <- org.Hs.eg.db
+
+DEProts_IDH1_up <- Diff_Prot_exp_IDH1 %>% 
+  dplyr::filter(IDH1_vs_Group_control_p.val < 0.05 & IDH1_vs_Group_control_diff > 0.5) %>% 
+  .$name
+
+DEProts_IDH2_up <- Diff_Prot_exp_IDH2 %>% 
+  dplyr::filter(IDH2_vs_Group_control_p.val < 0.05 & IDH2_vs_Group_control_diff > 0.5) %>% 
+  .$name
+
+DEProts_IDH_up <- Diff_Prot_exp_IDH %>% 
+  dplyr::filter(IDH2_vs_IDH1_p.val < 0.05 & IDH2_vs_IDH1_diff > 0.5) %>% 
+  .$name
+
+DEProts_IDH1_down <- Diff_Prot_exp_IDH1 %>% 
+  dplyr::filter(IDH1_vs_Group_control_p.val < 0.05 & IDH1_vs_Group_control_diff < -0.5) %>% 
+  .$name
+
+DEProts_IDH2_down <- Diff_Prot_exp_IDH2 %>% 
+  dplyr::filter(IDH2_vs_Group_control_p.val < 0.05 & IDH2_vs_Group_control_diff < -0.5) %>% 
+  .$name
+
+DEProts_IDH_down <- Diff_Prot_exp_IDH %>% 
+  dplyr::filter(IDH2_vs_IDH1_p.val < 0.05 & IDH2_vs_IDH1_diff < -0.5) %>% 
+  .$name
+```
+
+## GO KEGG WP
+
+```{r}
+IDH1_GO_KEGG_WP_vs_Control <- GO_KEGG_WP_MKEGG(DEProts_IDH1_up, DEProts_IDH1_down)
+IDH2_GO_KEGG_WP_vs_Control <- GO_KEGG_WP_MKEGG(DEProts_IDH2_up, DEProts_IDH2_down)
+IDH2_GO_KEGG_WP_vs_IDH1 <- GO_KEGG_WP_MKEGG(DEProts_IDH_up, DEProts_IDH_down)
+```
+
+## Saving plots
+
+```{r}
+lapply(names(IDH1_GO_KEGG_WP_vs_Control), function(enrichment){
+  Make_enrich_plot(IDH1_GO_KEGG_WP_vs_Control[[enrichment]], paste0("~/GitHub/Thesis_paper/Results/Proteo/Figures/IDH1_vs_IDHwt_", enrichment, ".png"))
+})
+
+lapply(names(IDH2_GO_KEGG_WP_vs_Control), function(enrichment){
+  Make_enrich_plot(IDH2_GO_KEGG_WP_vs_Control[[enrichment]], paste0("~/GitHub/Thesis_paper/Results/Proteo/Figures/IDH2_vs_IDHwt_", enrichment, ".png"))
+})
+
+lapply(names(IDH2_GO_KEGG_WP_vs_IDH1), function(enrichment){
+  Make_enrich_plot(IDH2_GO_KEGG_WP_vs_IDH1[[enrichment]], paste0("~/GitHub/Thesis_paper/Results/Proteo/Figures/IDH1_vs_IDH2_", enrichment, ".png"))
+})
+```
+
+## Saving tables
+
+```{r}
+lapply(names(IDH1_GO_KEGG_WP_vs_Control), function(enrichment){
+  IDH1_GO_KEGG_WP_vs_Control[[enrichment]]@result %>% .[c(1:5, 8:9)] %>% 
+    write.table(paste0("~/GitHub/Thesis_paper/Results/Proteo/Tables/Enrichments/IDH1_vs_Control_", enrichment, ".tsv"), sep = "\t", quote=F, col.names = NA)
+})
+
+lapply(names(IDH2_GO_KEGG_WP_vs_Control), function(enrichment){
+  IDH2_GO_KEGG_WP_vs_Control[[enrichment]]@result %>% .[c(1:5, 8:9)] %>% 
+    write.table(paste0("~/GitHub/Thesis_paper/Results/Proteo/Tables/Enrichments/IDH2_vs_Control_", enrichment, ".tsv"), sep = "\t", quote=F, col.names = NA)
+})
+
+lapply(names(IDH2_GO_KEGG_WP_vs_IDH1), function(enrichment){
+  IDH2_GO_KEGG_WP_vs_IDH1[[enrichment]]@result %>% .[c(1:5, 8:9)] %>% 
+    write.table(paste0("~/GitHub/Thesis_paper/Results/Proteo/Tables/Enrichments/IDH2_vs_IDH1_", enrichment, ".tsv"), sep = "\t", quote=F, col.names = NA)
+})
+```
+
+# GSEA analysis
+
+## Functions
+
+```{r}
+Do_GSEA_analysis <- function(Diff_prot_data){
+  deprots <- Diff_prot_data[2]
+  names(deprots) <- Diff_prot_data$name
+  deprots <- sort(deprots, decreasing = TRUE)
+
+  deprot_entrez <- deprots[names(deprots) %in% genes$hgnc_symbol]
+  names(deprot_entrez) <- sapply(names(deprot_entrez), function(hgnc_name){
+    dplyr::filter(genes, hgnc_symbol == hgnc_name) %>% .$entrezgene_id %>% unlist %>% unique
+  })
+  
+  list_enrichments <- list()
+  
+  list_enrichments[["KEGG"]] <- gseKEGG(deprot_entrez, minGSSize = 5, pvalueCutoff = 0.05, pAdjustMethod = "none", verbose = T)
+  
+  res <- lapply(names(list_enrichments), function(onto){
+    list_enrichments[[onto]]@result$qvalue <- list_enrichments[[onto]]@result$pvalue
+    list_enrichments[[onto]]@result$p.adjust <- list_enrichments[[onto]]@result$pvalue
+    list_enrichments[[onto]]
+  })
+  
+  names(res) <- names(list_enrichments)
+  res
+}
+
+Make_geneset <- function(DEGs){
+  DEGs <- merge(DEGs, genes, by.x=  "name", by.y = "hgnc_symbol")
+  DEGs <- DEGs[,c(5, 2, 3)]
+  colnames(DEGs) <- c("entrezgene_id", "log2FoldChange", "pvalue")
+  geneset <- DEGs$log2FoldChange
+  names(geneset) <- DEGs$entrezgene_id
+  geneset[order(geneset, decreasing = T)]
+}
+
+Do_enrichment <- function(Ont, Geneset){
+  if(Ont=="GO"){
+    res <- gseGO(Geneset, OrgDb = org.Hs.eg.db, keyType = "ENTREZID", ont = "all", pAdjustMethod = "BH",
+            minGSSize = 10, maxGSSize = 1000, pvalueCutoff = 0.05, verbose = F) %>%
+      .$ID %>% GO_similarity %>% simplifyGO()
+  }else if(Ont=="KEGG"){
+    res <- gseKEGG(Geneset, pvalueCutoff = 0.05, pAdjustMethod = "BH", 
+                   verbose = F, organism = 'hsa', keyType = 'ncbi-geneid')
+  }else if(Ont=="MKEGG"){
+    res <- gseMKEGG(Geneset, pvalueCutoff = 0.1, pAdjustMethod = "none", 
+                   verbose = F, organism = 'hsa', keyType = 'ncbi-geneid')
+  }else if(Ont == "WP"){
+    res <- gseWP(Geneset, pvalueCutoff = 0.1, pAdjustMethod = "none", 
+                 verbose = F, organism = "Homo sapiens")
+  }
+  n_enrich <- nrow(dplyr::filter(res@result, pvalue < 0.05))
+  if(n_enrich == 0){
+    return(NULL)
+  }
+  res <- res %>% 
+    setReadable(OrgDb = org.Hs.eg.db, keyType = "ENTREZID")
+  res
+}
+
+GSEA_KEGG_MKEGG_WP_enrichments_function <- function(DEG_entrez_datatable){
+  geneset <- Make_geneset(DEG_entrez_datatable)
+  ont <- c("GO", "KEGG")
+  enrichments <- lapply(ont, function(onto){
+    Do_enrichment(onto, geneset)
+  })
+  names(enrichments) <- ont
+  enrichments
+}
+
+Make_enrich_gsea_plot <- function(enrichment, path, logFC_data){
+  n_enrich <- nrow(dplyr::filter(enrichment@result, pvalue < 0.05))
+  print(n_enrich)
+  if(n_enrich == 0){
+    return(NULL)
+  }else if(n_enrich >= 20){
+    n_enrich <- 20
+  }
+  print(n_enrich)
+  height_plot <- 200 + (n_enrich *120)
+  print(height_plot)
+  cplot <- cnetplot(enrichment, showCategory = n_enrich, foldChange = logFC_data)
+  p <- dotplot(enrichment, showCategory = n_enrich)
+  rplot <- ridgeplot(enrichment, showCategory = n_enrich)
+  ggsave(paste0(path, "_dotplot.png"), p, bg = "white", width = 3800, height = height_plot, units = "px", limitsize = FALSE)
+  ggsave(paste0(path, "_cnetplot.png"), cplot, bg = "white", width = 3800, height = 3800, units = "px", limitsize = FALSE)
+  ggsave(paste0(path, "_ridgeplot.png"), rplot, bg = "white", width = 3800, height = height_plot, units = "px", limitsize = FALSE)
+  p
+  cplot
+  rplot
+  list(p, cplot, rplot)
+}
+```
+
+## KEGG MKEGG WP GSEA
+
+```{r}
+DEP_list <- list("IDH1_vs_IDH2" = Diff_Prot_exp_IDH, 
+                 "IDH1_vs_IDHwt" = Diff_Prot_exp_IDH1,
+                 "IDH2_vs_IDHwt" = Diff_Prot_exp_IDH2)
+```
+
+```{r}
+GSEA_enrichments <- lapply(names(DEP_list), function(Comp){
+  GSEA_KEGG_MKEGG_WP_enrichments_function(DEP_list[[Comp]])
+})
+names(GSEA_enrichments) <- names(DEP_list)
+
+lapply(names(GSEA_enrichments), function(comp){
+  genset_comp <- Make_geneset(DEP_list[[comp]])
+  lapply(names(GSEA_enrichments[[comp]]), function(enrich){
+    if(enrich == "GO"){
+      tmp <- GSEA_enrichments[[comp]][[enrich]]$ID %>% GO_similarity
+      plots <- simplifyGO(tmp)
+      plots %>%
+        ggsave(paste0("~/GitHub/Thesis_paper/Results/Proteo/Figures/GSEA/GSEA_", comp, "_", enrich, "_simplify_plot.png"), bg = "white", width = 3800, height = 3800, units = "px", limitsize = FALSE)
+    }else{
+      Make_enrich_gsea_plot(GSEA_enrichments[[comp]][[enrich]],
+                            paste0("~/GitHub/Thesis_paper/Results/Proteo/Figures/GSEA/GSEA_", comp, "_", enrich), genset_comp)
+      
+    }
+  })
+})
+
+names(GSEA_enrichments) <- names(DEP_list)
+```
+
+
+
+```{r}
+IDH1_wt_GSEA <- Do_GSEA_analysis(Diff_Prot_exp_IDH1)
+IDH2_wt_GSEA <- Do_GSEA_analysis(Diff_Prot_exp_IDH2)
+IDH2_IDH1_GSEA <- Do_GSEA_analysis(Diff_Prot_exp_IDH)
+```
+
+## Saving plots
+
+```{r}
+lapply(names(IDH1_wt_GSEA), function(enrichment){
+  Make_enrich_plot(IDH1_wt_GSEA[[enrichment]], paste0("~/GitHub/Thesis_paper/Results/Proteo/Figures/GSEA/GSEA_IDH1_vs_IDHwt_", enrichment, ".png"))
+})
+
+lapply(names(IDH2_wt_GSEA), function(enrichment){
+  Make_enrich_plot(IDH2_wt_GSEA[[enrichment]], paste0("~/GitHub/Thesis_paper/Results/Proteo/Figures/GSEA/GSEA_IDH2_vs_IDHwt_", enrichment, ".png"))
+})
+
+lapply(names(IDH2_IDH1_GSEA), function(enrichment){
+  Make_enrich_plot(IDH2_IDH1_GSEA[[enrichment]], paste0("~/GitHub/Thesis_paper/Results/Proteo/Figures/GSEA/GSEA_IDH2_vs_IDH1_", enrichment, ".png"))
+})
+```
+
+## Saving tables
+
+```{r}
+lapply(names(IDH1_wt_GSEA), function(enrichment){
+  if(nrow(IDH1_wt_GSEA[[enrichment]]@result) > 0){
+    IDH1_wt_GSEA[[enrichment]]@result %>% .[c(1:6, 9:11)] %>% 
+      write.table(paste0("~/GitHub/Thesis_paper/Results/Proteo/Tables/Enrichments/GSEA/IDH1_vs_Control_", enrichment, ".tsv"), sep = "\t", quote=F, col.names = NA)
+  }
+})
+
+lapply(names(IDH2_wt_GSEA), function(enrichment){
+  if(nrow(IDH2_wt_GSEA[[enrichment]]@result) > 0){
+    IDH2_wt_GSEA[[enrichment]]@result %>% .[c(1:6, 9:11)] %>% 
+      write.table(paste0("~/GitHub/Thesis_paper/Results/Proteo/Tables/Enrichments/GSEA/IDH2_vs_Control_", enrichment, ".tsv"), sep = "\t", quote=F, col.names = NA)
+  }
+})
+
+lapply(names(IDH2_IDH1_GSEA), function(enrichment){
+  if(nrow(IDH2_IDH1_GSEA[[enrichment]]@result) > 0){
+    IDH2_IDH1_GSEA[[enrichment]]@result %>% .[c(1:6, 9:11)] %>% 
+      write.table(paste0("~/GitHub/Thesis_paper/Results/Proteo/Tables/Enrichments/GSEA/IDH2_vs_IDH1_", enrichment, ".tsv"), sep = "\t", quote=F, col.names = NA)
+  }
+})
+```
+
+# Cluster compare results
+
+## Functions
+
+```{r}
+Compare_Enrichments <- function(List_DEGs, only_up=F, only_down=F, logFC_threshold = 0.5, List_ready = F){
+  if(List_ready){
+    list_direct_ID <- lapply(names(List_DEGs), function(comp){
+      data.table::data.table(Entrez = List_DEGs[[comp]], group = comp)
+    })
+  }else{
+    list_direct_ID <- lapply(names(List_DEGs), function(Comparison){
+      df <- List_DEGs[[Comparison]]
+      colnames(df) <- c("name", "logFC", "pval")
+      up <- dplyr::filter(df, logFC > logFC_threshold & pval < 0.05) %>% .$name %>% unique
+      down <- dplyr::filter(df, logFC < -logFC_threshold & pval < 0.05) %>% .$name %>% unique
+      if(only_up){
+        down <- up
+      }else if(only_down){
+        up <- down
+      }
+      if(only_up & only_down){
+        up <- dplyr::filter(df, logFC > logFC_threshold & pval < 0.05) %>% .$name %>% unique
+        down <- dplyr::filter(df, logFC < -logFC_threshold & pval < 0.05) %>% .$name %>% unique
+      }
+      ids <- c(up, down) %>% unique
+      data.table::data.table(Entrez = ids, group = Comparison)
+    })
+  }
+  names(list_direct_ID) <- names(List_DEGs)
+  mydf <- data.table::rbindlist(list_direct_ID)
+  go_cluster <- compareCluster(Entrez~group, data = mydf, fun = "enrichGO", OrgDb = org.Hs.eg.db, 
+                 keyType = "SYMBOL", pvalueCutoff = 0.05, pAdjustMethod = "none", qvalueCutoff = 1, 
+                 universe = Prot_universe_hgnc)
+  mydf_entrez <- merge(mydf, genes, by.x = "Entrez", by.y = "hgnc_symbol")
+  kegg_cluster <- compareCluster(entrezgene_id~group, data = mydf_entrez, fun = "enrichKEGG", 
+                                 organism = "hsa", qvalueCutoff = 1,
+                                 keyType = 'ncbi-geneid', pvalueCutoff = 0.05, 
+                                 pAdjustMethod = "none", universe = Prot_universe_entrez) 
+  
+  List("GO" = go_cluster,
+       "KEGG" = kegg_cluster)
+}
+
+Auto_set_readable <- function(Results_cluster_KEGG_WP){
+  setReadable(Results_cluster_KEGG_WP, OrgDb = org.Hs.eg.db, keyType = "ENTREZID")
+}
+
+```
+
+```{r}
+Prot_universe_hgnc <- c(Diff_Prot_exp_IDH$name, Diff_Prot_exp_IDH1$name, Diff_Prot_exp_IDH2$name) %>% unique
+Prot_universe_entrez <- dplyr::filter(genes, hgnc_symbol %in% Prot_universe_hgnc) %>% .$entrezgene_id
+
+List_IDH_comp <- list("IDH1_vs_IDH2" = dplyr::filter(Diff_Prot_exp_IDH, IDH2_vs_IDH1_diff < -0.5 & IDH2_vs_IDH1_p.val < 0.05) %>%
+                        .$name %>% unique,
+                      "IDH2_vs_IDH1" = dplyr::filter(Diff_Prot_exp_IDH, IDH2_vs_IDH1_diff > 0.5 & IDH2_vs_IDH1_p.val < 0.05) %>%
+                        .$name %>% unique,
+                      "IDH1_vs_IDHwt" = dplyr::filter(Diff_Prot_exp_IDH1, IDH1_vs_Group_control_diff > 0.5 & IDH1_vs_Group_control_p.val < 0.05) %>%
+                        .$name %>% unique, 
+                      "IDH2_vs_IDHwt" = dplyr::filter(Diff_Prot_exp_IDH2, IDH2_vs_Group_control_diff > 0.5 & IDH2_vs_Group_control_p.val < 0.05) %>%
+                        .$name %>% unique)
+
+
+List_IDs <- list("IDH1_vs_Control" = Diff_Prot_exp_IDH1,
+                         "IDH2_vs_Control" = Diff_Prot_exp_IDH2,
+                         "IDH2_vs_IDH1" = Diff_Prot_exp_IDH)
+```
+
+
+```{r}
+Cluster_comparison_up <- Compare_Enrichments(List_IDs, only_up = T, logFC_threshold = 0.5)
+
+IDH_cluster_comparaison <- Compare_Enrichments(List_IDH_comp, List_ready = T)
+```
+
+```{r}
+lapply(names(IDH_cluster_comparaison), function(ont){
+  n <- 10
+  p <- dotplot(IDH_cluster_comparaison[[ont]], showCategory = n, font.size = 15) 
+  height_param <- n*6*120 +200
+  ggsave(paste0("~/GitHub/Thesis_paper/Results/Proteo/Figures/GO/IDH_cluster_comp_", ont, ".png"), p, bg = "white", width = 5700, 
+         height = height_param, units = "px", limitsize = FALSE)
+ if(ont == "KEGG"){
+    pcnet <- Auto_set_readable(IDH_cluster_comparaison[[ont]]) %>% cnetplot(showCategory = n, 
+                                                                          cex_label_gene = 2, cex_label_category = 2) 
+  }else{
+    pcnet <- cnetplot(IDH_cluster_comparaison[[ont]], showCategory = n, cex_label_gene = 2, cex_label_category = 2) 
+  }
+  height_param <- n*4*120 +200
+  ggsave(paste0("~/GitHub/Thesis_paper/Results/Proteo/Figures/GO/IDH_cluster_comp_", ont, "_cnetplot.png"), pcnet, bg = "white", width = 5700, 
+         height = 5700, units = "px", limitsize = FALSE)
+})
+```
+
+
+```{r}
+Cluster_comparison <- Compare_Enrichments(List_IDs)
+Cluster_comparison_down <- Compare_Enrichments(List_IDs, only_down = T, logFC_threshold = 0.5)
+```
+
+
+
+```{r}
+n <- 10
+p <- dotplot(Cluster_comparison_up$GO, showCategory = n) 
+height_param <- n*4*120 +200
+ggsave("~/GitHub/Thesis_paper/Results/Proteo/Figures/GO/Cluster_GO_up_plot.png", p, bg = "white", width = 5700, 
+       height = height_param, units = "px", limitsize = FALSE)
+
+pcnet <- cnetplot(Cluster_comparison_up$GO, showCategory = n, cex_label_gene = 2, cex_label_category = 2) 
+height_param <- n*4*120 +200
+ggsave("~/GitHub/Thesis_paper/Results/Proteo/Figures/GO/Cluster_GO_up_cnetplot_0.1.png", pcnet, bg = "white", width = 5700, 
+       height = 5700, units = "px", limitsize = FALSE)
+```
+
+```{r}
+n <- 10
+p <- dotplot(Cluster_comparison_down$GO, showCategory = n) 
+height_param <- n*4*120 +200
+ggsave("~/GitHub/Thesis_paper/Results/Proteo/Figures/GO/Cluster_GO_down_plot.png", p, bg = "white", width = 5700, 
+       height = height_param, units = "px", limitsize = FALSE)
+
+pcnet <- cnetplot(Cluster_comparison_down$GO, showCategory = n*2, cex_label_gene = 2, cex_label_category = 2) 
+height_param <- n*4*120 +200
+ggsave("~/GitHub/Thesis_paper/Results/Proteo/Figures/GO/Cluster_GO_down_cnetplot.png", pcnet, bg = "white", width = 5700, 
+       height = 5700, units = "px", limitsize = FALSE)
+```
+
+```{r}
+n <- 10
+p <- dotplot(Cluster_comparison_up$KEGG, showCategory = n) 
+height_param <- n*4*120 +200
+ggsave("~/GitHub/Thesis_paper/Results/Proteo/Figures/GO/Cluster_KEGG_up_plot.png", p, bg = "white", width = 5700, 
+       height = height_param, units = "px", limitsize = FALSE)
+
+pcnet <- cnetplot(Auto_set_readable(Cluster_comparison_up$KEGG), showCategory = n, cex_label_gene = 2, cex_label_category = 2) 
+height_param <- n*4*120 +200
+ggsave("~/GitHub/Thesis_paper/Results/Proteo/Figures/GO/Cluster_KEGG_up_cnetplot.png", pcnet, bg = "white", width = 5700, 
+       height = 5700, units = "px", limitsize = FALSE)
+```
+
+```{r}
+n <- 10
+p <- dotplot(Cluster_comparison_down$KEGG, showCategory = n) 
+height_param <- n*4*120 +200
+ggsave("~/GitHub/Thesis_paper/Results/Proteo/Figures/GO/Cluster_KEGG_down_plot.png", p, bg = "white", width = 5700, 
+       height = height_param, units = "px", limitsize = FALSE)
+
+pcnet <- cnetplot(Auto_set_readable(Cluster_comparison_down$KEGG), showCategory = n) 
+height_param <- n*4*120 +200
+ggsave("~/GitHub/Thesis_paper/Results/Proteo/Figures/GO/Cluster_KEGG_down_cnetplot.png", pcnet, bg = "white", width = 5700, 
+       height = 5700, units = "px", limitsize = FALSE)
+```
+
+
+
+# Make fppi network
+
+## Functions
+
+```{r}
+Make_fPPI_specific_network <- function(Diff_data_sig){
+  dplyr::filter(fPPI, Gene1 %in% Diff_data_sig$name | Gene2 %in% Diff_data_sig$name)
+}
+```
+
+## Making Network
+
+```{r}
+fPPI <- read.table("~/Documents/List_genes_from_transcriptome/FIsInGene_020720_with_annotations.tsv", sep = "\t", header = T)
+
+fPPI_IDH1_wt <- dplyr::filter(fPPI, Gene1 %in% Diff_Prot_exp_IDH1_sig$name | Gene2 %in% Diff_Prot_exp_IDH1_sig$name)
+fPPI_IDH2_wt <- dplyr::filter(fPPI, Gene1 %in% Diff_Prot_exp_IDH2_sig$name | Gene2 %in% Diff_Prot_exp_IDH2_sig$name)
+fPPI_IDH2_IDH1 <- dplyr::filter(fPPI, Gene1 %in% Diff_Prot_exp_IDH_sig$name | Gene2 %in% Diff_Prot_exp_IDH_sig$name)
+```
+
+## Saving network
+
+```{r}
+fPPI_IDH1_wt %>%
+  write.table("~/GitHub/Thesis_paper/Results/Proteo/Cytoscape/fPPI_IDH1_wt.tsv", sep = "\t", quote = F, col.names = NA)
+fPPI_IDH2_wt %>%
+  write.table("~/GitHub/Thesis_paper/Results/Proteo/Cytoscape/fPPI_IDH2_wt.tsv", sep = "\t", quote = F, col.names = NA)
+fPPI_IDH2_IDH1 %>%
+  write.table("~/GitHub/Thesis_paper/Results/Proteo/Cytoscape/fPPI_IDH2_IDH1.tsv", sep = "\t", quote = F, col.names = NA)
+```
+
+# Comparing Networks
+
+## Functions
+
+```{r}
+Mergeing_networks <- function(Network_A, Network_B, Main_Network, Network_C = NULL, Network_D=NULL){
+  nodes_network_A <- paste(Network_A$Gene1, Network_A$Gene2, sep = "_") %>% unique
+  nodes_network_B <- paste(Network_B$Gene1, Network_B$Gene2, sep = "_") %>% unique
+  if(!is.null(Network_C)){
+    nodes_network_C <- paste(Network_C$Gene1, Network_C$Gene2, sep = "_") %>% unique
+    nodes_network_B <- intersect(nodes_network_B, nodes_network_C)
+  }
+  if(!is.null(Network_D)){
+    nodes_network_D <- paste(Network_D$Gene1, Network_D$Gene2, sep = "_") %>% unique
+    nodes_network_B <- intersect(nodes_network_B, nodes_network_D)
+  }
+  common_nodes <- intersect(nodes_network_A, nodes_network_B)
+  Main_Network$edge <- paste(Main_Network$Gene1, Main_Network$Gene2, sep = "_")
+  
+  dplyr::filter(Main_Network, edge %in% common_nodes)
+}
+
+Distinct_networks <- function(Network_A, Network_B, Main_Network){
+  edges_network_A <- paste(Network_A$Gene1, Network_A$Gene2, sep = "_") %>% unique
+  edges_network_B <- paste(Network_B$Gene1, Network_B$Gene2, sep = "_") %>% unique
+  
+  specific_A <- edges_network_A[edges_network_A %ni% edges_network_B]
+  specific_B <- edges_network_B[edges_network_B %ni% edges_network_A]
+
+  Main_Network$edge <- paste(Main_Network$Gene1, Main_Network$Gene2, sep = "_")
+  
+  specific_network_A <- Main_Network[Main_Network$edge %in% specific_A,]
+  specific_network_B <- Main_Network[Main_Network$edge %in% specific_B,]
+  
+  list("Network_A" = specific_network_A,
+       "Network_B" = specific_network_B)
+}
+```
+
+## Mergeing 
+
+```{r}
+IDH1_IDH2_common <- Mergeing_networks(fPPI_IDH1_wt, fPPI_IDH2_wt, fPPI)
+IDH1_IDH2_specifics <- Distinct_networks(fPPI_IDH1_wt, fPPI_IDH2_wt, fPPI)
+```
+
+## Saving merged
+
+```{r}
+IDH1_IDH2_common %>% write.table("~/GitHub/Thesis_paper/Results/Proteo/Cytoscape/IDH1_IDH2_Common.tsv", 
+                                 sep="\t", quote = F, col.names = NA)
+IDH1_IDH2_specifics$Network_A %>% write.table("~/GitHub/Thesis_paper/Results/Proteo/Cytoscape/IDH1_specific.tsv", 
+                                 sep="\t", quote = F, col.names = NA)
+IDH1_IDH2_specifics$Network_B %>% write.table("~/GitHub/Thesis_paper/Results/Proteo/Cytoscape/IDH2_specific.tsv", 
+                                 sep="\t", quote = F, col.names = NA)
+```
+
+
+
+```{r}
+save.image("/media/alexis/DATA/Session/R_session/Thesis_paper_Rsessions/Proteomic/Proteo_diff_enrich.RData")
+```
+

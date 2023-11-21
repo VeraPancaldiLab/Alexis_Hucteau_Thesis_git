@@ -1,0 +1,293 @@
+---
+title: "Making Phenotype multilayer network"
+subtitle: "Layer 2"
+author: Alexis Hucteau
+date: "`r Sys.Date()`"
+output:
+    html_document:
+      toc: yes
+      toc_float: yes
+      theme: united
+editor_options:
+  markdown:
+    wrap: sentence
+---
+
+# Libraries
+
+```{r, error=F, warning=F, echo=FALSE, include=F}
+rm(DmIALite, DOLite, DOLiteTerm, HsIALite, MmIALite, RnIALite)
+
+library(dplyr)
+library(parallel)
+library(ggplot2)
+
+cores2use <- detectCores()
+```
+
+
+# Loading DATA
+
+## Loading Clinical data
+
+```{r}
+Clinical_patient_data <- read.table("../../Datasets/Clinical_Koichi_data_isoform_SRR_annotated.tsv", sep = "\t", header = T)
+Clinical_patient_data$Baseline_phenotype_2 <- sapply(Clinical_patient_data$Best_response, function(resp){
+  switch(resp,
+         "CR" = "Responder",
+         "CRp" = "Responder",
+         "CRi" = "Responder",
+         "MLFS" = "Responder",
+         "HI" = "Responder",
+         "PR" = "Responder",
+         "SD" = "Non_Responder",
+         "PD" = "Non_Responder",
+         "Not_assessed" = "Not_assessed",
+         "NA" = "Control")
+})
+```
+
+## Loading networks
+
+```{r}
+Regulonlaml_network <- read.table("../../Datasets/regulonlaml_symbol.tsv", sep = "\t", header = T)
+
+data(dorothea_hs, package = "dorothea")
+
+doronet <-  dorothea_hs %>%
+  filter(confidence %in% c("A", "B", "C", "D", "E"))
+doronet <- doronet[c(1,3,2,4)]
+```
+
+## Loading Gene expression
+
+```{r}
+RNAseq_Koichi_vst <- read.table("~/GitHub/Thesis_paper/Datasets/Koichi_NR_R_symbol_no_dup.tsv", sep = "\t", header = T, row.names = 1, check.names = F)
+```
+
+## Loading TF activities 
+
+```{r}
+IDH_Koichi_TF_actitity_dorothea_vst <- read.table("~/GitHub/Thesis_paper/Results/Transcriptomique/TFs/Koichi_TF_activities_doronet.tsv", 
+                                                sep = "\t", check.names = F, header = T, row.names = 1)
+```
+
+
+## Combining TF activities
+
+### Filter Samples classes
+
+### Function
+
+```{r}
+Return_value <- function(Feature_TF, Feature_Gene, Node){
+  if(Node %in% rownames(Feature_TF)){
+    Feature_TF[Node, ] %>% unlist
+  }else if(Node %in% rownames(Feature_Gene)){
+    Feature_Gene[Node, ] %>% unlist
+  }else{
+    c(0)
+  }
+}
+
+Calculate_edges_weight_corr <- function(Network, Features_TF, Features_Gene){
+  sapply(1:nrow(Network), function(node){
+    A <- Return_value(Features_TF, Features_Gene, Network[node, "tf"])
+    B <- Return_value(Features_TF, Features_Gene, Network[node, "target"])
+    if(length(B) <= 4){
+      return(0)
+    }
+    Hmisc::rcorr(A,B, type = "pearson")$r[1,2]
+  })
+}
+
+Scale_edge_weight <- function(Network){
+  w <- Network$weight_corr
+  scaled_weight <- sapply(w, function(we){
+    res <- abs(we)
+    if(is.na(res)){
+      res <- 0
+    }else if(is.nan(res)){
+      res <- 0
+    }else if(res == Inf){
+      res <- 1
+    }
+    res
+  })
+  sqrt(scaled_weight)
+}
+
+
+Create_GRN_corr <- function(GRN, TF_activities, RNAseq, Clinicals=Clinical_patient_data){
+  phenos_tf <- colnames(TF_activities) %>% lapply(function(sample){
+    fil <- Clinicals %>%
+      dplyr::filter(Baseline_RNAseq_data == sample) 
+    data.frame("IDH" = fil$IDH_isoform,
+               "sample" = fil$Baseline_RNAseq_data, 
+               "Response"= fil$Baseline_phenotype_2)
+  }) %>% data.table::rbindlist()
+  
+  samples_mIDH1_R <- phenos_tf %>%
+    dplyr::filter(Response == "Responder" & IDH == "IDH1") %>% 
+    .$sample
+  print(paste0("mIDH1_R: ", length(samples_mIDH1_R)))
+  samples_mIDH1_NR <- phenos_tf %>%
+    dplyr::filter(Response == "Non_Responder" & IDH == "IDH1") %>% 
+    .$sample
+  print(paste0("mIDH1_NR: ", length(samples_mIDH1_NR)))
+  samples_mIDH2_R <- phenos_tf %>% 
+    dplyr::filter(Response == "Responder" & (IDH == "IDH2_R140" | IDH == "IDH2_R172")) %>% 
+    .$sample
+  print(paste0("mIDH2_R: ", length(samples_mIDH2_R)))
+
+  samples_mIDH2_NR <- phenos_tf %>% 
+    dplyr::filter(Response == "Non_Responder" & (IDH == "IDH2_R140" | IDH == "IDH2_R172")) %>% 
+    .$sample
+  print(paste0("mIDH2_NR: ", length(samples_mIDH2_NR)))
+
+  samples_TF.list <-  list("mIDH2_NR" = samples_mIDH2_NR, "mIDH2_R" = samples_mIDH2_R, 
+                           "mIDH1_R" = samples_mIDH1_R, "mIDH1_NR" = samples_mIDH1_NR)
+
+
+  TF_activities.list <- mclapply(names(samples_TF.list), function(class){
+    samples <- samples_TF.list[[class]]
+    TF_activities[,samples]
+  }, mc.cores = cores2use)
+  names(TF_activities.list) <- names(samples_TF.list)
+  
+  phenos_rna <- colnames(RNAseq) %>% lapply(function(sample){
+    fil <- Clinical_patient_data %>%
+      dplyr::filter(Baseline_RNAseq_data == sample) 
+    data.frame("IDH" = fil$IDH_isoform, 
+               "sample" = fil$Baseline_RNAseq_data, 
+               "Response" = fil$Baseline_phenotype_2)
+  }) %>% data.table::rbindlist()
+  
+  samples_mIDH1_R <- phenos_rna %>%
+    dplyr::filter(Response == "Responder" & IDH == "IDH1") %>% .$sample
+  print(paste0("mIDH1_R: ", length(samples_mIDH1_R)))
+
+  samples_mIDH1_NR <- phenos_rna %>%
+    dplyr::filter(Response == "Non_Responder" & IDH == "IDH1") %>% .$sample
+  print(paste0("mIDH1_NR: ", length(samples_mIDH1_NR)))
+
+  samples_mIDH2_R <- phenos_rna %>% 
+    dplyr::filter(Response == "Responder" & (IDH == "IDH2_R140" | IDH == "IDH2_R172")) %>% .$sample
+  print(paste0("mIDH2_R: ", length(samples_mIDH2_R)))
+
+  samples_mIDH2_NR <- phenos_rna %>% 
+    dplyr::filter(Response == "Non_Responder" & (IDH == "IDH2_R140" | IDH == "IDH2_R172")) %>% .$sample
+  print(paste0("mIDH2_NR: ", length(samples_mIDH2_NR)))
+
+  
+  samples_gene_exp.list <-  list("mIDH2_NR" = samples_mIDH2_NR, "mIDH2_R" = samples_mIDH2_R, 
+                           "mIDH1_R" = samples_mIDH1_R, "mIDH1_NR" = samples_mIDH1_NR)
+  
+  gene_exp.list <- lapply(names(samples_gene_exp.list), function(class){
+    samples <- samples_gene_exp.list[[class]]
+    RNAseq[,samples]
+  })
+  names(gene_exp.list) <- names(samples_gene_exp.list)
+  
+  GRN.list <- mclapply(names(gene_exp.list), function(class){
+    res <- GRN
+    print(rownames(gene_exp.list[[class]])[1:10])
+    res$weight_corr <- Calculate_edges_weight_corr(GRN, 
+                                                   TF_activities.list[[class]], 
+                                                   gene_exp.list[[class]])
+    res$weight_corr <- Scale_edge_weight(res)
+    res
+  }, mc.cores = cores2use)
+  names(GRN.list) <- names(gene_exp.list)
+  return(GRN.list)
+}
+```
+
+### Calcul
+
+```{r}
+Regulon_GRN_corr <- Create_GRN_corr(as.data.frame(doronet), IDH_Koichi_TF_actitity_dorothea_vst, RNAseq_Koichi_vst)
+```
+
+```{r}
+lapply(names(Regulon_GRN_corr), function(multi){
+  png(paste0("~/GitHub/Thesis_paper/Results/Multi_layer_pheno_like/Layer_Figures/Layer_2/", multi, "_Cross_weight.png"))
+  plot(density(na.omit((Regulon_GRN_corr[[multi]]$weight_corr[Regulon_GRN_corr[[multi]]$weight_corr>0]))), main = multi)
+  dev.off()
+  (Regulon_GRN_corr[[multi]]$weight_corr > 0.8) %>% table
+  plot(density(na.omit((Regulon_GRN_corr[[multi]]$weight_corr[Regulon_GRN_corr[[multi]]$weight_corr>0]))), main = multi)
+})
+lapply(names(Regulon_GRN_corr), function(multi){
+  plot(density(na.omit(Regulon_GRN_corr[[multi]]$weight_corr)))
+  (Regulon_GRN_corr[[multi]]$weight_corr > 0.8) %>% table
+})
+```
+
+```{r}
+Plotting_function <- function(A, B, title, xlabel, ylabel){
+  a_weight <- A$weight_corr > 0
+  b_weight <- B$weight_corr > 0
+  weight_test <- (a_weight & b_weight)
+  a <- A[weight_test,]
+  b <- B[weight_test,]
+  df <- data.frame(x = (a$weight_corr), y = (b$weight_corr))
+  d <- MASS::kde2d(df$x, df$y)
+  dens <- data.frame(expand.grid(x = d$x, y = d$y), z = as.vector(d$z))
+  plot_final <- ggplot() +
+    geom_contour_filled(data = dens, aes(x=x, y=y, z =z, alpha = after_stat(level))) +
+    theme(legend.position = "none") + xlab(xlabel) + ylab(ylabel)                     
+    ggsave(paste0("~/GitHub/Thesis_paper/Results/Multi_layer_pheno_like/Layer_Figures/Layer_2/", title, "_Cross_weight.png"), plot_final, height = 2100, width = 2100, units = "px")
+  plot_final
+}
+```
+
+```{r}
+Plotting_function(Regulon_GRN_corr[["mIDH1_NR"]], Regulon_GRN_corr[["mIDH1_R"]], "Response in IDH1", "mIDH1 Non responder", "mIDH1 Responder")
+Plotting_function(Regulon_GRN_corr[["mIDH2_NR"]], Regulon_GRN_corr[["mIDH2_R"]], "Response in IDH2", "mIDH2 Non responder", "mIDH2 Responder")
+Plotting_function(Regulon_GRN_corr[["mIDH2_R"]], Regulon_GRN_corr[["mIDH1_R"]], "IDH in Responder", "mIDH2 Responder", "mIDH1 Responder")
+Plotting_function(Regulon_GRN_corr[["mIDH2_NR"]], Regulon_GRN_corr[["mIDH1_NR"]], "IDH in Non responder", "mIDH2 Non responder", "mIDH1 Non responder")
+```
+
+
+
+```{r}
+plot(Regulon_GRN_corr[["mIDH2_NR"]]$weight_corr, Regulon_GRN_corr[["mIDH2_R"]]$weight_corr, 
+     main = "Response in IDH2", xlab = "mIDH2 Non responder", ylab = "mIDH2 Responder", pch='·')
+plot(Regulon_GRN_corr[["mIDH1_NR"]]$weight_corr, Regulon_GRN_corr[["mIDH1_R"]]$weight_corr, 
+     main = "Response in IDH1", xlab = "mIDH1 Non responder", ylab = "mIDH1 Responder", pch='·')
+plot(Regulon_GRN_corr[["mIDH2_R"]]$weight_corr, Regulon_GRN_corr[["mIDH1_R"]]$weight_corr, 
+     main = "IDH in Responder", xlab = "mIDH2 Responder", ylab = "mIDH1 Responder", pch='·')
+plot(Regulon_GRN_corr[["mIDH2_NR"]]$weight_corr, Regulon_GRN_corr[["mIDH1_NR"]]$weight_corr, 
+     main = "IDH in Non responder", xlab = "mIDH2 Non responder", ylab = "mIDH1 Non responder", pch='·')
+```
+
+
+```{r}
+Top_weighted <- function(GRN, N_top){
+  GRN <- GRN[order(GRN$weight_corr, decreasing = T),]
+  GRN[1:N_top,]
+}
+```
+
+```{r}
+Layer2_path <- "~/GitHub/Thesis_paper/Results/Multi_layer_pheno_like/Final_mutlilayer/"
+
+names(Regulon_GRN_corr) %>% 
+  lapply(function(Pheno){
+    dir.create(paste0(Layer2_path, Pheno), showWarnings = F)
+    dir.create(paste0(Layer2_path, Pheno, "/Layer_2"), showWarnings = F)
+    file_path <- paste0(Layer2_path, Pheno, "/Layer_2/", Pheno, "_GRN_network.tsv")
+    Regulon_GRN_corr[[Pheno]] %>%
+      dplyr::filter(!is.na(weight_corr) & weight_corr > 0) %>%
+      write.table(file_path, sep = "\t", row.names = F, quote = F)
+  })
+```
+
+
+
+
+```{r}
+save.image("/media/alexis/DATA/Session/R_session/Thesis_paper_Rsessions/Multi_layer_phenolike/Final_Layer_2_regulonlaml.RData")
+# system("bash ~/shutdown_o_clock.sh")
+```
+

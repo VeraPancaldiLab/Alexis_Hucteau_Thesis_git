@@ -1,0 +1,1150 @@
+---
+title: "Making_multi_layer_and_analysis"
+author: Alexis Hucteau
+date: "`r Sys.Date()`"
+output:
+    html_document:
+      toc: yes
+      toc_float: yes
+      theme: united
+editor_options:
+  markdown:
+    wrap: sentence
+---
+
+# Libraries
+
+```{r}
+rm(DmIALite, DOLite, DOLiteTerm, HsIALite, MmIALite, RnIALite)
+
+library(dplyr)
+library(RCy3)
+library(igraph)
+library(data.table)
+library(stringr)
+library(clusterProfiler)
+library(ggplot2)
+library(muxViz)
+library(grid)
+library(ggraph)
+library(RColorBrewer)
+library(viridis)
+
+
+"%ni%" <- Negate("%in%")
+```
+
+# Functions
+
+```{r}
+Add_layer <- function(network_path, separateur = "\t", features_path, separateur_feat = "\t", config_path, title_network, title_multiplex, multiplex_path){
+  layer_config <- paste0(multiplex_path, title_network,  "_", title_multiplex, ".edges;", title_network, ";", multiplex_path, title_multiplex, "_layout.txt")
+  net <- read.table(network_path, sep = separateur, check.names = F, header = T)
+  colnames(net)[1:2] <- c("source", "target")
+  layout <- data.frame(nodeID = c(net$source, net$target) %>% unique())
+  layout$nodeLabel <- layout$nodeID
+  if(!file.exists(config_path)){
+    layer_config_file <- data.frame(V1 = layer_config)
+    layout_file <- layout
+  }else{
+    layer_config <- data.frame(V1 = layer_config)
+    layer_config_file <- read.table(config_path, sep = ",", header = F, check.names = F)
+    layer_config_file <- rbind(layer_config_file, layer_config)
+    layout_file <- read.table(paste0(multiplex_path, title_multiplex, "_layout.txt"), sep = " ", header = T, check.names = F)
+    layout_file <- merge(layout_file, layout, by.x = "nodeID", by.y = colnames(layout)[1], all.x = T, all.y = T) %>%
+      .[!duplicated(.$nodeID),]
+  }
+  write.table(layer_config_file, config_path, row.names = F, col.names = F, quote = F)
+  if(!is.na(features_path)){
+    feat <- read.table(features_path, sep = separateur_feat, check.names = F, header = T)
+    colnames(feat)[-1] <- paste0(title_network, "_", colnames(feat)[-1])
+  }else{
+    feat <- data.frame("name" = layout$nodeID)
+  }
+  layout_file <- merge(layout_file, feat, by.x = "nodeID", by.y = colnames(feat)[1], all.x = T, all.y = T)
+  if("nodeLabel.y" %in% colnames(layout_file)){
+    layout_file <- layout_file[,colnames(layout_file) != "nodeLabel.y" & colnames(layout_file) != "nodeLabel.x."]
+    colnames(layout_file)[2] <- "nodeLabel"
+  }
+  layout_file$nodeLabel <- layout_file$nodeID
+  write.table(layout_file, paste0(multiplex_path, title_multiplex, "_layout.txt"), sep = " ", row.names = F, col.names = T, quote = F)
+  if(ncol(net) < 3){
+    net$weight <- rep(1, nrow(net))
+  }else{
+    net <- net[,1:3]
+    net[[3]] <- abs(as.numeric(net[[3]]))
+  }
+  write.table(net, paste0(multiplex_path, title_network, "_", title_multiplex, ".edges"), sep = " ", col.names = F, row.names = F, quote = F)
+}
+
+Clean_missing_values <- function(feature_data_path, column2correct, final_value){
+  df <- read.table(feature_data_path, sep = " ", header = T, check.names = F)
+  if(final_value != "mini"){
+    for (i in column2correct){
+      data.table::set(df, which(is.na(df[[i]])), i, final_value)
+    }
+  }else{
+    for (i in column2correct){
+      minimum <- min(na.omit(df[[i]]))
+      data.table::set(df, which(is.na(df[[i]])), i, minimum)
+    }
+  }
+  write.table(df, feature_data_path, sep = " ", row.names = F, quote = F)
+}
+
+Transform_nodeLabelID2nodeID <- function(config_path){
+  config_file <- read.table(config_path, sep = ";", header = F)
+  layout_path <- config_file[1,3]
+  layout_file <- read.table(layout_path, sep = " ", header = T, check.names = F)
+  layout_file$nodeID <- rownames(layout_file)
+  layout_file$nodeLabel <- sapply(layout_file$nodeLabel, function(label){
+    if(stringr::str_detect(label, pattern = "[:alpha:]")){
+      label
+    }else{
+      paste("frag", label, sep = "_")
+    }
+  })
+  write.table(layout_file, layout_path, sep = " ", quote = F, col.names = T, row.names = F)
+  layout_file <- layout_file[,1:2]
+  sapply(config_file[[1]], function(edges_path){
+    edges <- read.table(edges_path, sep = " ", header = F, check.names = F)
+    edges$V1 <- sapply(edges$V1, function(label){
+      if(stringr::str_detect(label, pattern = "[:alpha:]")){
+        label
+      }else{
+        paste("frag", label, sep = "_")
+      }
+    })
+    edges$V2 <- sapply(edges$V2, function(label){
+      if(stringr::str_detect(label, pattern = "[:alpha:]")){
+        label
+      }else{
+        paste("frag", label, sep = "_")
+      }
+    })
+    edges <- merge(edges, layout_file, by.x = "V1", by.y = "nodeLabel", all.x = T)
+    colnames(edges)[4] <- "source"
+    edges <- merge(edges, layout_file, by.x = "V2", by.y = "nodeLabel", all.x = T)
+    colnames(edges)[5] <- "target"
+    edges <- dplyr::select(edges, "source", "target", "V3")
+    write.table(edges, edges_path, sep = " ", row.names = F, col.names = F, quote = F)
+  })
+}
+```
+
+# Loading data
+
+## Koichi Cluster 1 vs Cluster 2
+
+```{r}
+system("rm ~/GitHub/Thesis_paper/Results/Multi_layer_1/DATA/*")
+
+Add_layer(network_path = "~/GitHub/Thesis_paper/Results/Chromatine_part/Chromatine_networks/Pchic_Koichi_Clusters.tsv", 
+          separateur = "\t", 
+          features_path = "~/GitHub/Thesis_paper/Results/Chromatine_part/Chromatine_features_datasets/Pchic_KOICHI_clusters.tsv", 
+          separateur_feat = "\t",
+          config_path = "~/GitHub/Thesis_paper/Results/Multi_layer_1/DATA/Multiplex_Cluster_config.txt", 
+          title_network = "DNA_methylation", 
+          title_multiplex = "Cluster", 
+          multiplex_path = "~/GitHub/Thesis_paper/Results/Multi_layer_1/DATA/")
+
+Add_layer(network_path = "~/GitHub/Thesis_paper/Results/Network_4_Multilayer/Filtered_GRN_network.tsv", 
+          separateur = "\t", 
+          features_path = "~/GitHub/Thesis_paper/Results/Network_analysis/Nodes_Cluster_Cytoscape_GRN.tsv", 
+          separateur_feat = "\t",
+          config_path = "~/GitHub/Thesis_paper/Results/Multi_layer_1/DATA/Multiplex_Cluster_config.txt", 
+          title_network = "GRN", 
+          title_multiplex = "Cluster", 
+          multiplex_path = "~/GitHub/Thesis_paper/Results/Multi_layer_1/DATA/")
+
+Add_layer(network_path = "~/GitHub/Thesis_paper/Results/fPPI/Annotations_cleaned_for_multi_layer.tsv", 
+          separateur = "\t", 
+          features_path = NA, 
+          separateur_feat = "\t",
+          config_path = "~/GitHub/Thesis_paper/Results/Multi_layer_1/DATA/Multiplex_Cluster_config.txt", 
+          title_network = "fPPI", 
+          title_multiplex = "Cluster", 
+          multiplex_path = "~/GitHub/Thesis_paper/Results/Multi_layer_1/DATA/")
+
+Add_layer(network_path = "~/GitHub/Thesis_paper/Results/Metabolism/Gene_reactions_network.tsv", 
+          separateur = "\t", 
+          features_path = NA, 
+          separateur_feat = "\t",
+          config_path = "~/GitHub/Thesis_paper/Results/Multi_layer_1/DATA/Multiplex_Cluster_config.txt", 
+          title_network = "Gene_reaction", 
+          title_multiplex = "Cluster", 
+          multiplex_path = "~/GitHub/Thesis_paper/Results/Multi_layer_1/DATA/")
+
+Add_layer(network_path = "~/GitHub/Thesis_paper/Results/Metabolism/Metabolic_network_clean_filtered_Clusters.tsv", 
+          separateur = "\t", 
+          features_path = "~/GitHub/Thesis_paper/Results/Metabolism/Cluster_Metabolic_features_filtered.tsv", 
+          separateur_feat = "\t",
+          config_path = "~/GitHub/Thesis_paper/Results/Multi_layer_1/DATA/Multiplex_Cluster_config.txt", 
+          title_network = "Metabolism", 
+          title_multiplex = "Cluster", 
+          multiplex_path = "~/GitHub/Thesis_paper/Results/Multi_layer_1/DATA/")
+
+Clean_missing_values("../Results/Multi_layer_1/DATA/Cluster_layout.txt", c("DNA_methylation_logFC", "GRN_logFC", "GRN_size", "GRN_nes", "fPPI_Mutations_of_interest_vs_Group_control_diff", "Metabo_mean.diff"), 0)
+Clean_missing_values("../Results/Multi_layer_1/DATA/Cluster_layout.txt", c("DNA_methylation_P.Value", "GRN_P.Value", "GRN_pval", "fPPI_Mutations_of_interest_vs_Group_control_p.val", "Metabo_pvalue"), 1)
+Clean_missing_values("../Results/Multi_layer_1/DATA/Cluster_layout.txt", c("GRN_eigenvalue", "GRN_Page_Rank"), "mini")
+
+Transform_nodeLabelID2nodeID("~/GitHub/Thesis_paper/Results/Multi_layer_1/DATA/Multiplex_Cluster_config.txt")
+```
+
+## mIDH1 vs mIDH2
+
+```{r}
+system("rm ~/GitHub/Thesis_paper/Results/Multi_layer_IDHm_Koichi/DATA/*")
+
+Add_layer(network_path = "~/GitHub/Thesis_paper/Results/Chromatine_part/Chromatine_networks/Pchic_KOICHI_mIDH.tsv", 
+          separateur = "\t", 
+          features_path = "~/GitHub/Thesis_paper/Results/Chromatine_part/Chromatine_features_datasets/Pchic_KOICHI_mIDH.tsv", 
+          separateur_feat = "\t",
+          config_path = "~/GitHub/Thesis_paper/Results/Multi_layer_IDHm_Koichi/DATA/Multiplex_Koichi_mIDH_config.txt", 
+          title_network = "DNA_methylation", 
+          title_multiplex = "Koichi_mIDH", 
+          multiplex_path = "~/GitHub/Thesis_paper/Results/Multi_layer_IDHm_Koichi/DATA/")
+
+Add_layer(network_path = "~/GitHub/Thesis_paper/Results/GRN/Network/ARACNe/IDHs_Koichi_msvip_ARACNe_network.tsv", 
+          separateur = "\t", 
+          features_path = "~/GitHub/Thesis_paper/Results/GRN/Features/ARACNe/IDHs_Koichi_msvip_features.tsv", 
+          separateur_feat = "\t",
+          config_path = "~/GitHub/Thesis_paper/Results/Multi_layer_IDHm_Koichi/DATA/Multiplex_Koichi_mIDH_config.txt", 
+          title_network = "GRN", 
+          title_multiplex = "Koichi_mIDH", 
+          multiplex_path = "~/GitHub/Thesis_paper/Results/Multi_layer_IDHm_Koichi/DATA/")
+
+Add_layer(network_path = "~/GitHub/Thesis_paper/Results/Proteo/PPI_filtered_005_enhanced.tsv", 
+          separateur = "\t", 
+          features_path = "~/GitHub/Thesis_paper/Results/Proteo/Diff_Prot_exp_IDH1_IDH2.tsv", 
+          separateur_feat = "\t",
+          config_path = "~/GitHub/Thesis_paper/Results/Multi_layer_IDHm_Koichi/DATA/Multiplex_Koichi_mIDH_config.txt", 
+          title_network = "fPPI", 
+          title_multiplex = "Koichi_mIDH", 
+          multiplex_path = "~/GitHub/Thesis_paper/Results/Multi_layer_IDHm_Koichi/DATA/")
+
+Add_layer(network_path = "~/GitHub/Thesis_paper/Results/Metabolism/Gene_reactions_network.tsv", 
+          separateur = "\t", 
+          features_path = NA, 
+          separateur_feat = "\t",
+          config_path = "~/GitHub/Thesis_paper/Results/Multi_layer_IDHm_Koichi/DATA/Multiplex_Koichi_mIDH_config.txt", 
+          title_network = "Gene_reaction", 
+          title_multiplex = "Koichi_mIDH", 
+          multiplex_path = "~/GitHub/Thesis_paper/Results/Multi_layer_IDHm_Koichi/DATA/")
+
+Add_layer(network_path = "~/GitHub/Thesis_paper/Results/Metabolism/Metabolic_network_clean_filtered_KOICHI_IDHm.tsv", 
+          separateur = "\t", 
+          features_path = "~/GitHub/Thesis_paper/Results/Metabolism/KOICHI_IDHm_Metabolic_features_filtered.tsv", 
+          separateur_feat = "\t",
+          config_path = "~/GitHub/Thesis_paper/Results/Multi_layer_IDHm_Koichi/DATA/Multiplex_Koichi_mIDH_config.txt", 
+          title_network = "Metabolism", 
+          title_multiplex = "Koichi_mIDH", 
+          multiplex_path = "~/GitHub/Thesis_paper/Results/Multi_layer_IDHm_Koichi/DATA/")
+
+Clean_missing_values("../Results/Multi_layer_IDHm_Koichi/DATA/Koichi_mIDH_layout.txt", c("DNA_methylation_logFC", "GRN_logFC", "GRN_size", "GRN_nes", "fPPI_Mutations_of_interest_vs_Group_control_diff", "Metabo_mean.diff"), 0)
+Clean_missing_values("../Results/Multi_layer_IDHm_Koichi/DATA/Koichi_mIDH_layout.txt", c("DNA_methylation_P.Value", "GRN_P.Value", "GRN_pval", "fPPI_Mutations_of_interest_vs_Group_control_p.val", "Metabo_pvalue"), 1)
+Clean_missing_values("../Results/Multi_layer_IDHm_Koichi/DATA/Koichi_mIDH_layout.txt", c("GRN_eigenvalue", "GRN_Page_Rank"), "mini")
+
+Transform_nodeLabelID2nodeID("~/GitHub/Thesis_paper/Results/Multi_layer_IDHm_Koichi/DATA/Multiplex_Koichi_mIDH_config.txt")
+```
+
+# Creating Multiplex
+
+## Cluster 1 vs Cluster 2
+
+```{r}
+Multiplex_test <- buildMultilayerNetworkFromMuxvizFiles(config.file = "../Results/Multi_layer_1/DATA/Multiplex_Cluster_config.txt", MultisliceType = "categorical", isWeighted = T, isDirected = F, verbose = T)
+```
+```{r}
+M <- BuildSupraAdjacencyMatrixFromEdgeColoredMatrices(Multiplex_test$nodeTensor, Multiplex_test$layerTensor, Multiplex_test$Layers, Multiplex_test$Nodes)
+```
+
+## mIDH1 vs mIDH2
+
+```{r}
+Multiplex_KOICHI_IDH <- buildMultilayerNetworkFromMuxvizFiles(config.file = "../Results/Multi_layer_IDHm_Koichi/DATA/Multiplex_Koichi_mIDH_config.txt", MultisliceType = "categorical", isWeighted = F, isDirected = T, verbose = T)
+```
+```{r}
+MIDH_Multiplex <- BuildSupraAdjacencyMatrixFromEdgeColoredMatrices(Multiplex_KOICHI_IDH$nodeTensor, Multiplex_KOICHI_IDH$layerTensor, Multiplex_KOICHI_IDH$Layers, Multiplex_KOICHI_IDH$Nodes)
+```
+
+# Function Community
+
+```{r}
+GetMultilayerCommunities_Infomap_modified <- function(SupraAdjacencyMatrix,
+           Layers,
+           Nodes,
+           bin.path = NA,
+           isDirected,
+           seed = 12345,
+           includeSelfLinks = F,
+           numTrials = 100,
+           twoLevel = T,
+           preclusterMultiplex = F,
+           addMissingPhysicalNodes = T,
+           hardPartitions = F,
+           verbose = T,
+           addAggregateAnalysis = T,
+           outputPrefix = "multimap") {
+    #
+
+    if (is.na(bin.path) || !file.exists(bin.path)) {
+      stop(
+        "Error! You must provide a valid path to the INFOMAP bin.
+        Likely you will find it in the bin/ folder of muxviz, or you must compile it from
+        source in src/ folder. If this is the case, just unzip the infomap archive and
+        run make that will generate executable Infomap.
+        Feel free to move the file where you prefer and provide the full path as an
+        argument to this function."
+      )
+    }
+
+    tmpname <- outputPrefix
+    inputFile <- paste0(tmpname, "_infomap.edges")
+    if (file.exists(inputFile))
+      file.remove(inputFile)
+    fileConn <- file(inputFile, open = "at")
+
+    cat('1/2 Setting up the algorithms...\n')
+
+    # obtain an extended edgelist representation in format:
+    # node.from layer.from node.to layer.to weight
+    multilayerEdges <- BuildExtendedEdgelistFromSupraAdjacencyMatrix(
+                         SupraAdjacencyMatrix,
+                         Layers,
+                         Nodes,
+                         FALSE
+                       )
+
+    # write in the Infomap multilayer format for general multilayer networks
+    # this part is different from the one in GetMultiplexCommunities_Infomap
+
+    writeLines(c("*Intra", "#layer node node weight"), fileConn)
+    mergedEdgelist <- data.frame()
+
+    submulti <-
+      multilayerEdges[multilayerEdges$layer.from == multilayerEdges$layer.to,]
+    mergedEdgelist <-
+      rbind(
+        mergedEdgelist,
+        data.frame(
+          layer = submulti$layer.from,
+          from = submulti$node.from,
+          to = submulti$node.to,
+          weight = submulti$weight
+        )
+      )
+    if (!isDirected) {
+      #this is because multimap requires both directions specified, even for undirected networks
+      mergedEdgelist <-
+        rbind(
+          mergedEdgelist,
+          data.frame(
+            layer = submulti$layer.from,
+            from = submulti$node.to,
+            to = submulti$node.from,
+            weight = submulti$weight
+          )
+        )
+    }
+    utils::write.table(
+      mergedEdgelist,
+      file = fileConn,
+      row.names = F,
+      col.names = F,
+      quote = F
+    )
+
+    writeLines(c("*Inter", "#layer node layer weight"), fileConn)
+    mergedEdgelist <- data.frame()
+
+    submulti <-
+      multilayerEdges[multilayerEdges$node.from == multilayerEdges$node.to,]
+    
+    Inter <- data.frame(
+          from = submulti$layer.from,
+          node = submulti$node.from,
+          to = submulti$layer.to,
+          weight = submulti$weight
+        ) %>%
+      .[.$from != .$to,]
+    
+    mergedEdgelist <-
+      rbind(
+        mergedEdgelist,
+        Inter
+      )
+    if (!isDirected) {
+      Inter <- data.frame(
+            from = submulti$layer.to,
+            node = submulti$node.from,
+            to = submulti$layer.from,
+            weight = submulti$weight
+          ) %>%
+      .[.$from != .$to,]
+      #this is because multimap requires both directions specified, even for undirected networks
+      mergedEdgelist <-
+        rbind(
+          mergedEdgelist,
+          Inter
+        )
+    }
+    mergedEdgelist <- mergedEdgelist
+    utils::write.table(
+      mergedEdgelist,
+      file = fileConn,
+      row.names = F,
+      col.names = F,
+      quote = F
+    )
+
+    close(fileConn)
+
+    cat('2/2 Finding communities...\n')
+    cat(' + Multiplex network...\n')
+
+    exePath <- bin.path
+
+    outname <- tmpname
+    outdir <- getwd()
+
+    #default flags
+    exeFlags <- paste(inputFile, outdir)
+    exeFlags <- paste(exeFlags, "--input-format multilayer")
+    exeFlags <- paste(exeFlags, "--clu --map --tree --expanded")
+
+    exeFlags <- paste(exeFlags, "--seed", seed)
+    exeFlags <- paste(exeFlags, "--num-trials", numTrials)
+
+    if (isDirected) {
+      exeFlags <- paste(exeFlags, "-d")
+    } else {
+      exeFlags <- paste(exeFlags, "-u")
+    }
+
+    if (includeSelfLinks) {
+      exeFlags <- paste(exeFlags, "--include-self-links")
+    }
+
+    if (twoLevel) {
+      exeFlags <- paste(exeFlags, "--two-level")
+    }
+
+    if (preclusterMultiplex) {
+      exeFlags <- paste(exeFlags, "--pre-cluster-multiplex")
+    }
+
+    if (addMissingPhysicalNodes) {
+      exeFlags <- paste(exeFlags, "--multilayer-add-missing-nodes")
+    }
+
+    if (hardPartitions) {
+      exeFlags <- paste(exeFlags, "--hard-partitions")
+    }
+
+    if (verbose) {
+      exeFlags <- paste(exeFlags, "-vvv")
+    }
+
+    exeFlags <- paste(exeFlags, "--out-name", outname)
+
+    #call infomap
+    system(paste(exePath, exeFlags), intern = T)
+
+
+    #read output. Here I could redirect the output inside the R environment.. but
+    #for compatibility with the rest of the code I prefer to read a file
+    communityList <- list()
+
+    #import the results (clu and modularity value)
+    resultFile <- paste0(outputPrefix, "_expanded.clu")
+    wmemb_membership <- utils::read.table(resultFile, header = F, sep = " ")
+
+    communityList$membership.multi <- wmemb_membership
+
+    #if(!hardPartitions){
+    #same columns regardless of this flag
+    colnames(communityList$membership.multi) <-
+      c("layer", "node", "module", "flow")
+    #}
+    #reorder, for easier inspection
+    communityList$membership.multi <-
+      communityList$membership.multi[order(communityList$membership.multi$layer,
+                                           communityList$membership.multi$node), ]
+
+
+    resultFile <- paste0(outputPrefix, "_expanded.map")
+    wtcod <-
+      as.numeric(strsplit(readLines(resultFile, n = 5), " ")[[5]][3])
+
+    communityList$codelength.multi <- wtcod
+
+    cat(paste("    Code length Multiplex: ", wtcod, "\n"))
+    numComms <- max(wmemb_membership$V3)
+    cat(paste("    Communities Multiplex: ", numComms, "\n"))
+
+    communityList$modules.multi <- numComms
+
+    communityList$msize.multi <-
+      table(communityList$membership.multi$module)
+
+    #depending on flags, Infomap can transform into layer IDs the id of isolated nodes.
+    #let's remove those ones
+    communityList$membership.multi <-
+      communityList$membership.multi[which(communityList$membership.multi$layer <=
+                                             Layers), ]
+
+    #TODO for the future: calculate modularity of the partition. No direct multiplex way from igraph
+    #one possibility is to pass the expanded representation of the network
+    #but in case of edgecolored the supradjacency matrix would empty off-diagonal
+    #resulting in huge modularity due to layers, not modules..
+    #igraph::modularity(x, membership, weights = NULL, ...)
+
+    if (addAggregateAnalysis) {
+      cat(' + Aggregate network...\n')
+
+      #calculate same things for the aggregate using R-igraph infomap
+      g.agg <-
+        GetAggregateNetworkFromSupraAdjacencyMatrix(SupraAdjacencyMatrix, Layers, Nodes)
+
+      infocom <-
+        igraph::cluster_infomap(g.agg, modularity = TRUE)
+      wmemb_membership_aggregate <-
+        as.numeric(igraph::membership(infocom))
+      wtcod_aggregate <- igraph::code_len(infocom)
+
+      communityList$membership.aggr <-
+        data.frame(node = 1:length(wmemb_membership_aggregate),
+                   module = wmemb_membership_aggregate)
+      communityList$codelength.aggr <- wtcod_aggregate
+
+      cat(paste("    Code length Aggregate: ", wtcod_aggregate, "\n"))
+      numCommsAggr <- max(wmemb_membership_aggregate)
+      cat(paste("    Communities Aggregate: ", numCommsAggr, "\n"))
+
+      communityList$modules.aggr <- numCommsAggr
+      communityList$msize.aggr <-
+        table(communityList$membership.aggr$module)
+    }
+
+    cat('Calculation Completed!\n')
+
+    return(communityList)
+  }
+```
+
+# Calcul Community
+
+```{r}
+pathInfomap <- "~/Test_Git/mux/muxViz/src-exe/infomap-0.x/Infomap"
+```
+
+## mIDH1 vs mIDH2
+
+```{r}
+Nodes_mIDH <- Multiplex_KOICHI_IDH$Nodes
+Layers_mIDH <- Multiplex_KOICHI_IDH$Layers
+
+commResult2_Agregate_analysis <-
+  GetMultilayerCommunities_Infomap_modified(
+    SupraAdjacencyMatrix = MIDH_Multiplex,
+    Layers = Layers_mIDH,
+    Nodes = Nodes_mIDH,
+    bin.path = pathInfomap,
+    isDirected = F,
+    seed = 12345,
+    includeSelfLinks = T,
+    numTrials = 100,
+    twoLevel = T,
+    preclusterMultiplex = F,
+    addMissingPhysicalNodes = F,
+    hardPartitions = F,
+    verbose = T,
+    addAggregateAnalysis = T,
+    outputPrefix = "multimap_mIDH_Koichi"
+  )
+
+commResult2_Agregate_analysis_hardpart <-
+  GetMultilayerCommunities_Infomap_modified(
+    SupraAdjacencyMatrix = MIDH_Multiplex,
+    Layers = Layers_mIDH,
+    Nodes = Nodes_mIDH,
+    bin.path = pathInfomap,
+    isDirected = F,
+    seed = 12345,
+    includeSelfLinks = T,
+    numTrials = 100,
+    twoLevel = T,
+    preclusterMultiplex = F,
+    addMissingPhysicalNodes = F,
+    hardPartitions = T,
+    verbose = T,
+    addAggregateAnalysis = T,
+    outputPrefix = "multimap_mIDH_Koichi"
+  )
+```
+
+```{r}
+pal.mux <- sample(viridis(commResult2_Agregate_analysis$modules.multi))
+
+node.colors.matrix2 <- matrix("#dadada", Nodes_mIDH, Layers_mIDH)
+for(l in 1:Layers_mIDH){
+    dftmp <- commResult2_Agregate_analysis$membership.multi[commResult2_Agregate_analysis$membership.multi$layer==l,]
+    idxs <- dftmp$node
+    node.colors.matrix2[idxs,l] <- pal.mux[dftmp$module]
+}
+layer.colors <- c("#896944", "#FF0000", "#0000FF", "#008800", "#00FF00")
+lay <- layoutMultiplex(Multiplex_KOICHI_IDH$g.list, layout="fr", ggplot.format=F, box=T)
+
+plot_multiplex3D(Multiplex_KOICHI_IDH$g.list, layer.layout=lay, layer.colors=layer.colors,
+                         layer.shift.x=0.5, layer.space=2,
+                         layer.labels="auto", layer.labels.cex=1.5, edge.size.scale = 0.1,
+                         node.size.values="auto", node.size.scale=1,
+                         node.colors=node.colors.matrix2, edge.colors="#dadada",
+                         show.aggregate=F)
+rgl::snapshot3d("../Results/Multi_layer_IDHm_Koichi/Results/multi_filtered_sbm_infomap_aggregate.png", fmt="png", width = 1920, height = 1080)
+# save.image("/media/alexis/DATA/Session/R_session/Thesis_paper_Rsessions/Multiplex_mIDH.RData")
+```
+
+```{r}
+VI <- igraph::compare(commResult2_Agregate_analysis$membership.multi$module, commResult2_Agregate_analysis_hardpart$membership.multi$module, method="vi")
+NMI <- igraph::compare(commResult2_Agregate_analysis$membership.multi$module, commResult2_Agregate_analysis_hardpart$membership.multi$module, method="nmi")
+ARI <- igraph::compare(commResult2_Agregate_analysis$membership.multi$module, commResult2_Agregate_analysis_hardpart$membership.multi$module, method="adjusted.rand")
+
+VI
+NMI
+ARI
+```
+
+```{r}
+pal.mux <- sample(viridis(commResult2_Agregate_analysis$modules.multi))
+pal.aggr <- sample(viridis(commResult2_Agregate_analysis$modules.aggr))
+
+png("../Results/Multi_layer_IDHm_Koichi/Results/multi_sbm_infomap_table.png", width = 1024, height = 728 / 2,
+    res = 100)
+gplt <- plot_multimodules(commResult2_Agregate_analysis, module.colors = pal.aggr,
+                          show.aggregate = T)
+dev.off()
+#> agg_png 
+#>       2
+
+pal.mux <- sample(viridis(commResult2_Agregate_analysis_hardpart$modules.multi))
+pal.aggr <- sample(viridis(commResult2_Agregate_analysis_hardpart$modules.aggr))
+       
+png("../Results/Multi_layer_IDHm_Koichi/Results/multi_sbm_infomap_hp_table.png", width = 1024,
+    height = 728 / 2, res = 100)
+gplt.hp <- plot_multimodules(commResult2_Agregate_analysis_hardpart, module.colors = pal.aggr,
+                             show.aggregate = T)
+dev.off()
+```
+
+
+## Cluster 1 vs Cluster 2
+
+```{r}
+Nodes <- Multiplex_test$Nodes
+Layers <- Multiplex_test$Layers
+
+commResult2_Cluster_Agregate_analysis <-
+  GetMultilayerCommunities_Infomap_modified(
+    SupraAdjacencyMatrix = M,
+    Layers = Layers,
+    Nodes = Nodes,
+    bin.path = pathInfomap,
+    isDirected = F,
+    seed = 12345,
+    includeSelfLinks = T,
+    numTrials = 100,
+    twoLevel = T,
+    preclusterMultiplex = F,
+    addMissingPhysicalNodes = F,
+    hardPartitions = F,
+    verbose = T,
+    addAggregateAnalysis = T,
+    outputPrefix = "multimap_Cluster_analysis"
+  )
+
+commResult2_Cluster_Agregate_analysis_hardpart <-
+  GetMultilayerCommunities_Infomap_modified(
+    SupraAdjacencyMatrix = M,
+    Layers = Layers,
+    Nodes = Nodes,
+    bin.path = pathInfomap,
+    isDirected = F,
+    seed = 12345,
+    includeSelfLinks = T,
+    numTrials = 100,
+    twoLevel = T,
+    preclusterMultiplex = F,
+    addMissingPhysicalNodes = F,
+    hardPartitions = T,
+    verbose = T,
+    addAggregateAnalysis = T,
+    outputPrefix = "multimap_Cluster_analysis_hardpart"
+  )
+
+save.image("/media/alexis/DATA/Session/R_session/Thesis_paper_Rsessions/Multilayer_IDHm_Aggregate.RData")
+system("say finished")
+```
+
+```{r}
+pal.mux <- sample(viridis(commResult2_Cluster_Agregate_analysis$modules.multi))
+
+node.colors.matrix2 <- matrix("#dadada", Nodes, Layers)
+for(l in 1:Layers){
+    dftmp <- commResult2_Cluster_Agregate_analysis$membership.multi[commResult2_Cluster_Agregate_analysis$membership.multi$layer==l,]
+    idxs <- dftmp$node
+    node.colors.matrix2[idxs,l] <- pal.mux[dftmp$module]
+}
+layer.colors <- c("#896944", "#FF0000", "#0000FF", "#008800", "#00FF00")
+lay <- layoutMultiplex(Multiplex_test$g.list, layout="fr", ggplot.format=F, box=T)
+
+
+plot_multiplex3D(Multiplex_test$g.list, layer.layout=lay, layer.colors=layer.colors,
+                         layer.shift.x=0.5, layer.space=2,
+                         layer.labels="auto", layer.labels.cex=1.5, edge.size.scale = 0.1,
+                         node.size.values="auto", node.size.scale=1,
+                         node.colors=node.colors.matrix2, edge.colors="#dadada",
+                         show.aggregate=F)
+rgl::snapshot3d("../Results/Multi_layer_1/Results/multi_filtered_sbm_infomap.png", fmt="png", width = 1024, height = 1024)
+```
+
+# Interpretation of community results
+
+## Functions
+
+```{r}
+Set_up_Community_results_interpretation <- function(Community_result, Multiplex_folder, Multiplex_layout_file, title){
+  Community_result$membership.multi %>%
+    write.table(paste0(Multiplex_folder, "Results/", title, ".tsv"), sep = "\t", col.names = NA)
+
+  Community_result$membership.multi$log_flow <- Community_result$membership.multi$flow %>%
+    sapply(function(x){-log(x)}) 
+  
+  Best_flows <- Community_result$membership.multi
+  
+  Conversion_id_label <- read.table(Multiplex_layout_file, sep = " ", header = T)
+  Best_flows_converted <- merge(Best_flows, Conversion_id_label, by.x = "node", by.y = "nodeID", all.x = T)
+  Best_flows_converted <- Best_flows_converted %>% .[order(Best_flows_converted$log_flow),]
+  final_result <- lapply(1:max(Best_flows_converted$layer), function(n_layer){
+    if(n_layer == 1){
+      Chromatin_Best_flows_converted <- Best_flows_converted %>% 
+        dplyr::filter(layer == 1)
+      Chromatin_Best_flows_converted$nodeLabel <- stringr::str_remove(Chromatin_Best_flows_converted$nodeLabel, 
+                                                                          pattern = "frag_")
+      Chromatin_Best_flows_converted %>%
+        write.table(paste0(Multiplex_folder, "Results/", n_layer, "_layer_Best_flows_converted.tsv"), 
+                    sep = "\t", row.names = F, quote = F)
+      res <- Chromatin_Best_flows_converted
+    }else{
+      res <- Best_flows_converted %>% dplyr::filter(layer == n_layer) 
+      res %>%
+        write.table(paste0(Multiplex_folder, "Results/", n_layer, "_layer_Best_flows_converted.tsv"), 
+                    sep = "\t", row.names = F, quote = F)
+    }
+    Top_1000_nodes <- res$nodeLabel %>% .[str_detect(., pattern = "[:alpha:]")] %>% unique %>% .[1:1000]
+    if(n_layer < 5){
+      EnrichGo_1000 <- enrichGO(gene = Top_1000_nodes, OrgDb = "org.Hs.eg.db", 
+                                keyType = "SYMBOL", ont = "ALL")
+      
+      dotplot(EnrichGo_1000, showCategory=15, title = "GO genes up enrichment")
+      ggsave(paste0(Multiplex_folder, "Results/", n_layer, "_layer_EnrichGo.png"),
+             dotplot(EnrichGo_1000,showCategory=15, title = "GO genes up enrichment"))
+    }else{
+      EnrichGo_1000 <- NULL
+    }
+    list(EnrichGo_1000, res)
+  })
+  return(final_result)
+}
+```
+
+## mIDH1 vs mIDH2
+
+```{r}
+Community_Aggregate_Analysis_Multiplex_Koichi_mIDH <- Set_up_Community_results_interpretation(commResult2_Agregate_analysis, "../Results/Multi_layer_IDHm_Koichi/", "../Results/Multi_layer_IDHm_Koichi/DATA/Koichi_mIDH_layout.txt", "Community_Aggregate_Analysis")
+names(Community_Aggregate_Analysis_Multiplex_Koichi_mIDH) <- c("layer_1", "layer_2", "layer_3", "layer_4", "layer_5")
+```
+
+```{r}
+Flow_converted <- lapply(names(Community_Aggregate_Analysis_Multiplex_Koichi_mIDH), function(layer){
+  Community_Aggregate_Analysis_Multiplex_Koichi_mIDH[[layer]][[2]]
+}) %>% rbindlist
+
+Flow_converted %>%
+  write.table("../Results/Multi_layer_IDHm_Koichi/Results/Flow_features_converted.tsv", 
+              sep = "\t", quote = F, row.names = F)
+```
+
+```{r}
+Flow_by_module <- sapply(1:max(Flow_converted$module), function(mod){
+  tmp <- Flow_converted %>%
+    dplyr::filter(module == mod)
+  min(tmp$log_flow)
+})
+```
+
+```{r}
+Filtered_modules <- 1:length(Flow_by_module) %>% .[Flow_by_module < 8]
+Flow_converted$filtered_module <- Flow_converted$module %in% Filtered_modules
+```
+
+```{r}
+plot(Flow_by_module, xlab = "module", ylab = "-log_flow_minimum", main = "Flow analysis throught modules")
+abline(a = 8, b = 0, col = "red")
+
+Flow_by_module[Flow_by_module < 8] %>% 
+  plot(xlab = "module", ylab = "-log_flow_minimum", main = "Selected modules based on best flows")
+abline(a = 8, b = 0, col = "red")
+text(8,0, "test", col = 2)
+```
+
+```{r}
+Flow_converted %>% dplyr::filter(log_flow < Inf) %>%
+  ggplot(aes(x = layer, y = log_flow, group = layer), colour = layer)+
+  geom_boxplot() +
+  ggtitle("Flow values across layers")
+```
+
+```{r}
+Module_Size <- table(commResult2_Agregate_analysis$membership.multi$module)
+
+plot(Module_Size, xlab = "module", ylab = "size", main = "Modules size")
+```
+
+```{r}
+Top_flow_module_mIDH <- Flow_converted %>%
+  dplyr::filter(module %in% Filtered_modules)
+```
+
+
+```{r}
+save.image("/media/alexis/DATA/Session/R_session/Thesis_paper_Rsessions/Multilayer_IDHm_Aggregate.RData")
+system("shutdown")
+```
+
+# Layer 1
+
+```{r}
+feature_no_inf <- Flow_converted %>% 
+  dplyr::filter(layer == 1 & 
+                  DNA_methylation_logFC != 0 & 
+                  stringr::str_detect(nodeLabel, pattern = "[:alpha:]"))
+ggplot(feature_no_inf, aes(x = DNA_methylation_logFC, y = log_flow, label = nodeLabel, color = filtered_module))+
+  geom_text(check_overlap = T, size = 4, nudge_x = 0.0005, hjust = 0, outlier.size = 0)+
+  geom_point(size = 0.5)+
+  labs(title = paste0("Network-based node flow ", "DNA_methylation"))+
+  xlab("DNA_methylation")+
+  ylab("Flow (log)")
+```
+
+```{r}
+layer_1_mIDH_genes <- Flow_converted %>%
+  dplyr::filter(module %in% Filtered_modules & 
+                  DNA_methylation_logFC != 0 & 
+                  stringr::str_detect(nodeLabel, pattern = "[:alpha:]") & 
+                  !stringr::str_detect(nodeLabel, pattern = "frag")) %>%
+  .$nodeLabel %>%
+ unique
+  
+
+layer_1_mIDH_universe <- Flow_converted %>%
+  dplyr::filter(DNA_methylation_logFC != 0 & 
+                stringr::str_detect(nodeLabel, pattern = "[:alpha:]") & 
+                  !stringr::str_detect(nodeLabel, pattern = "frag"))  %>%
+  .$nodeLabel %>%
+ unique
+
+EnrichGo_layer_1_mIDH <- enrichGO(gene = layer_1_mIDH_genes, OrgDb = "org.Hs.eg.db", 
+                          universe = layer_1_mIDH_universe, keyType = "SYMBOL", ont = "ALL")
+
+dotplot(EnrichGo_layer_1_mIDH, showCategory=15, title = "GO genes up enrichment")
+ggsave(paste0("../Results/Multi_layer_IDHm_Koichi/Results/1_layer_EnrichGo.png"),
+             dotplot(EnrichGo_layer_1_mIDH,showCategory=15, title = "GO genes up enrichment"))
+```
+
+
+
+# Layer 2
+
+```{r}
+feature_no_inf <- Flow_converted %>% 
+  dplyr::filter(layer == 2 & 
+                  GRN_nes != 0)
+ggplot(feature_no_inf, aes(x = GRN_nes, y = log_flow, label = nodeLabel, color = filtered_module))+
+  geom_text(check_overlap = T, size = 4, nudge_x = 0.0005, hjust = 0, outlier.size = 0)+
+  geom_point(size = 0.5)+
+  labs(title = paste0("Network-based node flow ", "TF activity"))+
+  xlab("TF activity")+
+  ylab("Flow (log)")
+```
+
+```{r}
+layer_2_mIDH_genes <- Flow_converted %>%
+  dplyr::filter(module %in% Filtered_modules & 
+                  GRN_nes > 0 & 
+                  stringr::str_detect(nodeLabel, pattern = "[:alpha:]") & 
+                  !stringr::str_detect(nodeLabel, pattern = "frag")) %>%
+  .$nodeLabel %>%
+ unique
+  
+
+layer_2_mIDH_universe <- Flow_converted %>%
+  dplyr::filter(GRN_pval != 1 & 
+                stringr::str_detect(nodeLabel, pattern = "[:alpha:]") & 
+                  !stringr::str_detect(nodeLabel, pattern = "frag"))  %>%
+  .$nodeLabel %>%
+ unique
+
+EnrichGo_layer_2_mIDH <- enrichGO(gene = layer_2_mIDH_genes, OrgDb = "org.Hs.eg.db", 
+                          universe = layer_2_mIDH_universe, keyType = "SYMBOL", ont = "ALL")
+
+dotplot(EnrichGo_layer_2_mIDH, showCategory=15, title = "GO genes up enrichment")
+ggsave(paste0("../Results/Multi_layer_IDHm_Koichi/Results/2_layer_EnrichGo.png"),
+             dotplot(EnrichGo_layer_2_mIDH,showCategory=15, title = "GO genes up enrichment"))
+```
+
+# Layer 3
+
+```{r}
+feature_no_inf <- Flow_converted %>% 
+  dplyr::filter(layer == 3 & 
+                  fPPI_IDH2_vs_IDH1_diff != 0)
+ggplot(feature_no_inf, aes(x = fPPI_IDH2_vs_IDH1_diff, y = log_flow, label = nodeLabel, color = filtered_module))+
+  geom_text(check_overlap = T, size = 4, nudge_x = 0.0005, hjust = 0, outlier.size = 0)+
+  geom_point(size = 0.5)+
+  labs(title = paste0("Network-based node flow ", "Proteo"))+
+  xlab("Proteo")+
+  ylab("Flow (log)")
+```
+
+```{r}
+layer_3_mIDH_genes <- Flow_converted %>%
+  dplyr::filter(module %in% Filtered_modules & 
+                  fPPI_IDH2_vs_IDH1_diff > 0 & 
+                  stringr::str_detect(nodeLabel, pattern = "[:alpha:]") & 
+                  !stringr::str_detect(nodeLabel, pattern = "frag")) %>%
+  .$nodeLabel %>%
+ unique
+  
+
+layer_3_mIDH_universe <- Flow_converted %>%
+  dplyr::filter(!is.na(fPPI_IDH2_vs_IDH1_diff) & 
+                stringr::str_detect(nodeLabel, pattern = "[:alpha:]") & 
+                  !stringr::str_detect(nodeLabel, pattern = "frag"))  %>%
+  .$nodeLabel %>%
+ unique
+
+EnrichGo_layer_3_mIDH <- enrichGO(gene = layer_3_mIDH_genes, OrgDb = "org.Hs.eg.db", 
+                          universe = layer_3_mIDH_universe, keyType = "SYMBOL", ont = "ALL")
+
+dotplot(EnrichGo_layer_3_mIDH, showCategory=15, title = "GO genes up enrichment")
+ggsave(paste0("../Results/Multi_layer_IDHm_Koichi/Results/3_layer_EnrichGo.png"),
+             dotplot(EnrichGo_layer_3_mIDH,showCategory=15, title = "GO genes up enrichment"))
+```
+
+
+# Layer 4
+
+```{r}
+feature_no_inf <- Flow_converted %>% 
+  dplyr::filter(layer == 4 & 
+                  Metabolism_mean.diff != 0)
+ggplot(feature_no_inf, aes(x = Metabolism_mean.diff, y = log_flow, label = nodeLabel, color = filtered_module))+
+  geom_text(check_overlap = T, size = 4, nudge_x = 0.0005, hjust = 0, outlier.size = 0)+
+  geom_point(size = 0.5)+
+  labs(title = paste0("Network-based node flow ", "Metabolism"))+
+  xlab("Metabolism")+
+  ylab("Flow (log)")
+```
+
+# Layer 5
+
+```{r}
+feature_no_inf <- Flow_converted %>% 
+  dplyr::filter(layer == 5 & 
+                  is.na(Metabolism_mean.diff))
+ggplot(feature_no_inf, aes(x = node, y = log_flow, label = nodeLabel, color = filtered_module))+
+  geom_text(check_overlap = T, size = 4, nudge_x = 0.0005, hjust = 0, outlier.size = 0)+
+  geom_point(size = 0.5)+
+  labs(title = paste0("Network-based node flow ", "Metabolism"))+
+  xlab("Metabolism")+
+  ylab("Flow (log)")
+```
+
+## Cluster 1 vs Cluster 2
+
+```{r}
+Community_Aggregate_Analysis_Multiplex_Koichi_Cluster <- Set_up_Community_results_interpretation(commResult2_Cluster_Agregate_analysis, "../Results/Multi_layer_1/", "../Results/Multi_layer_1/DATA/Cluster_layout.txt", "Community_Aggregate_Analysis")
+names(Community_Aggregate_Analysis_Multiplex_Koichi_Cluster) <- c("layer_1", "layer_2", "layer_3", "layer_4", "layer_5")
+```
+
+```{r}
+Flow_converted_Cluster <- lapply(names(Community_Aggregate_Analysis_Multiplex_Koichi_Cluster), function(layer){
+  Community_Aggregate_Analysis_Multiplex_Koichi_Cluster[[layer]][[2]]
+}) %>% rbindlist %>% unique
+
+Flow_converted_Cluster %>%
+  write.table("../Results/Multi_layer_1/Results/Flow_features_converted_Cluster.tsv", 
+              sep = "\t", quote = F, row.names = F)
+```
+
+```{r}
+Flow_by_module_Cluster <- sapply(1:max(Flow_converted_Cluster$module), function(mod){
+  tmp <- Flow_converted_Cluster %>%
+    dplyr::filter(module == mod)
+  min(tmp$log_flow)
+})
+```
+
+```{r}
+Filtered_modules_Cluster <- 1:length(Flow_by_module_Cluster) %>% .[Flow_by_module_Cluster < 8.5]
+Flow_converted_Cluster$filtered_module <- Flow_converted_Cluster$module %in% Filtered_modules_Cluster
+```
+
+```{r}
+Module_Size <- table(commResult2_Agregate_analysis$membership.multi$module)
+
+plot(Module_Size, xlab = "module", ylab = "size", main = "Modules size")
+```
+
+
+```{r}
+plot(Flow_by_module_Cluster, xlab = "module", ylab = "-log_flow_minimum", main = "Flow analysis throught modules")
+abline(a = 8.5, b =0, col = "red")
+
+Flow_by_module_Cluster[Flow_by_module_Cluster < 8.5] %>% 
+  plot(xlab = "module", ylab = "-log_flow_minimum", main = "Selected modules based on best flows")
+abline(a = 8.5, b = 0, col = "red")
+```
+
+```{r}
+Flow_converted_Cluster %>% dplyr::filter(log_flow < Inf) %>%
+  ggplot(aes(x = layer, y = log_flow, group = layer), colour = layer)+
+  geom_boxplot() +
+  ggtitle("Flow values across layers")
+```
+
+```{r}
+Module_Size <- table(commResult2_Cluster_Agregate_analysis$membership.multi$module)
+
+plot(Module_Size, xlab = "module", ylab = "size", main = "Modules size")
+```
+
+```{r}
+Top_flow_module <- Flow_converted_Cluster %>%
+  dplyr::filter(module %in% Filtered_modules_Cluster)
+```
+
+# Layer 1
+
+```{r}
+feature_no_inf <- Flow_converted_Cluster %>% 
+  dplyr::filter(layer == 1 & 
+                  DNA_methylation_logFC != 0 & 
+                  stringr::str_detect(nodeLabel, pattern = "[:alpha:]"))
+ggplot(feature_no_inf, aes(x = DNA_methylation_logFC, y = log_flow, label = nodeLabel, color = filtered_module))+
+  geom_text(check_overlap = T, size = 4, nudge_x = 0.0005, hjust = 0, outlier.size = 0)+
+  geom_point(size = 0.5)+
+  labs(title = paste0("Network-based node flow ", "DNA_methylation"))+
+  xlab("DNA_methylation")+
+  ylab("Flow (log)")
+```
+
+```{r}
+layer_1_Cluster_genes <- Flow_converted_Cluster %>%
+  dplyr::filter(module %in% Filtered_modules_Cluster & 
+                  DNA_methylation_logFC > 0 & 
+                  stringr::str_detect(nodeLabel, pattern = "[:alpha:]") & 
+                  !stringr::str_detect(nodeLabel, pattern = "frag")) %>%
+  .$nodeLabel %>%
+ unique
+  
+
+layer_1_Cluster_universe <- Flow_converted_Cluster %>%
+  dplyr::filter(DNA_methylation_logFC != 0 & 
+                stringr::str_detect(nodeLabel, pattern = "[:alpha:]") & 
+                  !stringr::str_detect(nodeLabel, pattern = "frag"))  %>%
+  .$nodeLabel %>%
+ unique
+
+EnrichGo_layer_1_Cluster <- enrichGO(gene = layer_1_Cluster_genes, OrgDb = "org.Hs.eg.db", 
+                          universe = layer_1_Cluster_universe, keyType = "SYMBOL", ont = "ALL")
+
+dotplot(EnrichGo_layer_1_Cluster, showCategory=15, title = "GO genes up enrichment")
+ggsave(paste0("../Results/Multi_layer_1/Results/1_layer_EnrichGo.png"),
+             dotplot(EnrichGo_layer_1_Cluster,showCategory=15, title = "GO genes up enrichment"))
+```
+
+# Layer 2
+
+```{r}
+feature_no_inf <- Flow_converted_Cluster %>% 
+  dplyr::filter(layer == 2 & 
+                  GRN_nes != 0)
+ggplot(feature_no_inf, aes(x = GRN_nes, y = log_flow, label = nodeLabel, color = filtered_module))+
+  geom_text(check_overlap = T, size = 4, nudge_x = 0.0005, hjust = 0, outlier.size = 0)+
+  geom_point(size = 0.5)+
+  labs(title = paste0("Network-based node flow ", "TF activity"))+
+  xlab("TF activity")+
+  ylab("Flow (log)")
+```
+
+```{r}
+layer_2_Cluster_genes <- Flow_converted_Cluster %>%
+  dplyr::filter(module %in% Filtered_modules_Cluster & 
+                  GRN_P.Value < 0.1 & 
+                  stringr::str_detect(nodeLabel, pattern = "[:alpha:]") & 
+                  !stringr::str_detect(nodeLabel, pattern = "frag")) %>%
+  .$nodeLabel %>%
+ unique
+  
+
+layer_2_Cluster_universe <- Flow_converted_Cluster %>%
+  dplyr::filter(GRN_P.Value != 1 & 
+                stringr::str_detect(nodeLabel, pattern = "[:alpha:]") & 
+                  !stringr::str_detect(nodeLabel, pattern = "frag"))  %>%
+  .$nodeLabel %>%
+ unique
+
+EnrichGo_layer_2_Cluster <- enrichGO(gene = layer_2_Cluster_genes, OrgDb = "org.Hs.eg.db", 
+                          universe = layer_2_Cluster_universe, keyType = "SYMBOL", ont = "ALL")
+
+dotplot(EnrichGo_layer_2_Cluster, showCategory=15, title = "GO genes up enrichment")
+ggsave(paste0("../Results/Multi_layer_1/Results/2_layer_EnrichGo.png"),
+             dotplot(EnrichGo_layer_2_Cluster,showCategory=15, title = "GO genes up enrichment"))
+```
+
+
+# Layer 4
+
+```{r}
+feature_no_inf <- Flow_converted_Cluster %>% 
+  dplyr::filter(layer == 4 & 
+                  Metabolism_mean.diff != 0)
+ggplot(feature_no_inf, aes(x = Metabolism_mean.diff, y = log_flow, label = nodeLabel, color = filtered_module))+
+  geom_text(check_overlap = T, size = 4, nudge_x = 0.0005, hjust = 0, outlier.size = 0)+
+  geom_point(size = 0.5)+
+  labs(title = paste0("Network-based node flow ", "Metabolism"))+
+  xlab("Metabolism")+
+  ylab("Flow (log)")
+```
+
+# Layer 5
+
+```{r}
+feature_no_inf <- Flow_converted_Cluster %>% 
+  dplyr::filter(layer == 5 & 
+                  is.na(Metabolism_mean.diff))
+ggplot(feature_no_inf, aes(x = node, y = log_flow, label = nodeLabel, color = filtered_module))+
+  geom_text(check_overlap = T, size = 4, nudge_x = 0.0005, hjust = 0, outlier.size = 0)+
+  geom_point(size = 0.5)+
+  labs(title = paste0("Network-based node flow ", "Metabolism"))+
+  xlab("Metabolism")+
+  ylab("Flow (log)")
+```
+
+```{r}
+save.image("/media/alexis/DATA/Session/R_session/Thesis_paper_Rsessions/Multilayer_IDHm_Aggregate.RData")
+# system("shutdown")
+```

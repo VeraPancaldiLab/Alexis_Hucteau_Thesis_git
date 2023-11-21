@@ -1,0 +1,150 @@
+---
+title: "Chromatine_network_making"
+author: Alexis Hucteau
+date: "`r Sys.Date()`"
+output:
+    html_document:
+      toc: yes
+      toc_float: yes
+      theme: united
+editor_options:
+  markdown:
+    wrap: sentence
+---
+
+```{r}
+rm(list = ls())
+```
+
+
+```{r, include=F, echo=F, warning=F}
+library(dplyr)
+library(RCy3)
+library(igraph)
+library(data.table)
+library(GenomicRanges)
+library(data.table)
+library(enrichplot)
+library(clusterProfiler)
+library(org.Hs.eg.db)
+library(ggplot2)
+library(DOSE)
+
+"%ni%" <- Negate("%in%")
+source("Make_chromatine_network.R")
+```
+
+```{r}
+Methylation_features <- read.table("../Results/Chromatine_part/Features_fragment_methylation.tsv", sep = "\t", header = T)
+
+Chromatine_network <- read.table("../Results/Chromatine_part/Promoter_named_pchic_dCPGs.tsv", sep = "\t", header = T)
+```
+
+```{r}
+HSC_Methylation_features <- read.table("../Results/Chromatine_part/Features_HSC_fragment_methylation.tsv", sep = "\t", header = T)
+
+HSC_Chromatine_network <- read.table("../Results/Chromatine_part/Promoter_named_HSC_pchic_dCPGs.tsv", sep = "\t", header = T)
+```
+
+
+```{r}
+Genes_promoter_hypermethylation <- Methylation_features %>% dplyr::filter(logFC > 0) %>% .[stringr::str_detect(.$name, "[:alpha:]"),] %>% .$logFC
+names(Genes_promoter_hypermethylation) <- Methylation_features %>% dplyr::filter(logFC > 0) %>% .$name %>% .[stringr::str_detect(., "[:alpha:]")]
+Genes_promoter_hypermethylation <- Genes_promoter_hypermethylation[order(Genes_promoter_hypermethylation, decreasing = T)]
+hs <- org.Hs.eg.db
+DEGenes_ID <- select(hs, names(Genes_promoter_hypermethylation), columns = c("ENTREZID", "SYMBOL"), keytype = "SYMBOL") %>% na.omit() %>% .[!duplicated(.$SYMBOL),]
+DEGenes_ID_list <- Genes_promoter_hypermethylation[which(names(Genes_promoter_hypermethylation) %in% DEGenes_ID$SYMBOL)]
+names(DEGenes_ID_list) <- DEGenes_ID$ENTREZID
+
+Genes_connected_to_methylation_shift <- Chromatine_network %>% c(.$source, .$target) %>% unlist %>% unname %>% .[stringr::str_detect(., "[:alpha:]")] %>% unique()
+```
+
+```{r}
+HSC_Genes_promoter_hypermethylation <- HSC_Methylation_features %>% dplyr::filter(logFC > 0) %>% .[stringr::str_detect(.$name, "[:alpha:]"),] %>% .$logFC
+names(HSC_Genes_promoter_hypermethylation) <- HSC_Methylation_features %>% dplyr::filter(logFC > 0) %>% .$name %>% .[stringr::str_detect(., "[:alpha:]")]
+HSC_Genes_promoter_hypermethylation <- HSC_Genes_promoter_hypermethylation[order(HSC_Genes_promoter_hypermethylation, decreasing = T)]
+hs <- org.Hs.eg.db
+HSC_DEGenes_ID <- select(hs, names(HSC_Genes_promoter_hypermethylation), columns = c("ENTREZID", "SYMBOL"), keytype = "SYMBOL") %>% na.omit() %>% .[!duplicated(.$SYMBOL),]
+HSC_DEGenes_ID_list <- HSC_Genes_promoter_hypermethylation[which(names(HSC_Genes_promoter_hypermethylation) %in% HSC_DEGenes_ID$SYMBOL)]
+names(HSC_DEGenes_ID_list) <- HSC_DEGenes_ID$ENTREZID
+
+HSC_Genes_connected_to_methylation_shift <- HSC_Chromatine_network %>% c(.$source, .$target) %>% unlist %>% unname %>% .[stringr::str_detect(., "[:alpha:]")] %>% unique()
+```
+
+
+```{r}
+Methylation_dse <- gseDO(geneList = DEGenes_ID_list, pAdjustMethod = "none", pvalueCutoff = 0.1, minGSSize = 5)
+png("../Results/DNAmethylation/Enrichments/Clustering_analysis/ridgeplot_DSO.png")
+ridgeplot(Methylation_dse)
+dev.off()
+ridgeplot(Methylation_dse)
+png("../Results/DNAmethylation/Enrichments/Clustering_analysis/dotplot_DSO.png")
+dotplot(Methylation_dse, title = "DO enrichment Clusters Methylation", showCategory=20, split=".sign") + facet_grid(.~.sign)
+dev.off()
+dotplot(Methylation_dse, title = "DO enrichment Clusters Methylation", showCategory=20, split=".sign") + facet_grid(.~.sign)
+Methylation_kse <- gseKEGG(geneList = DEGenes_ID_list, pAdjustMethod = "none", pvalueCutoff = 0.1, minGSSize = 5)
+png("../Results/DNAmethylation/Enrichments/Clustering_analysis/ridgeplot_KEGG.png")
+ridgeplot(Methylation_kse)
+dev.off()
+ridgeplot(Methylation_kse)
+png("../Results/DNAmethylation/Enrichments/Clustering_analysis/dotplot_KEGG.png")
+dotplot(Methylation_kse, title = "KEGG enrichment Clusters Methylation", showCategory=20, split=".sign") + facet_grid(.~.sign)
+dev.off()
+dotplot(Methylation_kse, title = "KEGG enrichment Clusters Methylation", showCategory=20, split=".sign") + facet_grid(.~.sign)
+```
+
+```{r}
+GO_hyper <- enrichGO(Genes_connected_to_methylation_shift, OrgDb = "org.Hs.eg.db", keyType = "SYMBOL", pvalueCutoff = 0.05, pAdjustMethod = "none", minGSSize = 5, ont = "all")
+
+GO_hyper_HSC <- enrichGO(HSC_Genes_connected_to_methylation_shift, OrgDb = "org.Hs.eg.db", keyType = "SYMBOL", pvalueCutoff = 0.05, pAdjustMethod = "none", minGSSize = 5, ont = "all")
+
+dotplot(GO_hyper_HSC,showCategory=15, title = "Genes_connected_to_methylation_shift_HSC")
+png("../Results/DNAmethylation/Enrichments/Clustering_analysis/dotplot_GO_HSC.png")
+dotplot(GO_hyper_HSC,showCategory=15, title = "Genes_connected_to_methylation_shift_HSC")
+dev.off()
+
+dotplot(GO_hyper,showCategory=15, title = "Genes_connected_to_methylation_shift")
+png("../Results/DNAmethylation/Enrichments/Clustering_analysis/dotplot_GO.png")
+dotplot(GO_hyper,showCategory=15, title = "Genes_connected_to_methylation_shift")
+dev.off()
+
+```
+
+
+
+```{r}
+HSC_Methylation_dse <- gseDO(geneList = HSC_DEGenes_ID_list, pAdjustMethod = "none", pvalueCutoff = 0.1, minGSSize = 5)
+png("../Results/DNAmethylation/Enrichments/Clustering_analysis/HSC_ridgeplot_DSO.png")
+ridgeplot(HSC_Methylation_dse)
+dev.off()
+ridgeplot(HSC_Methylation_dse)
+png("../Results/DNAmethylation/Enrichments/Clustering_analysis/HSC_dotplot_DSO.png")
+dotplot(HSC_Methylation_dse, title = "HSC_DO enrichment Clusters Methylation", showCategory=20, split=".sign") + facet_grid(.~.sign)
+dev.off()
+dotplot(HSC_Methylation_dse, title = "HSC_DO enrichment Clusters Methylation", showCategory=20, split=".sign") + facet_grid(.~.sign)
+HSC_Methylation_kse <- gseKEGG(geneList = HSC_DEGenes_ID_list, pAdjustMethod = "none", pvalueCutoff = 0.1, minGSSize = 5)
+# png("../Results/DNAmethylation/HSC_ridgeplot_KEGG.png")
+# ridgeplot(HSC_Methylation_kse)
+# dev.off()
+# ridgeplot(HSC_Methylation_kse)
+# png("../Results/DNAmethylation/HSC_dotplot_KEGG.png")
+# dotplot(HSC_Methylation_kse, title = "HSC_KEGG enrichment", showCategory=20, split=".sign") + facet_grid(.~.sign)
+# dev.off()
+# dotplot(HSC_Methylation_kse, title = "HSC_KEGG enrichment", showCategory=20, split=".sign") + facet_grid(.~.sign)
+```
+
+```{r}
+Cluster_chromatine_net_analysis <- From_network_to_TF_activity(Chromatine_network, Methylation_features, output_folder = "../Results/Network_analysis/", filtered = T, title = "Cluster_Chromatine_Response")
+Cluster_made <- Make_Cytoscape_network(net = Cluster_chromatine_net_analysis$net, feat = Cluster_chromatine_net_analysis$features, title = "Chromatine_network", collection = "Cluster_analysis")
+
+Cluster_made$net %>% write.table("../Results/Network_analysis/Network_Cluster_Cytoscape_Chromatine.tsv", sep = "\t", row.names = F)
+Cluster_made$nodes %>% write.table("../Results/Network_analysis/Nodes_Cluster_Cytoscape_Chromatine.tsv", sep = "\t", row.names = F)
+```
+
+```{r}
+HSC_Cluster_chromatine_net_analysis <- From_network_to_TF_activity(HSC_Chromatine_network, HSC_Methylation_features, output_folder = "../Results/Network_analysis/HSC_folder", filtered = T, title = "HSC_Cluster_Chromatine_Response")
+HSC_Cluster_made <- Make_Cytoscape_network(net = HSC_Cluster_chromatine_net_analysis$net, feat = HSC_Cluster_chromatine_net_analysis$features, title = "HSC_Chromatine_network", collection = "HSC_Cluster_analysis")
+
+HSC_Cluster_made$net %>% write.table("../Results/Network_analysis/HSC_Network_Cluster_Cytoscape_Chromatine.tsv", sep = "\t", row.names = F)
+HSC_Cluster_made$nodes %>% write.table("../Results/Network_analysis/HSC_Nodes_Cluster_Cytoscape_Chromatine.tsv", sep = "\t", row.names = F)
+```

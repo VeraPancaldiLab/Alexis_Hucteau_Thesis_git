@@ -1,0 +1,137 @@
+---
+title: "Combining TCGA Koichi BEATAML data"
+author: Alexis Hucteau
+date: "`r Sys.Date()`"
+output:
+    html_document:
+      toc: yes
+      toc_float: yes
+      theme: united
+editor_options:
+  markdown:
+    wrap: sentence
+---
+
+```{r, error=FALSE, include = F}
+rm(list = ls())
+
+library(FactoMineR)
+library(igraph)
+library(limma)
+library(viper)
+library(stringr)
+library(data.table)
+library(dplyr)
+library(RCy3)
+library(factoextra)
+library(pheatmap)
+library(Hmisc)
+library(matrixStats)
+library(RColorBrewer)
+library(sva)
+library(ggvenn)
+
+"%ni%" <- Negate("%in%")
+wd <- "~/GitHub/Thesis_paper/"
+source("~/Core_scripts/core_functions.R")
+source("~/Core_scripts/msviper_functions.R")
+```
+
+```{r}
+Koichi_RNAseq <- read.csv("~/GitHub/Koichi_gene_expression_analyses_git/Koichi_gene_expression_analyses/DATA/RNAseq_parsed.csv", row.names = 1, header = T, check.names = F)
+Clinical_patient_data <- read.table("../Datasets/Clinical_Koichi_data.tsv", sep = "\t", header = T)
+Relapse <- colnames(Koichi_RNAseq) %in% Clinical_patient_data$Relapse_RNAseq_data
+Koichi_RNAseq <- Koichi_RNAseq[,!Relapse]
+Pheno_Koichi <- sapply(colnames(Koichi_RNAseq), function(sample){
+  Clinical_patient_data %>% dplyr::filter(Baseline_RNAseq_data == sample) %>% .$Cluster
+})
+BEATAML_RNAseq <- read.table("../Datasets/Voom_BEATAML.tsv", sep = "\t", header = T)
+colnames(BEATAML_RNAseq) <- sapply(colnames(BEATAML_RNAseq), function(sample){
+  paste("BEATAML", sample, sep = "_")
+})
+TCGA_RNAseq <- read.table("../Datasets/Voom_TCGA.tsv", sep = "\t", header = T)
+colnames(TCGA_RNAseq) <- sapply(colnames(TCGA_RNAseq), function(sample){
+  paste("TCGA", sample, sep = "_")
+})
+```
+
+```{r}
+TCGA_BEATAML <- cbind(BEATAML_RNAseq, TCGA_RNAseq)
+Common_genes <- intersect(rownames(TCGA_BEATAML), rownames(Koichi_RNAseq))
+TCGA_BEATAML_filtered <- TCGA_BEATAML[rownames(TCGA_BEATAML) %in% Common_genes,]
+Koichi_RNAseq_filtered <- Koichi_RNAseq[rownames(Koichi_RNAseq) %in% Common_genes,]
+TCGA_BEATAML_Koichi <- merge(TCGA_BEATAML_filtered, Koichi_RNAseq_filtered, by = 0)
+rownames(TCGA_BEATAML_Koichi) <- TCGA_BEATAML_Koichi$Row.names
+TCGA_BEATAML_Koichi <- TCGA_BEATAML_Koichi[,-1]
+```
+
+```{r}
+pheno_dataset <- c(rep("BEATAML", ncol(BEATAML_RNAseq)), rep("TCGA", ncol(TCGA_RNAseq)), rep("Koichi", ncol(Koichi_RNAseq)))
+res.pca <- prcomp(t(TCGA_BEATAML_Koichi))
+p <- fviz_pca_ind(res.pca, label="none", habillage = pheno_dataset,
+                  addEllipses=T, ellipse.level=0.95)
+p <- p + ggtitle("PCA gene expression")
+p
+```
+
+```{r}
+TCGA_BEATAML_Koichi_batched <- ComBat(TCGA_BEATAML_Koichi, pheno_dataset)
+```
+```{r}
+pheno_dataset_IDH <- colnames(TCGA_BEATAML_Koichi_batched)[1:172] %>% sapply(function(sample){
+  if(stringr::str_detect(sample, "IDHwt")){
+    "WT"
+  }else{
+    "mIDH"
+  }
+})
+pheno_dataset_IDH_koichi <- c(pheno_dataset_IDH, Pheno_Koichi) %>% paste(., pheno_dataset, sep = "_")
+res.pca <- prcomp(t(TCGA_BEATAML_Koichi_batched))
+p <- fviz_pca_ind(res.pca, label="none", habillage = pheno_dataset_IDH_koichi,
+                  addEllipses=T, ellipse.level=0.95)
+p <- p + ggtitle("PCA gene expression")
+p
+```
+
+```{r}
+Pheno_Beataml <- sapply(colnames(BEATAML_RNAseq), function(sample){
+  if(stringr::str_detect(sample, "wt")){
+    "IDHwt"
+  }else{
+    "IDHm"
+  }
+})
+BEATAML_DEG_analysis <- Differential_analysis(Pheno_Beataml, BEATAML_RNAseq)[[1]]
+```
+
+```{r}
+Pheno_TCGA <- sapply(colnames(TCGA_RNAseq), function(sample){
+  if(stringr::str_detect(sample, "wt")){
+    "IDHwt"
+  }else{
+    "IDHm"
+  }
+})
+TCGA_DEG_analysis <- Differential_analysis(Pheno_TCGA, TCGA_RNAseq)[[1]]
+```
+
+```{r}
+Koichi_DEG_analysis <- Differential_analysis(Pheno_Koichi, Koichi_RNAseq)$`Cluster_NR-Cluster_R`
+```
+
+
+```{r}
+DEGs_Beataml <- BEATAML_DEG_analysis %>% dplyr::filter(abs(logFC) > 0 & P.Value < 0.05) %>% .$ID
+DEGs_TCGA <- TCGA_DEG_analysis %>% dplyr::filter(abs(logFC) > 0 & P.Value < 0.05) %>% .$ID
+DEGs_Koichi <- Koichi_DEG_analysis %>% dplyr::filter(abs(logFC) > 0 & P.Value < 0.05) %>% .$ID
+
+DEGs <- list(Beataml = DEGs_Beataml, TCGA = DEGs_TCGA, Koichi = DEGs_Koichi)
+
+ggvenn::ggvenn(DEGs)
+intersect(DEGs_TCGA, DEGs_Beataml) %>% intersect(DEGs_Koichi)
+```
+
+```{r}
+
+```
+

@@ -1,0 +1,247 @@
+---
+title: "Koichi_gene_expression_analysis"
+author: Alexis Hucteau
+date: "`r Sys.Date()`"
+output:
+    html_document:
+      toc: yes
+      toc_float: yes
+      theme: united
+editor_options:
+  markdown:
+    wrap: sentence
+---
+
+# Libraries
+
+```{r, error=F, warning=F, echo=FALSE, include=F}
+rm(DmIALite, DOLite, DOLiteTerm, HsIALite, MmIALite, RnIALite)
+
+library(FactoMineR)
+library(igraph)
+library(limma)
+library(viper)
+library(stringr)
+library(data.table)
+library(dplyr)
+library(RCy3)
+library(factoextra)
+library(pheatmap)
+library(Hmisc)
+library(matrixStats)
+library(RColorBrewer)
+
+"%ni%" <- Negate("%in%")
+source("~/Core_scripts/msviper_functions.R")
+source("~/GitHub/Multiplex_DNAmet_PPI_Chrom_Coexp/Make_koichi_factor.R")
+```
+
+# Loading Data
+
+```{r}
+RNAseq <- read.csv("~/GitHub/Koichi_gene_expression_analyses_git/Koichi_gene_expression_analyses/DATA/RNAseq_parsed.csv", row.names = 1, header = T, check.names = F)
+Factor_R_OR_NR_B <- Make_factor(Clinical_patient_data,
+                                colnames(RNAseq),
+                                F, 
+                                0,
+                                c("CR", "CRi"),
+                                "R",
+                                c("MLFS", "HI", "CRp", "PR"),
+                                "OR",
+                                c("SD", "PD"),
+                                "NR")
+Factor_R_OR_NR_B
+RNAseq <- RNAseq %>% .[Factor_R_OR_NR_B=="NR.B" | Factor_R_OR_NR_B=="R.B" | Factor_R_OR_NR_B == "OR.B"]
+Factor_R_OR_NR_B <- Make_factor(Clinical_patient_data,
+                                colnames(RNAseq),
+                                F,
+                                0,
+                                c("CR", "CRi"),
+                                "R",
+                                c("MLFS", "HI", "CRp", "PR"),
+                                "OR",
+                                c("SD", "PD"),
+                                "NR")
+Factor_R_OR_NR_B
+```
+
+# PCA
+
+```{r}
+res.pca <- prcomp(t(RNAseq))
+p <- fviz_pca_ind(res.pca, label="all", habillage=Factor_R_OR_NR_B,
+                               addEllipses=T, ellipse.level=0.95)
+p <- p + ggtitle("PCA gene expression")
+p
+png("../Results/DGEA/PCA_Koichi_data.png")
+p
+dev.off()
+```
+
+# Gene expression analysis
+
+```{r}
+Make_heatmap <- function(DATA, Phenotype, method = "pearson", title, annotation_color, kmeans_k = NA, cuttree = NA, corr=T, TF=F) {
+  annotation_for_heatmap <- data.frame(Phenotype = Phenotype$Phenotype)
+  rownames(annotation_for_heatmap) <- colnames(DATA)
+  if(corr){
+    corr <- rcorr(as.matrix(DATA), type = method)$r
+    colnames(corr) <- colnames(DATA)
+    if(TF){
+      color= rev(colorRampPalette(brewer.pal(n = 9, name = "RdBu"))(100))
+    }else{
+      color = colorRampPalette(brewer.pal(n = 9, name = "YlOrRd"))(100)
+    }
+  }else{
+    corr=DATA
+    color= rev(colorRampPalette(brewer.pal(n = 9, name = "RdBu"))(100))
+  }
+  
+  title <- paste0(title, " ", method)
+  heatmap <- pheatmap(corr, 
+                      color = color,
+                      annotation_col = annotation_for_heatmap,
+                      annotation_colors = annotation_color,
+                      legend = TRUE,
+                      treeheight_row = 20,
+                      main = title, 
+                      fontsize = 10,
+                      cutree_cols = cuttree
+  )
+  return(heatmap)
+}
+```
+
+## Variance
+
+```{r}
+Var_gene <- rowVars(as.matrix(RNAseq))
+names(Var_gene) <- rownames(RNAseq)
+```
+
+## Heatmap
+
+```{r}
+nb_genes <- 100
+method <- "pearson"
+Top_var_genes <- Var_gene[order(Var_gene, decreasing = T)] %>% .[1:nb_genes]
+Top_Var_RNAseq <- RNAseq %>% .[rownames(.) %in% names(Top_var_genes),] 
+ann_color_RNA <- list(
+    Phenotype = c(R.B = "blue", NR.B = "red", OR.B = "green"))
+
+Factor_R_OR_NR_B <- Make_factor(Clinical_patient_data,
+                                colnames(RNAseq),
+                                F,
+                                0,
+                                c("CR", "CRi"),
+                                "R",
+                                c("MLFS", "HI", "CRp", "PR"),
+                                "OR",
+                                c("SD", "PD"),
+                                "NR")
+
+pheno_heatmap <- data.frame("Responder" = Factor_R_OR_NR_B == "R.B", "Non_responder" = Factor_R_OR_NR_B == "NR.B", "Overall_responder" = Factor_R_OR_NR_B == "OR.B")
+pheno_heatmap$Phenotype <- Factor_R_OR_NR_B
+heat <- Make_heatmap(Top_Var_RNAseq, Phenotype = pheno_heatmap, title = paste0("Patient correlation of Top ", nb_genes, " variable Gene expression"), annotation_color = ann_color_RNA, method = method)
+
+png(paste0("../Results/DGEA/Heatmap_GE_top_", nb_genes,"_corr_", method, "_Koichi_data.png"))
+heat
+dev.off()
+if(nb_genes < 500){
+  heat2 <- Make_heatmap(Top_Var_RNAseq, Phenotype = pheno_heatmap, title = paste0("Patient correlation of Top ", nb_genes, " variable Gene expression"), annotation_color = ann_color_RNA, method = "", corr = F)
+  png(paste0("../Results/DGEA/Heatmap_GE_top_", nb_genes,"_Koichi_data.png"))
+  heat2
+  dev.off()
+}
+```
+
+## PCA
+
+```{r}
+res.pca <- prcomp(t(Top_Var_RNAseq))
+p <- fviz_pca_ind(res.pca, label="all", habillage=Factor_R_OR_NR_B,
+                               addEllipses=T, ellipse.level=0.95)
+p <- p + ggtitle(paste0("PCA top ", nb_genes, " genes"))
+p
+png(paste0("../Results/DGEA/PCA_GE_top_", nb_genes,"_Koichi_data.png"))
+p
+dev.off()
+```
+
+# TF activity msViper
+
+```{r}
+All_sample_ARACNe_network <- read.table("../../Multiplex_DNAmet_PPI_Chrom_Coexp/Output_all_Samples_TPM/network.txt", sep = "\t", header = T)
+colnames(All_sample_ARACNe_network)[1:2] <- c("tf", "target")
+
+ref_NR <- Factor_R_OR_NR_B == "NR.B"
+ref_R <- Factor_R_OR_NR_B == "R.B"
+
+NR_R_msvip <- run_msviper(RNAseq, All_sample_ARACNe_network, use_aracne = T, ref_R, ref_NR, "Responder", "Non_responder", minsize = 4, ges.filter = T)
+Koichi_TF_actitity <- viper(RNAseq, dorothea2viper_regulons(NR_R_msvip$regulons))
+```
+
+## Variance
+
+```{r}
+Var_TF <- rowVars(as.matrix(Koichi_TF_actitity))
+names(Var_TF) <- rownames(Koichi_TF_actitity)
+```
+
+## Heatmap
+
+```{r}
+nb_TF <- 10
+method <- "pearson"
+Top_var_TF <- Var_TF[order(Var_TF, decreasing = T)] %>% .[1:nb_TF]
+Top_Var_TF <- Koichi_TF_actitity %>% .[rownames(.) %in% names(Top_var_TF),] 
+heat <- Make_heatmap(Top_Var_TF, Phenotype = pheno_heatmap, title = paste0("Patient correlation of Top ", nb_TF, " variable TF"), annotation_color = ann_color_RNA, method = method,TF=T)
+
+png(paste0("../Results/DGEA/Heatmap_TF_top_", nb_TF,"_corr_", method, "_Koichi_data.png"))
+heat
+dev.off()
+heat2 <- Make_heatmap(Top_Var_TF, Phenotype = pheno_heatmap, title = paste0("Patient correlation of Top ", nb_TF, " variable TF"), annotation_color = ann_color_RNA, method = "", corr=F)
+
+png(paste0("../Results/DGEA/Heatmap_TF_top_", nb_TF,"_Koichi_data.png"))
+heat2
+dev.off()
+```
+
+## PCA Top TF
+
+```{r}
+res.pca <- Top_Var_TF %>% as.data.frame %>% .[Factor_R_OR_NR_B=="NR.B" | Factor_R_OR_NR_B=="R.B"| Factor_R_OR_NR_B == "OR.B"] %>% t() %>% prcomp
+
+p <- fviz_pca_ind(res.pca, label="all", habillage=Factor_R_OR_NR_B[Factor_R_OR_NR_B=="NR.B" | Factor_R_OR_NR_B=="R.B"| Factor_R_OR_NR_B == "OR.B"],
+                               addEllipses=T, ellipse.level=0.95)
+p <- p + ggtitle(paste0("PCA top ", nb_TF, " TF"))
+p
+png(paste0("../Results/DGEA/PCA_GE_top_", nb_TF,"_TF_Koichi_data.png"))
+p
+dev.off()
+```
+
+## PCA all TF
+
+```{r}
+res.pca <- Koichi_TF_actitity %>% as.data.frame %>% .[Factor_R_OR_NR_B=="NR.B" | Factor_R_OR_NR_B=="R.B" | Factor_R_OR_NR_B == "OR.B"] %>% t() %>% prcomp
+
+p <- fviz_pca_ind(res.pca, label="all", habillage=Factor_R_OR_NR_B[Factor_R_OR_NR_B=="NR.B" | Factor_R_OR_NR_B=="R.B" | Factor_R_OR_NR_B == "OR.B"],
+                               addEllipses=T, ellipse.level=0.95)
+p <- p + ggtitle("PCA TF activity")
+p
+```
+
+```{r}
+res.pca <- Koichi_TF_actitity %>% as.data.frame %>% .[Factor_R_OR_NR_B=="NR.B" | Factor_R_OR_NR_B=="R.B" | Factor_R_OR_NR_B == "OR.B"] %>% prcomp
+
+p <- fviz_pca_ind(res.pca, label="all",
+                               addEllipses=F, ellipse.level=0.95)
+p <- p + ggtitle("PCA TF activity")
+p
+png("../Results/DGEA/Heatmap_PCA_TF_Koichi_data.png")
+p
+dev.off()
+```
+
+

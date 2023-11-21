@@ -1,0 +1,156 @@
+---
+title: "Sampling Layer 3"
+subtitle: "Layer 3"
+author: Alexis Hucteau
+date: "`r Sys.Date()`"
+output:
+    html_document:
+      toc: yes
+      toc_float: yes
+      theme: united
+editor_options:
+  markdown:
+    wrap: sentence
+---
+
+# Libraries
+
+```{r, error=F, warning=F, echo=FALSE, include=F}
+rm(DmIALite, DOLite, DOLiteTerm, HsIALite, MmIALite, RnIALite)
+
+library(dplyr)
+library(parallel)
+library(ggplot2)
+
+cores2use <- detectCores()
+```
+
+```{r}
+PPI_base <- read.csv("~/Documents/List_genes_from_transcriptome/FIsInGene_020720_with_annotations.tsv", sep = "\t")
+
+Proteomics_data <- read.table("~/GitHub/Thesis_paper/Datasets/Proteomic/mIDH_data.tsv", sep = "\t", check.names = F, header = T, row.names = 1)
+```
+
+```{r}
+Sampling_layer <- lapply(1:20, function(sampling){
+  sample(colnames(Proteomics_data), size = 15, replace = F) 
+})
+
+Samples_Proteo <- lapply(1:20, function(Pheno){
+  Proteomics_data[Sampling_layer[[Pheno]]]
+})
+```
+
+```{r}
+Samples_Proteo_stats <- lapply(1:20, function(Pheno){
+  res <- Samples_Proteo[[Pheno]]
+  res$mean <- rowMeans(res)
+  res$sd <- matrixStats::rowVars(as.matrix(dplyr::select(res, -c("mean"))))
+  res$zscore <- res$mean / res$sd
+  res
+})
+```
+
+```{r}
+Return_mean_value <- function(Feature, Node){
+  if(Node %in% rownames(Feature)){
+    Feature[Node, "zscore"] + 1
+  }else{
+    1
+  }
+}
+
+Calculate_edges_weight <- function(Network, Features){
+  sapply(1:nrow(Network), function(node){
+    A <- Return_mean_value(Features, Network[node, "Gene1"])
+    B <- Return_mean_value(Features, Network[node, "Gene2"])
+    A*B
+  })
+}
+```
+
+```{r}
+PPIs <- lapply(1:20, function(Pheno){
+  res <- PPI_base
+  res$weight <- Calculate_edges_weight(PPI_base, Samples_Proteo_stats[[Pheno]])
+  res
+})
+names(PPIs) <- names(Samples_Proteo_stats)
+```
+
+```{r}
+Log_scaling_weight <- function(Network){
+  w <- Network$weight
+  w <- sapply(w, function(we){
+    if(we == 0){
+      0
+    }else{
+      log10(we)
+    }
+  })
+  max_log_w <- max(w)
+  scaled_weight <- sapply(w, function(we) we / max_log_w)
+  scaled_weight
+}
+```
+
+```{r}
+Scaled_PPI <- lapply(1:20, function(Pheno){
+  res <- PPIs[[Pheno]]
+  res$Scaled_weight <- Log_scaling_weight(res)
+  res$Gene1 <- stringr::str_replace_all(res$Gene1, pattern = " ", replacement = "_") %>% 
+    stringr::str_replace_all(pattern = " ", replacement = "_") %>%
+    stringr::str_replace_all(pattern = " ", replacement = "_")
+  res$Gene2 <- stringr::str_replace_all(res$Gene2, pattern = " ", replacement = "_") %>% 
+    stringr::str_replace_all(pattern = " ", replacement = "_") %>%
+    stringr::str_replace_all(pattern = " ", replacement = "_")
+  res
+})
+```
+
+
+```{r}
+Make_PPI_directed <- function(Network){
+  mclapply(1:nrow(Network), function(interaction){
+    dir <- Network[interaction, "Direction"]
+    if(dir == "->" | dir == "-|"){
+      data.frame("Gene1" = Network[interaction, "Gene1"],
+                 "Gene2" = Network[interaction, "Gene2"], 
+                 "weight" = Network[interaction, "Scaled_weight"])
+    }else if(dir == "<-" | dir == "|-"){
+      data.frame("Gene1" = Network[interaction, "Gene2"],
+                 "Gene2" = Network[interaction, "Gene1"], 
+                 "weight" = Network[interaction, "Scaled_weight"])
+    }else{
+      w_2 <- Network[interaction, "Scaled_weight"] / 2
+      data.frame("Gene1" = c(Network[interaction, "Gene1"], Network[interaction, "Gene2"]),
+                 "Gene2" = c(Network[interaction, "Gene2"], Network[interaction, "Gene1"]),
+                 "weight" = c(w_2, w_2)
+                 )
+    }
+  }, mc.cores = cores2use) %>% data.table::rbindlist() %>% unique
+}
+```
+
+```{r}
+Scaled_and_directed_PPI <- mclapply(1:20, function(PPI){
+  Make_PPI_directed(Scaled_PPI[[PPI]])
+}, mc.cores = cores2use)
+```
+
+```{r}
+lapply(1:20, function(Class){
+  file <- paste0("~/GitHub/Thesis_paper/Results/Multi_layer_pheno_like/Sampling/Layer_3/Network_", Class, ".tsv")
+  Scaled_and_directed_PPI[[Class]] %>%
+    write.table(file,
+              sep = "\t", quote = F, row.names = F)
+  return(NULL)
+})
+```
+
+
+```{r}
+save.image("/media/alexis/DATA/Session/R_session/Thesis_paper_Rsessions/Multi_layer_phenolike/Layer_3_sampling.RData")
+
+```
+

@@ -1,0 +1,426 @@
+---
+title: "Analyse BEATAML + IDH signatures"
+author: Alexis Hucteau
+date: "`r Sys.Date()`"
+output:
+    html_document:
+      toc: yes
+      toc_float: yes
+      theme: united
+editor_options:
+  markdown:
+    wrap: sentence
+---
+
+# Libraries
+
+```{r, error=F, warning=F, echo=FALSE, include=F}
+library(dplyr)
+library(matrixTests)
+library(factoextra)
+library(Hmisc)
+library(matrixStats)
+library(RColorBrewer)
+library(pheatmap)
+library(data.table)
+library(parallel)
+library(ggpubr)
+library("grid")
+library("gridExtra")
+library(ggplotify)
+library(limma)
+library(EnhancedVolcano)
+library(biomaRt)
+library(clusterProfiler)
+library(org.Hs.eg.db)
+library(simplifyEnrichment)
+library(pathview)
+library(DESeq2)
+
+cores2use <- detectCores() -2
+
+
+source("~/Core_scripts/core_functions.R")
+```
+
+# Datasets
+
+```{r}
+BEATAML_Counts <- read.table("~/GitHub/Thesis_paper/Datasets/Transcriptomics/RNAseq/beataml2_0_raw.csv", sep = ",", header = T, row.names = 1)
+
+
+BEATAML_Clinical <- readxl::read_excel("~/GitHub/Thesis_paper/Datasets/Transcriptomics/RNAseq/beataml_wv1to4_clinical.xlsx", 
+                               sheet = "summary")  %>% .[c(1, 3, 95)] %>%
+  unique 
+```
+
+## Filter dataset
+
+```{r}
+Pheno_RNAseq <- dplyr::filter(BEATAML_Clinical, !is.na(dbgap_rnaseq_sample) & !is.na(variantSummary)) 
+
+Pheno_RNAseq$IDH <- sapply(Pheno_RNAseq$variantSummary, function(sample){
+  if(is.na(sample)){
+    return("No_data")
+  }
+  IDH1 <- stringr::str_detect(sample, "IDH1")
+  IDH2 <- stringr::str_detect(sample, "IDH2")
+  if(IDH1){
+    if(IDH2){
+      "IDH1_IDH2"
+    }else{
+      "IDH1"
+    }
+  }else if(IDH2){
+    "IDH2"
+  }else{
+    "wtIDH"
+  }
+})
+
+table(Pheno_RNAseq$IDH)
+```
+
+```{r}
+samples_IDH1 <- dplyr::filter(Pheno_RNAseq, IDH == "IDH1") %>% 
+  .$dbgap_rnaseq_sample
+samples_IDH2 <- dplyr::filter(Pheno_RNAseq, IDH == "IDH2") %>% 
+  .$dbgap_rnaseq_sample
+samples_wtIDH <- dplyr::filter(Pheno_RNAseq, IDH == "wtIDH") %>% 
+  .$dbgap_rnaseq_sample %>% sample(30, replace = FALSE, prob = NULL)
+```
+
+```{r}
+Ensembl_2_symbol <- BEATAML_Counts[1:4]
+```
+
+# IDH1 vs IDHwt
+
+```{r}
+Samples_2_keep <- colnames(BEATAML_Counts) %in% c(samples_IDH1, samples_wtIDH) %>% .[5:711]
+
+BEATAML_Counts_filtered_IDH1_wt <- BEATAML_Counts[c(rep(T, 4), Samples_2_keep)]
+
+BEATAML_Counts_filtered_IDH1_wt <- BEATAML_Counts_filtered_IDH1_wt[-c(2:4)]
+
+Pheno_RNAseq_IDH1_wt <- data.frame("id" = Pheno_RNAseq$dbgap_rnaseq_sample,
+                    "IDH" = Pheno_RNAseq$IDH) %>%
+  dplyr::filter(id %in% colnames(BEATAML_Counts_filtered_IDH1_wt))
+
+dds_IDH1_wt <- DESeqDataSetFromMatrix(countData=BEATAML_Counts_filtered_IDH1_wt, 
+                              colData=Pheno_RNAseq_IDH1_wt, 
+                              design=~IDH, 
+                              tidy=TRUE)
+dds_IDH1_wt
+
+dds_IDH1_wt <- DESeq(dds_IDH1_wt)
+res_IDH1_wt <- results(dds_IDH1_wt, tidy=TRUE)
+res_IDH1_wt <- as_tibble(res_IDH1_wt)
+res_IDH1_wt
+```
+
+# IDH2 vs IDHwt
+
+```{r}
+Samples_2_keep <- colnames(BEATAML_Counts) %in% c(samples_IDH2, samples_wtIDH) %>% .[5:711]
+
+BEATAML_Counts_filtered_IDH2_wt <- BEATAML_Counts[c(rep(T, 4), Samples_2_keep)]
+
+BEATAML_Counts_filtered_IDH2_wt <- BEATAML_Counts_filtered_IDH2_wt[-c(2:4)]
+
+Pheno_RNAseq_IDH2_wt <- data.frame("id" = Pheno_RNAseq$dbgap_rnaseq_sample,
+                    "IDH" = Pheno_RNAseq$IDH) %>%
+  dplyr::filter(id %in% colnames(BEATAML_Counts_filtered_IDH2_wt))
+
+dds_IDH2_wt <- DESeqDataSetFromMatrix(countData=BEATAML_Counts_filtered_IDH2_wt, 
+                              colData=Pheno_RNAseq_IDH2_wt, 
+                              design=~IDH, 
+                              tidy=TRUE)
+dds_IDH2_wt
+
+dds_IDH2_wt <- DESeq(dds_IDH2_wt)
+res_IDH2_wt <- results(dds_IDH2_wt, tidy=TRUE)
+res_IDH2_wt <- as_tibble(res_IDH2_wt)
+res_IDH2_wt
+```
+
+# IDH1 vs IDH2
+
+```{r}
+Samples_2_keep <- colnames(BEATAML_Counts) %in% c(samples_IDH2, samples_IDH1) %>% .[5:711]
+
+BEATAML_Counts_filtered_IDH1_IDH2 <- BEATAML_Counts[c(rep(T, 4), Samples_2_keep)]
+
+BEATAML_Counts_filtered_IDH1_IDH2 <- BEATAML_Counts_filtered_IDH1_IDH2[-c(2:4)]
+
+Pheno_RNAseq_IDH1_IDH2 <- data.frame("id" = Pheno_RNAseq$dbgap_rnaseq_sample,
+                    "IDH" = Pheno_RNAseq$IDH) %>%
+  dplyr::filter(id %in% colnames(BEATAML_Counts_filtered_IDH1_IDH2))
+
+dds_IDH1_IDH2 <- DESeqDataSetFromMatrix(countData=BEATAML_Counts_filtered_IDH1_IDH2, 
+                              colData=Pheno_RNAseq_IDH1_IDH2, 
+                              design=~IDH, 
+                              tidy=TRUE)
+dds_IDH1_IDH2
+
+dds_IDH1_IDH2 <- DESeq(dds_IDH1_IDH2)
+res_IDH1_IDH2 <- results(dds_IDH1_IDH2, tidy=TRUE)
+res_IDH1_IDH2 <- as_tibble(res_IDH1_IDH2)
+res_IDH1_IDH2
+```
+
+```{r}
+diff_IDH1_IDH2 <- dplyr::filter(res_IDH1_IDH2, abs(log2FoldChange) > 1 & pvalue < 0.05) 
+diff_IDH1_wt <- dplyr::filter(res_IDH1_wt, log2FoldChange < -1 & pvalue < 0.05) 
+diff_IDH2_wt <- dplyr::filter(res_IDH2_wt, abs(log2FoldChange) > 1 & pvalue < 0.05) 
+
+Top_IDH1_2_IDH2 <- dplyr::filter(diff_IDH1_IDH2, log2FoldChange < -1) %>% .[order(.$log2FoldChange, decreasing = F),] %>% .$row
+
+Top_IDH2_2_IDH1 <- dplyr::filter(diff_IDH1_IDH2, log2FoldChange > 1) %>% .[order(.$log2FoldChange, decreasing = T),] %>% .$row
+
+Top_IDH1_2_wt <- dplyr::filter(diff_IDH1_wt, log2FoldChange < -1) %>% .[order(.$log2FoldChange, decreasing = F),] %>% .$row
+
+Top_IDH2_2_wt <- dplyr::filter(diff_IDH2_wt, log2FoldChange < -1) %>% .[order(.$log2FoldChange, decreasing = F),] %>% .$row
+
+IDH1_BEATAML_signature <- Top_IDH1_2_wt %>% .[1:50]
+IDH1_BEATAML_signature <- sapply(IDH1_BEATAML_signature, function(gene){
+  dplyr::filter(Ensembl_2_symbol, stable_id == gene) %>% .$display_label
+})
+IDH1_BEATAML_signature
+
+IDH2_BEATAML_signature <- Top_IDH2_2_wt %>% .[1:50]
+IDH2_BEATAML_signature <- sapply(IDH2_BEATAML_signature, function(gene){
+  dplyr::filter(Ensembl_2_symbol, stable_id == gene) %>% .$display_label
+})
+IDH2_BEATAML_signature
+
+IDH1_specific_BEATAML_signature <- intersect(Top_IDH1_2_IDH2, Top_IDH1_2_wt) 
+IDH1_specific_BEATAML_signature <- sapply(IDH1_specific_BEATAML_signature, function(gene){
+  dplyr::filter(Ensembl_2_symbol, stable_id == gene) %>% .$display_label
+})
+
+IDH2_specific_BEATAML_signature <- intersect(Top_IDH2_2_IDH1, Top_IDH2_2_wt)
+IDH2_specific_BEATAML_signature <- sapply(IDH2_specific_BEATAML_signature, function(gene){
+  dplyr::filter(Ensembl_2_symbol, stable_id == gene) %>% .$display_label
+})
+```
+
+```{r}
+IDH1_specific_BEATAML_signature %>% write.table("~/tmp/IDH1_specific_BEATAML_signature.tsv")
+IDH2_specific_BEATAML_signature %>% write.table("~/tmp/IDH2_specific_BEATAML_signature.tsv")
+
+IDH1_BEATAML_signature %>% write.table("~/tmp/IDH1_BEATAML_signature.tsv")
+IDH2_BEATAML_signature %>% write.table("~/tmp/IDH2_BEATAML_signature.tsv")
+
+```
+
+# Drug screening analysis
+
+
+```{r}
+BEATAML_Drug_analysis <- read.table("~/GitHub/Thesis_paper/Datasets/Drug_screening/beataml_probit_curve_fits_v4_dbgap.txt", sep = "\t", header = T)
+
+Samples_tested <- BEATAML_Drug_analysis$dbgap_subject_id %>% unique
+
+Pheno_Drug_screening <- dplyr::filter(BEATAML_Clinical, dbgap_subject_id %in% Samples_tested) %>% .[c(1,3)] %>%
+  dplyr::filter(!is.na(variantSummary)) %>% unique
+
+Pheno_Drug_screening$IDH <- sapply(Pheno_Drug_screening$variantSummary, function(sample){
+  if(is.na(sample)){
+    return("No_data")
+  }
+  IDH1 <- stringr::str_detect(sample, "IDH1")
+  IDH2 <- stringr::str_detect(sample, "IDH2")
+  if(IDH1){
+    if(IDH2){
+      "IDH1_IDH2"
+    }else{
+      "IDH1"
+    }
+  }else if(IDH2){
+    "IDH2"
+  }else{
+    "wtIDH"
+  }
+})
+
+table(Pheno_Drug_screening$IDH)
+```
+
+```{r}
+samples_IDH1_Drug_screening <- dplyr::filter(Pheno_Drug_screening, IDH == "IDH1") %>% 
+  .$dbgap_subject_id
+samples_IDH2_Drug_screening <- dplyr::filter(Pheno_Drug_screening, IDH == "IDH2") %>% 
+  .$dbgap_subject_id
+samples_wtIDH_Drug_screening <- dplyr::filter(Pheno_Drug_screening, IDH == "wtIDH") %>% 
+  .$dbgap_subject_id %>% sample(40, replace = FALSE, prob = NULL)
+
+BEATAML_Drug_screening_data <- BEATAML_Drug_analysis[c(1,4,20,23)]
+```
+
+
+```{r}
+BEATAML_Drug_screening_data_matrix <- split(BEATAML_Drug_screening_data, BEATAML_Drug_screening_data$dbgap_subject_id)
+
+samples_Drugs <- names(BEATAML_Drug_screening_data_matrix) 
+
+BEATAML_Drug_screening_data_matrix <- lapply(samples_Drugs, function(sample){
+  df <- BEATAML_Drug_screening_data_matrix[[sample]]
+  df_list <- split(df, df$inhibitor)
+  df_list_combined <- lapply(names(df_list), function(inhibitor){
+    df_inhibitor <- df_list[[inhibitor]] 
+    if(nrow(df_inhibitor) > 1){
+      aucvalues <- df_inhibitor$auc
+      ic50values <- df_inhibitor$ic50 %>% .[. != 10]
+      mean_aucvalues <- mean(aucvalues)
+      if(is.null(ic50values)){
+        mean_ic50values <- 10
+      }else{
+        mean_ic50values <- mean(ic50values)
+      }
+      res <- data.frame("inhibitor" = inhibitor,
+                        "auc" = mean_aucvalues,
+                        "ic50" = mean_ic50values)
+    }else{
+      res <- data.frame("inhibitor" = inhibitor,
+                        "auc" = df_inhibitor$auc,
+                 "ic50" = df_inhibitor$ic50)
+    }
+    colnames(res) <- c("inhibitor", paste0(sample, "_ic50"), paste0(sample, "_auc"))
+    res
+  }) %>% data.table::rbindlist()
+})
+
+names(BEATAML_Drug_screening_data_matrix) <- samples_Drugs
+
+BEATAML_Drug_screening_data_matrix <- lapply(samples_Drugs, function(sample){
+  df <- BEATAML_Drug_screening_data_matrix[[sample]]
+  df <- dplyr::filter(df, sample != 10)
+  colnames(df) <- c("inhibitor", paste0(sample, "_auc"), paste0(sample, "_ic50"))
+  df
+}) %>% purrr::reduce(.f = function(a, b) merge(a, b, by = "inhibitor", all=T))
+```
+
+
+```{r}
+Deal_with_na <- function(df, column, final_value){
+  for (i in column){
+    data.table::set(df, which(is.na(df[[i]])), i, final_value)
+  }
+}
+```
+
+```{r}
+BEATAML_Drug_screening_data_matrix_keeped_na <- BEATAML_Drug_screening_data_matrix
+Deal_with_na(BEATAML_Drug_screening_data_matrix, paste0(samples_Drugs, "_ic50"), 10)
+Deal_with_na(BEATAML_Drug_screening_data_matrix, paste0(samples_Drugs, "_auc"), 0)
+write.table(BEATAML_Drug_screening_data_matrix, "~/GitHub/Thesis_paper/Datasets/Drug_screening/BEATAML_Drug_ic50_formated.tsv", sep = "\t", row.names = F)
+
+# write.table(BEATAML_Drug_screening_data_matrix_keeped_na, "~/GitHub/Thesis_paper/Datasets/Drug_screening/BEATAML_Drug_ic50_formated_na_omitted.tsv", sep = "\t", row.names = F)
+```
+
+
+```{r}
+BEATAML_Drug_screening_data_frame <- as.data.frame(BEATAML_Drug_screening_data_matrix)
+rownames(BEATAML_Drug_screening_data_frame) <- BEATAML_Drug_screening_data_frame$inhibitor
+BEATAML_Drug_screening_data_frame <- BEATAML_Drug_screening_data_frame[-1]
+Pheno_IDH_ic50_Drug_screening <- sapply(colnames(BEATAML_Drug_screening_data_frame), function(sample){
+  sample <- stringr::str_remove(sample, "_ic50")
+  if(sample %in% samples_IDH1_Drug_screening){
+    "mIDH1"
+  }else if(sample %in% samples_IDH2_Drug_screening){
+    "mIDH2"
+  }else if(sample %in% samples_wtIDH_Drug_screening){
+    "wtIDH"
+  }else{
+    "out"
+  }
+})
+Pheno_IDH_auc_Drug_screening <- sapply(colnames(BEATAML_Drug_screening_data_frame), function(sample){
+  sample <- stringr::str_remove(sample, "_auc")
+  if(sample %in% samples_IDH1_Drug_screening){
+    "mIDH1"
+  }else if(sample %in% samples_IDH2_Drug_screening){
+    "mIDH2"
+  }else if(sample %in% samples_wtIDH_Drug_screening){
+    "wtIDH"
+  }else{
+    "out"
+  }
+})
+```
+
+```{r}
+Diff_drug_analysis_ic50 <- Differential_analysis(Pheno_IDH_ic50_Drug_screening[Pheno_IDH_ic50_Drug_screening != "out"], BEATAML_Drug_screening_data_frame[Pheno_IDH_ic50_Drug_screening != "out"])
+Diff_drug_analysis_auc <- Differential_analysis(Pheno_IDH_auc_Drug_screening[Pheno_IDH_auc_Drug_screening != "out"], BEATAML_Drug_screening_data_frame[Pheno_IDH_auc_Drug_screening != "out"])
+
+```
+
+```{r}
+Diff_drug_analysis_ic50["mIDH1-wtIDH"] %>% 
+  write.table("~/GitHub/Thesis_paper/Results/Drug_screening/BEATAML_mIDH1_wtIDH_ic50.tsv", sep ="\t", row.names = F)
+Diff_drug_analysis_ic50["mIDH2-wtIDH"] %>% 
+  write.table("~/GitHub/Thesis_paper/Results/Drug_screening/BEATAML_mIDH2_wtIDH_ic50.tsv", sep ="\t", row.names = F)
+Diff_drug_analysis_ic50["mIDH1-mIDH2"] %>% 
+  write.table("~/GitHub/Thesis_paper/Results/Drug_screening/BEATAML_mIDH1_mIDH2_ic50.tsv", sep ="\t", row.names = F)
+
+Diff_drug_analysis_auc["mIDH1-wtIDH"] %>% 
+  write.table("~/GitHub/Thesis_paper/Results/Drug_screening/BEATAML_mIDH1_wtIDH_auc.tsv", sep ="\t", row.names = F)
+Diff_drug_analysis_auc["mIDH2-wtIDH"] %>% 
+  write.table("~/GitHub/Thesis_paper/Results/Drug_screening/BEATAML_mIDH2_wtIDH_auc.tsv", sep ="\t", row.names = F)
+Diff_drug_analysis_auc["mIDH1-mIDH2"] %>% 
+  write.table("~/GitHub/Thesis_paper/Results/Drug_screening/BEATAML_mIDH1_mIDH2_auc.tsv", sep ="\t", row.names = F)
+```
+
+```{r}
+Drug_diff_IDH1_IDHwt_ic50 <- dplyr::filter(Diff_drug_analysis_ic50[["mIDH1-wtIDH"]], abs(logFC) > 1.5)
+Drug_diff_IDH1_IDHwt_ic50$ID
+
+Drug_diff_IDH2_IDHwt_ic50 <- dplyr::filter(Diff_drug_analysis_ic50[["mIDH2-wtIDH"]], abs(logFC) > 1.5)
+Drug_diff_IDH2_IDHwt_ic50$ID
+
+Drug_diff_IDH1_IDH2_ic50 <- dplyr::filter(Diff_drug_analysis_ic50[["mIDH1-mIDH2"]], abs(logFC) > 1.5)
+Drug_diff_IDH1_IDH2_ic50$ID
+```
+
+```{r}
+Drug_diff_IDH1_IDHwt_auc <- dplyr::filter(Diff_drug_analysis_auc[["mIDH1-wtIDH"]], abs(logFC) > 1.5)
+Drug_diff_IDH1_IDHwt_auc$ID
+
+Drug_diff_IDH2_IDHwt_auc <- dplyr::filter(Diff_drug_analysis_auc[["mIDH2-wtIDH"]], abs(logFC) > 1.5)
+Drug_diff_IDH2_IDHwt_auc$ID
+
+Drug_diff_IDH1_IDH2_auc <- dplyr::filter(Diff_drug_analysis_auc[["mIDH1-mIDH2"]], abs(logFC) > 1.5)
+Drug_diff_IDH1_IDH2_auc$ID
+```
+
+
+
+```{r}
+DATA_drug_screening <- read.table("~/GitHub/Thesis_paper/Results/Drug_screening/Resume_data_drug_screening.csv", sep = "\t", header = T, skip =1)
+
+DATA_IDH1_vs_IDHwt <- list("Molm13" = DATA_drug_screening$WT..IDH1 %>% .[. != ""],
+                           "BEATAML" = DATA_drug_screening$WT.IDH1 %>% .[. != ""],
+                           "Marseille" = DATA_drug_screening$IDH1.IDHwt %>% .[. != ""])
+
+DATA_IDH2_vs_IDHwt <- list("Molm13" = DATA_drug_screening$WT.IDH2 %>% .[. != ""],
+                           "BEATAML" = DATA_drug_screening$WT.IDH2.1 %>% .[. != ""],
+                           "Marseille" = DATA_drug_screening$IDH2.wt %>% .[. != ""])
+
+DATA_IDH1_vs_IDH2 <- list("Molm13" = DATA_drug_screening$IDH1.IDH2 %>% .[. != ""],
+                           "BEATAML" = DATA_drug_screening$IDH1.IDH2.1 %>% .[. != ""],
+                           "Marseille" = DATA_drug_screening$IDH2.HB..IDH1 %>% .[. != ""])
+```
+
+
+```{r}
+ggvenn::ggvenn(DATA_IDH1_vs_IDHwt)
+ggvenn::ggvenn(DATA_IDH2_vs_IDHwt)
+ggvenn::ggvenn(DATA_IDH1_vs_IDH2)
+
+```
+
+```{r}
+
+```
+

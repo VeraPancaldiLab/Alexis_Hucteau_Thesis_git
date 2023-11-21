@@ -1,0 +1,167 @@
+---
+title: "R Notebook"
+output:
+  pdf_document: default
+  html_notebook: default
+---
+
+```{r}
+library(dplyr)
+library(ggplot2)
+```
+
+
+```{r}
+Data_seahorse <- read.table("../../Manip lignee IDH/Seahorse_24_05.csv", sep = "\t", header = T)
+Data_seahorse$OCR_ECAR <- Data_seahorse$BASAL_OCR / Data_seahorse$ECAR
+Data_seahorse$OCR_ECAR_Ext <- Data_seahorse$BASAL_OCR_Ext / Data_seahorse$ECAR_Ext
+Data_seahorse$Beta_oxy <- ((Data_seahorse$BASAL_OCR - Data_seahorse$BASAL_OCR_Ext) / Data_seahorse$BASAL_OCR) * 100
+Data_seahorse$Glyco <- (Data_seahorse$BASAL_OCR_Ext / Data_seahorse$BASAL_OCR) * 100
+Data_seahorse$pheno <- paste(Data_seahorse$Cell_line, Data_seahorse$IDH_statut, Data_seahorse$Replicat_bio, sep = "_")
+```
+
+
+
+```{r}
+Data_seahorse_pulled <- lapply(unique(Data_seahorse$pheno), function(Pheno){
+  tmp <- dplyr::filter(Data_seahorse, pheno == Pheno)
+  colMeans(tmp[,5:20]) %>% as.data.frame() %>% t() %>% as.data.frame()
+}) %>% data.table::rbindlist()
+rownames(Data_seahorse_pulled) <- unique(Data_seahorse$pheno)
+Sub_pheno <- Data_seahorse[Data_seahorse$Replicat_tech == 1, 1:4]
+Data_seahorse_pulled <- cbind(Sub_pheno, Data_seahorse_pulled)
+Data_seahorse_pulled$Beta_oxy <- ((Data_seahorse_pulled$BASAL_OCR - Data_seahorse_pulled$BASAL_OCR_Ext) / Data_seahorse_pulled$BASAL_OCR) * 100
+Data_seahorse_pulled$No_B_oxy <- (Data_seahorse_pulled$BASAL_OCR_Ext / Data_seahorse_pulled$BASAL_OCR) * 100
+```
+
+
+
+# BASAL OCR
+
+```{r}
+Basal_OCR <- ggplot(Data_seahorse_pulled, aes(x = Cell_line, y = BASAL_OCR, fill = factor(IDH_statut, levels = c("WT", "IDH1", "IDH2")))) +
+  geom_boxplot(position = position_dodge(width = 0.7), width = 0.5) +
+  geom_point(aes(x = Cell_line, 
+                 color = factor(IDH_statut, levels = c("WT", "IDH1", "IDH2")), 
+                 color = "#000000", 
+                 shape=factor(Replicat_bio, levels = c(1, 2, 3))), 
+             position = position_dodge(width = 0.7)) + 
+  labs(fill = c("IDH"), shape = c("Replicat"), color = c("IDH")) +
+  scale_fill_manual(values = c("#44BB44", "#4444BB", "#BB4444")) + 
+  ggtitle("Basal OCR") + 
+  scale_color_manual(values = c("#44BB44", "#4444BB", "#BB4444"))
+
+Basal_OCR
+```
+# BASAL OCR + Ext
+
+```{r}
+Basal_OCR_Ext <- dplyr::filter(Data_seahorse_pulled, Replicat_bio != 3) %>% ggplot(aes(x = Cell_line, y = BASAL_OCR_Ext, fill = factor(IDH_statut, levels = c("WT", "IDH1", "IDH2")))) +
+  geom_boxplot(position = position_dodge(width = 0.7), width = 0.5) +
+  geom_point(aes(x = Cell_line, 
+                 color = factor(IDH_statut, levels = c("WT", "IDH1", "IDH2")), 
+                 color = "#000000", 
+                 shape=factor(Replicat_bio, levels = c(1, 2))), 
+             position = position_dodge(width = 0.7)) +
+  labs(fill = c("IDH"), shape = c("Replicat"), color = c("IDH")) +
+  scale_fill_manual(values = c("#44BB44", "#4444BB", "#BB4444")) + 
+  ggtitle("Basal OCR + Ext")
+
+Basal_OCR_Ext
+```
+
+# OCR / ECAR
+
+```{r}
+OCR_ECAR_plot <- ggplot(Data_seahorse_pulled, aes(x = Cell_line, y = OCR_ECAR, fill = factor(IDH_statut, levels = c("WT", "IDH1", "IDH2")))) +
+  geom_boxplot(position = position_dodge(width = 0.7), width = 0.5) +
+  geom_point(aes(x = Cell_line, 
+                 color = factor(IDH_statut, levels = c("WT", "IDH1", "IDH2")), 
+                 color = "#000000", 
+                 shape=factor(Replicat_bio, levels = c(1, 2, 3))), 
+             position = position_dodge(width = 0.7)) +
+  labs(fill = c("IDH"), shape = c("Replicat"), color = c("IDH")) +
+  scale_fill_manual(values = c("#44BB44", "#4444BB", "#BB4444")) + 
+  ggtitle("OCR/ECAR")
+
+OCR_ECAR_plot
+```
+
+# OCR / ECAR + Ext
+
+```{r}
+OCR_ECAR_Ext_plot <- dplyr::filter(Data_seahorse_pulled, Replicat_bio != 3) %>% ggplot(aes(x = Cell_line, y = OCR_ECAR_Ext, fill = factor(IDH_statut, levels = c("WT", "IDH1", "IDH2")))) +
+  geom_boxplot(position = position_dodge(width = 0.7), width = 0.5) +
+geom_point(aes(x = Cell_line, 
+                 color = factor(IDH_statut, levels = c("WT", "IDH1", "IDH2")), 
+                 color = "#000000", 
+                 shape=factor(Replicat_bio, levels = c(1, 2))), 
+             position = position_dodge(width = 0.7)) +
+  labs(fill = c("IDH"), shape = c("Replicat"), color = c("IDH")) +
+  scale_fill_manual(values = c("#44BB44", "#4444BB", "#BB4444")) + ggtitle("OCR/ECAR + Ext")
+
+OCR_ECAR_Ext_plot
+```
+
+# ECAR
+
+```{r}
+ECAR_plot <- ggplot(Data_seahorse_pulled, aes(x = Cell_line, y = ECAR, fill = factor(IDH_statut, levels = c("WT", "IDH1", "IDH2")))) +
+  geom_boxplot(position = position_dodge(width = 0.7), width = 0.5) +
+ geom_point(aes(x = Cell_line, 
+                 color = factor(IDH_statut, levels = c("WT", "IDH1", "IDH2")), 
+                 color = "#000000", 
+                 shape=factor(Replicat_bio, levels = c(1, 2, 3))), 
+             position = position_dodge(width = 0.7)) +
+  labs(fill = c("IDH"), shape = c("Replicat"), color = c("IDH")) +
+  scale_fill_manual(values = c("#44BB44", "#4444BB", "#BB4444")) + ggtitle("ECAR")
+
+ECAR_plot
+```
+
+# ECAR + Ext
+
+```{r}
+ECAR_Ext_plot <- dplyr::filter(Data_seahorse_pulled, Replicat_bio != 3) %>% ggplot(aes(x = Cell_line, y = ECAR_Ext, fill = factor(IDH_statut, levels = c("WT", "IDH1", "IDH2")))) +
+  geom_boxplot(position = position_dodge(width = 0.7), width = 0.5) +
+  geom_point(aes(x = Cell_line, 
+                 color = factor(IDH_statut, levels = c("WT", "IDH1", "IDH2")), 
+                 color = "#000000", 
+                 shape=factor(Replicat_bio, levels = c(1, 2))), 
+             position = position_dodge(width = 0.7)) +
+  labs(fill = c("IDH"), shape = c("Replicat"), color = c("IDH")) +
+  scale_fill_manual(values = c("#44BB44", "#4444BB", "#BB4444")) + ggtitle("ECAR + Ext")
+
+ECAR_Ext_plot
+```
+
+# Beta_Oxy 
+
+```{r}
+Beta_oxy_plot <- dplyr::filter(Data_seahorse_pulled, Replicat_bio != 3) %>% ggplot(aes(x = Cell_line, y = Beta_oxy, fill = factor(IDH_statut, levels = c("WT", "IDH1", "IDH2")))) +
+  geom_boxplot(position = position_dodge(width = 0.7), width = 0.5) +
+geom_point(aes(x = Cell_line, 
+                 color = factor(IDH_statut, levels = c("WT", "IDH1", "IDH2")), 
+                 color = "#000000", 
+                 shape=factor(Replicat_bio, levels = c(1, 2))), 
+             position = position_dodge(width = 0.7)) +
+  labs(fill = c("IDH"), shape = c("Replicat"), color = c("IDH")) +
+  scale_fill_manual(values = c("#44BB44", "#4444BB", "#BB4444")) + ggtitle("% B-oxydation")
+
+Beta_oxy_plot
+```
+
+```{r}
+No_B_oxy_plot <- dplyr::filter(Data_seahorse_pulled, Replicat_bio != 3) %>% ggplot(aes(x = Cell_line, y = No_B_oxy, fill = factor(IDH_statut, levels = c("WT", "IDH1", "IDH2")))) +
+  geom_boxplot(position = position_dodge(width = 0.7), width = 0.5) +
+geom_point(aes(x = Cell_line, 
+                 color = factor(IDH_statut, levels = c("WT", "IDH1", "IDH2")), 
+                 color = "#000000", 
+                 shape=factor(Replicat_bio, levels = c(1, 2))), 
+             position = position_dodge(width = 0.7)) +
+  labs(fill = c("IDH"), shape = c("Replicat"), color = c("IDH")) +
+  scale_fill_manual(values = c("#44BB44", "#4444BB", "#BB4444")) + ggtitle("% - B Oxy")
+
+No_B_oxy_plot
+```
+

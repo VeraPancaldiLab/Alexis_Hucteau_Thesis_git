@@ -1,0 +1,971 @@
+---
+title: "Chas_analysis"
+author: Alexis Hucteau
+date: "`r Sys.Date()`"
+output:
+    html_document:
+      toc: yes
+      toc_float: yes
+      theme: united
+editor_options:
+  markdown:
+    wrap: sentence
+---
+
+```{r}
+rm(list = ls())
+```
+
+
+```{r}
+library(dplyr)
+library(chaser)
+library(stringr)
+library(biomaRt)
+library(gridExtra)
+library(grid)
+library(ggplot2)
+library(ggforce)
+library(data.table)
+library(factoextra)
+library(RColorBrewer)
+library(pheatmap)
+library(Hmisc)
+```
+
+
+```{r}
+source("~/Core_scripts/core_functions.R")
+source("~/GitHub/Multiplex_DNAmet_PPI_Chrom_Coexp/Make_koichi_factor.R")
+load("~/GitHub/Multiplex_DNAmet_PPI_Chrom_Coexp/DATA/pchic.RData")
+HSC_pchic <- read.table("../Datasets/HSC_Pchic_cleaned.tsv", sep = "\t", header = T)
+```
+
+
+```{r}
+prepare_pchic <- function(cell_lines = NULL, minimum_interaction = 5, pchic = NULL){
+  if (is.null(pchic)){
+    load("DATA/pchic.RData")
+  }
+  if (is.null(cell_lines)){
+    cell_lines = c("Mon", "Mac0", "Mac1", "Mac2", "Neu", "MK", "EP", "Ery", "FoeT", "nCD4", "tCD4", "aCD4", "naCD4", "nCD8", "tCD8", "nB", "tB")
+  }
+  pchic <- data.frame(pchic[rowSums(pchic[,cell_lines] >= minimum_interaction) >= 1,c(1,2,3,6,7,8)]) %>% na.omit(.)
+  pchic$baitChr <- paste0("chr", pchic$baitChr)
+  pchic$oeChr <- paste0("chr", pchic$oeChr)
+  return(pchic)
+}
+```
+
+```{r}
+RNAseq <- read.csv("~/GitHub/Koichi_gene_expression_analyses_git/Koichi_gene_expression_analyses/DATA/RNAseq_parsed.csv", row.names = 1, header = T, check.names = F)
+Clinical_patient_data <- read.table("../Datasets/Clinical_Koichi_data.tsv", sep = "\t", header = T)
+ensembl <- useMart("ensembl", dataset = "hsapiens_gene_ensembl")
+gene_ensembl <- biomaRt::getBM(attributes = c("ensembl_gene_id", "hgnc_symbol"), filters = "hgnc_symbol", values = rownames(RNAseq), mart = ensembl)
+
+gene_ensembl_2 <- gene_ensembl[!duplicated(gene_ensembl$hgnc_symbol) & gene_ensembl$hgnc_symbol != "CCL3L3",]
+
+RNAseq_1_ensembl <- RNAseq[gene_ensembl_2$hgnc_symbol,]
+rownames(RNAseq_1_ensembl) <- gene_ensembl_2$ensembl_gene_id
+
+conv=read.delim(paste('/mnt/SERVER-CRCT-STORAGE/CRCT21/Private/common/forGARDEN-NET/biomart/','BLUEPRINT_fragments_good.tsv', sep='/'), sep='\t')
+
+convpro=data.frame(paste('chr',conv$chr, ':', conv$start, '-', conv$end, sep=''), conv$ensembl)
+rownames(convpro)=convpro[,1]
+colnames(convpro)[2]='ens.id'
+
+RNAseq_ENSEMBL_Coordinates <- merge(convpro, RNAseq_1_ensembl, by.x="ens.id", by.y = 0, all.x = F, all.y = F)
+colnames(RNAseq_ENSEMBL_Coordinates)[2] <- "coordinates"
+rownames(RNAseq_ENSEMBL_Coordinates) <- RNAseq_ENSEMBL_Coordinates$coordinates
+RNAseq_ENSEMBL_Coordinates<-RNAseq_ENSEMBL_Coordinates[,-c(1,2)]
+RNAseq_ENSEMBL_Coordinates <- data.frame(RNAseq_ENSEMBL_Coordinates, rowMeans(RNAseq_ENSEMBL_Coordinates), check.names = F)
+write.table(RNAseq_ENSEMBL_Coordinates, "../Datasets/RNAseq_ENSEMBL_Coordinates.tsv", sep = "\t", row.names = T)
+```
+
+```{r}
+chas_for_selected_pheno <- function(pchic = pchics, RNAseq = RNAseq_ENSEMBL_Coordinates, pheno, title, cells){
+  RNAseq <- RNAseq[,pheno]
+  
+  pchics_pp <- lapply(cells, function(cell_type){
+    message(cell_type)
+    pp_exp <- chaser::load_features(pchics[[cell_type]],RNAseq,type='features_on_nodes',featnames = colnames(RNAseq), missingv=0)
+    chas <- chaser::chas(pp_exp)
+    chas_random <- tryCatch(chaser::randomize(pp_exp, nrandom = 10, dist.match = T), error=function(e) NULL)
+    chas_random <- lapply(chas_random, chaser::chas)
+    feat <- chaser::export(pp_exp)
+    list("pp_exp" = pp_exp, "chas" = chas, "rand" = chas_random, "feat" = feat)
+  })
+  names(pchics_pp) <- cells
+  chas_cell_lines <- sapply(names(pchics_pp), function(cell_type){
+    pchics_pp[[cell_type]][["chas"]]
+  })
+  message("Pchic_pp DONE!")
+  chas_cell_lines_df <- data.frame(cell_lines = rep(cells, each = nrow(chas_cell_lines)),
+                                   values = as.vector(chas_cell_lines))
+  
+  p <- ggplot2::ggplot(chas_cell_lines_df, aes(x = cell_lines, y = values, fill = cell_lines))
+  p <- p + ggplot2::geom_violin()
+  p <- p + theme(axis.line = element_line(colour = "black"),
+                 axis.text.x=element_text(size=16),
+                 axis.text.y=element_text(size=16),
+                 axis.title.x=element_text(size=16),
+                 axis.title.y=element_text(size=16))
+  p <- p + ggplot2::geom_jitter()
+  p <- p + ggtitle(title)
+
+  list("plot" = p,
+       "pchics_pp" = pchics_pp)
+}
+```
+
+```{r}
+Myelo_cell_lines <- c("Mon", "Mac1", "Mac0", "Mac2", "MK", "Ery", "EP", "HSC")
+
+pchics <- lapply(Myelo_cell_lines, function(cells){
+  if(cells == "HSC"){
+    ps <- HSC_pchic[,c(1:3,5:7)] %>% na.omit
+    ps$bait_chr <- paste0("chr", ps$bait_chr)
+    ps$otherEnd_chr <- paste0("chr", ps$otherEnd_chr)
+  }else{
+    ps <- prepare_pchic(cells, pchic = pchic)
+  }
+  po <- chaser::make_chromnet(ps)
+  baits <- export(po, 'baits')
+  chaser::subset_chromnet(po, method = "nodes", nodes1 = baits)
+})
+names(pchics) <- Myelo_cell_lines
+```
+
+```{r}
+Clinical_patient_data <- read.table("../Datasets/Clinical_Koichi_data.tsv", sep = "\t", header = T)
+
+Phenotype_Cluster <- sapply(colnames(RNAseq_ENSEMBL_Coordinates)[1:51], function(sample){
+  if(sample %in% Clinical_patient_data$Relapse_RNAseq_data){
+    "Relapse"
+  }else{
+    Clinical_patient_data %>% dplyr::filter(Baseline_RNAseq_data == sample) %>% .$Cluster
+  }
+})
+Phenotype_Cluster <- as.factor(Phenotype_Cluster)
+RNAseq_ENSEMBL_Coordinates <- RNAseq_ENSEMBL_Coordinates[,c(Phenotype_Cluster != "No_clustered" & Phenotype_Cluster != "Relapse", T)]
+Phenotype_Cluster <- Phenotype_Cluster[Phenotype_Cluster != "No_clustered" & Phenotype_Cluster != "Relapse"]
+Phenotype_Cluster <- sapply(colnames(RNAseq_ENSEMBL_Coordinates)[1:40], function(sample){
+  if(sample %in% Clinical_patient_data$Relapse_RNAseq_data){
+    "Relapse"
+  }else{
+    Clinical_patient_data %>% dplyr::filter(Baseline_RNAseq_data == sample) %>% .$Cluster
+  }
+})
+Phenotype_Cluster <- as.factor(Phenotype_Cluster)
+```
+
+
+```{r, include=F}
+Myelo_cell_lines <- c("Mon", "Mac1", "Mac0", "Mac2", "MK", "Ery", "EP", "HSC")
+Pheno_chas_NR <- lapply(c("Cluster_NR"), function(pheno){
+  ref <- Phenotype_Cluster == pheno
+  chas_for_selected_pheno(pheno = ref, title = pheno, cells = Myelo_cell_lines)
+})
+names(Pheno_chas_NR) <- "NR"
+```
+
+
+```{r}
+Pheno_chas_NR[[1]]$plot
+```
+
+```{r, include=F}
+Pheno_chas_R <- lapply(c("Cluster_R"), function(pheno){
+  ref <- Phenotype_Cluster == pheno
+  chas_for_selected_pheno(pheno = ref, title = pheno, cells = Myelo_cell_lines)
+})
+names(Pheno_chas_R) <- "R"
+```
+
+
+```{r}
+png(file = paste0("../Results/Chromatine_part/Chas_GE_all_Clines.png"), width = 1920, height = 1080)
+grid.arrange(Pheno_chas_NR[[1]]$plot, Pheno_chas_R[[1]]$plot,
+             ncol=2,
+             top = textGrob('Chas based on response',
+                            just = c('center'),
+                            gp = gpar(fontsize = 32)))
+dev.off()
+```
+
+```{r}
+Pheno_chas <- list()
+Pheno_chas[["Cluster_NR"]] <- Pheno_chas_NR[["NR"]]
+Pheno_chas[["Cluster_R"]] <- Pheno_chas_R[["R"]]
+```
+
+
+```{r}
+Rands <- lapply(names(Pheno_chas), function(Comp){
+  tmp <- lapply(names(Pheno_chas[[Comp]][["pchics_pp"]]), function(cell_line){
+    tmp <- unlist(Pheno_chas[[Comp]][["pchics_pp"]][[cell_line]][["rand"]]) %>% unname()
+    data.frame(cell_lines = rep(cell_line, length(tmp)), 
+                              values = tmp)
+  })
+  dplyr::bind_rows(tmp)
+})
+names(Rands) <- names(Pheno_chas)
+```
+
+```{r}
+prand <- lapply(names(Rands), function(comp){
+  prand <- ggplot2::ggplot(Rands[[comp]], aes(x = cell_lines, y = values, fill = cell_lines))
+  prand <- prand + ggplot2::geom_violin()
+  prand <- prand + theme(axis.line = element_line(colour = "black"),
+             axis.text.x=element_text(size=16),
+             axis.text.y=element_text(size=16),
+             axis.title.x=element_text(size=16),
+             axis.title.y=element_text(size=16))
+  prand <- prand + ggplot2::geom_jitter()
+  prand <- prand + ggtitle(comp)
+})
+names(prand) <- names(Pheno_chas)
+```
+
+```{r}
+png(file = "../Results/Chromatine_part/Chas_GE_all_Clines_rand.png", width = 1920, height = 1080)
+grid.arrange(prand[["Cluster_NR"]], prand[["Cluster_R"]],
+  ncol=2,
+  top = textGrob('Chas rand based on response',
+  just = c('center'),
+  gp = gpar(fontsize = 32)))
+dev.off()
+grid.arrange(prand[["Cluster_NR"]], prand[["Cluster_R"]],
+  ncol=2,
+  top = textGrob('Chas rand based on response',
+  just = c('center'),
+  gp = gpar(fontsize = 32)))
+```
+
+```{r}
+Combined_plot <- lapply(names(Pheno_chas), function(comp){
+  n_samples <- unname(table(Pheno_chas[[comp]][["plot"]][["data"]]$cell_lines)[1])
+  p <- ggplot2::ggplot(Pheno_chas[[comp]][["plot"]][["data"]], aes(x = cell_lines, y = values, fill = cell_lines)) 
+  p <- p + ggplot2::geom_violin()
+  p <- p + ggplot2::geom_violin(Rands[[comp]], inherit.aes = F, mapping = aes(x = cell_lines, y = values, fill = cell_lines))
+  p <- p + geom_sina()
+  p <- p + theme(axis.line = element_line(colour = "black"),
+                 axis.text.x=element_text(size=16),
+                 axis.text.y=element_text(size=16),
+                 axis.title.x=element_text(size=16),
+                 axis.title.y=element_text(size=16))
+  p <- p + ggtitle(paste0(comp, " n=", n_samples))
+  p
+})
+names(Combined_plot) <- names(Pheno_chas)
+```
+
+
+```{r}
+png(file = "../Results/Chromatine_part/Combined_Chas_all_Clines_GE.png", width = 1920, height = 1080)
+grid.arrange(Combined_plot[["Cluster_NR"]], Combined_plot[["Cluster_R"]],
+             ncol=2,
+             top = textGrob('Chas based on response',
+                            just = c('center'),
+                            gp = gpar(fontsize = 32)))
+dev.off()
+grid.arrange(Combined_plot[["Cluster_NR"]], Combined_plot[["Cluster_R"]],
+             ncol=2,
+             top = textGrob('Chas based on response',
+                            just = c('center'),
+                            gp = gpar(fontsize = 32)))
+```
+```{r}
+Chas_rand_mean <- lapply(Rands, function(comp){
+  tmp <- split(comp, f = comp$cell_lines)
+  tmp <- sapply(tmp, function(cell_line){
+    mean(cell_line$values)
+  }) %>% as.data.frame() %>% t()
+  tmp
+})
+
+Chas_rand_sd <- lapply(Rands, function(comp){
+  tmp <- split(comp, f = comp$cell_lines)
+  tmp <- sapply(tmp, function(cell_line){
+    sd(cell_line$values)
+  }) %>% as.data.frame() %>% t()
+  tmp
+})
+```
+
+
+```{r}
+Chas_GE_Myelo_zscore <- lapply(names(Pheno_chas), function(comp){
+  tmp <- Pheno_chas[[comp]][["plot"]][["data"]]
+  tmp <- split(tmp, tmp$cell_lines)
+  cell_lines <- colnames(Chas_rand_mean[[comp]]) %>% .[which(. %in% c("Mon", "Mac1", "Mac0", "Mac2", "MK", "Ery", "EP", "HSC"))]
+  n <- nrow(tmp[[cell_lines[1]]])
+  tmp <- lapply(cell_lines, function(cell_line){
+    message(cell_line)
+    tmp[[cell_line]] %>% mutate(zscore = (values - Chas_rand_mean[[comp]][,cell_line])/Chas_rand_sd[[comp]][,cell_line])
+  })
+  names(tmp) <- cell_lines
+  tmp <- sapply(tmp, function(cell_line){
+    as.vector(cell_line$zscore)
+  })
+  res <- data.frame(cell_lines = rep(cell_lines, each = n),
+                    zscore = as.vector(tmp))
+})
+names(Chas_GE_Myelo_zscore) <- names(Pheno_chas)
+
+```
+
+
+```{r}
+Chas_GE_Myelo_zscore_plot <- lapply(names(Chas_GE_Myelo_zscore), function(comp){
+  n_samples <- unname(table(Chas_GE_Myelo_zscore[[comp]]$cell_lines)[1])
+  p <- ggplot2::ggplot(Chas_GE_Myelo_zscore[[comp]], aes(x = cell_lines, y = zscore, fill = cell_lines)) 
+  p <- p + ggplot2::geom_violin()
+  p <- p + geom_sina()
+  p <- p + theme(axis.line = element_line(colour = "black"),
+                 axis.text.x=element_text(size=16),
+                 axis.text.y=element_text(size=16),
+                 axis.title.x=element_text(size=16),
+                 axis.title.y=element_text(size=16))
+  p <- p + ggtitle(paste0(comp, " n=", n_samples))
+  p
+})
+names(Chas_GE_Myelo_zscore_plot) <- names(Pheno_chas)
+
+```
+
+
+```{r}
+png(file = "../Results/Chromatine_part/Zscore_Chas_Myeloid_Clines_GE.png", width = 1920, height = 1080)
+grid.arrange(Chas_GE_Myelo_zscore_plot[["Cluster_NR"]], Chas_GE_Myelo_zscore_plot[["Cluster_R"]],
+             ncol=2,
+             top = textGrob('Chas GE zscore based on response Myeloid cells',
+                            just = c('center'),
+                            gp = gpar(fontsize = 32)))
+dev.off()
+grid.arrange(Chas_GE_Myelo_zscore_plot[["Cluster_NR"]], Chas_GE_Myelo_zscore_plot[["Cluster_R"]],
+             ncol=2,
+             top = textGrob('Chas GE zscore based on response Myeloid cells',
+                            just = c('center'),
+                            gp = gpar(fontsize = 32)))
+```
+```{r}
+HSC_GE_zscore_NR <- Chas_GE_Myelo_zscore$Cluster_NR %>% .[.$cell_lines == "HSC",]
+HSC_GE_zscore_NR$cluster <- rep("Cluster_NR", nrow(HSC_GE_zscore_NR))
+HSC_GE_zscore_R <- Chas_GE_Myelo_zscore$Cluster_R %>% .[.$cell_lines == "HSC",]
+HSC_GE_zscore_R$cluster <- rep("Cluster_R", nrow(HSC_GE_zscore_R))
+
+HSC_GE_zscore <- rbind(HSC_GE_zscore_NR, HSC_GE_zscore_R)
+
+nr_samples <- nrow(HSC_GE_zscore_NR)
+r_samples <- nrow(HSC_GE_zscore_R)
+p <- ggplot2::ggplot(HSC_GE_zscore, aes(x = cell_lines, y = zscore, fill = cluster)) 
+p <- p + ggplot2::geom_violin()
+p <- p + geom_sina()
+p <- p + ylim(c(0,5))
+p <- p + theme(axis.line = element_line(colour = "black"),
+               axis.text.x=element_text(size=16),
+               axis.text.y=element_text(size=16),
+               axis.title.x=element_text(size=16),
+               axis.title.y=element_text(size=16))
+p <- p + ggtitle(paste0("Cluster NR ", " n=", nr_samples, " & Cluster R n = ", r_samples))
+p
+png("../Results/Chromatine_part/Zscore_HSC_GE.png")
+p
+dev.off()
+```
+
+
+```{r}
+t.test(HSC_GE_zscore_R$zscore, HSC_GE_zscore_NR$zscore)
+```
+
+```{r}
+BMIQ <- readRDS("/media/alexis/DATA/Koichi_methylation_dat/BMIQ_norm_Koichi_samples.Rdata")
+Anno_EPIC <- read.table("/media/alexis/DATA/Illumina_manifest/infinium-methylationepic.tsv", sep = "\t", header = T)
+AnnoBMIQ <- merge(BMIQ, Anno_EPIC, by.x = 0, by.y = "Name")
+AnnoBMIQ$end <- AnnoBMIQ$MAPINFO +1
+AnnoBMIQ <- AnnoBMIQ %>% dplyr::select("MAPINFO":"end", "GSM4641437":"GSM4641541") 
+colnames(AnnoBMIQ)[1:4] <- c("start", "strand", "chrom", "end")
+AnnoBMIQ$chrom <- paste0("chr", AnnoBMIQ$chrom)
+AnnoBMIQ <- AnnoBMIQ[,c(3,1,4:109)]
+AnnoBMIQ$end <- as.integer(AnnoBMIQ$end)
+write.table(AnnoBMIQ, "../Datasets/Annotation_EPIC_BMIQ.tsv", sep = "\t", row.names = F)
+```
+
+
+
+
+```{r}
+chas_met_for_selected_pheno <- function(pchic = pchics, BMIQ = AnnoBMIQ, pheno, title, cells){
+  BMIQ_pheno <- BMIQ[,pheno]
+  pchics_pp <- lapply(names(pchics), function(cell_type){
+    message(cell_type)
+    pp_met <- chaser::load_features(pchics[[cell_type]],BMIQ_pheno,auxfun = 'mean', type='features_table',featnames = colnames(BMIQ_pheno), missingv=NA)
+    pp_met<-subset_chromnet(pp_met, 'complete')
+    chas <- chaser::chas(pp_met)
+    chas_random <- tryCatch(chaser::randomize(pp_met, nrandom = 10, dist.match = T), error=function(e) NULL)
+    chas_random <- lapply(chas_random, chaser::chas)
+    feat <- chaser::export(pp_met)
+    list("pp_met" = pp_met, "chas" = chas, "rand" = chas_random, "feat" = feat)
+  })
+  names(pchics_pp) <- cells
+  chas_cell_lines <- sapply(names(pchics_pp), function(cell_type){
+    pchics_pp[[cell_type]][["chas"]]
+  })
+  message("Pchic_pp DONE!")
+  chas_cell_lines_df <- data.frame(cell_lines = rep(cells, each = nrow(chas_cell_lines)),
+                                   values = as.vector(chas_cell_lines))
+  
+  p <- ggplot2::ggplot(chas_cell_lines_df, aes(x = cell_lines, y = values, fill = cell_lines))
+  p <- p + ggplot2::geom_violin()
+  p <- p + theme(axis.line = element_line(colour = "black"),
+                 axis.text.x=element_text(size=16),
+                 axis.text.y=element_text(size=16),
+                 axis.title.x=element_text(size=16),
+                 axis.title.y=element_text(size=16))
+  p <- p + ggplot2::geom_jitter()
+  p <- p + ggtitle(title)
+  
+  list("plot" = p,
+       "pchics_pp" = pchics_pp)
+}
+
+```
+
+```{r}
+Pheno_Cluster_DNAmeth <- sapply(colnames(AnnoBMIQ)[4:108], function(phen){
+  if(phen %in% Clinical_patient_data$Baseline_Sample){
+    Clinical_patient_data %>% dplyr::filter(Baseline_Sample == phen) %>% .$Cluster
+  }else{
+    "RELAPSE"
+  }
+}) 
+AnnoBMIQ <- AnnoBMIQ[,c(rep(T, 3), Pheno_Cluster_DNAmeth != "RELAPSE")]
+Pheno_Cluster_DNAmeth <- Pheno_Cluster_DNAmeth[Pheno_Cluster_DNAmeth != "RELAPSE"]
+Pheno_Cluster_DNAmeth <- as.factor(Pheno_Cluster_DNAmeth)
+```
+
+```{r, include = F, warning=F}
+Pheno_met_chas <- lapply(levels(Pheno_Cluster_DNAmeth), function(pheno){
+  ref <- rep(T, 3)
+  ref <- c(ref, Pheno_Cluster_DNAmeth == pheno)
+  chas_met_for_selected_pheno(pheno = ref, title = pheno, cells = Myelo_cell_lines)
+})
+names(Pheno_met_chas) <- levels(Pheno_Cluster_DNAmeth)
+
+```
+
+```{r}
+png(file = paste0("../Results/Chromatine_part/Chas_met_all_Clines.png"), width = 1920, height = 1080)
+grid.arrange(Pheno_met_chas[["Cluster_NR"]]$plot, Pheno_met_chas[["Cluster_R"]]$plot,
+             ncol=2,
+             top = textGrob('Chas met based on response',
+                            just = c('center'),
+                            gp = gpar(fontsize = 32)))
+dev.off()
+```
+
+```{r, include = F, warning=F}
+chas_random <- lapply(names(pchics), function(cell_type){
+  pp_met <- chaser::load_features(pchics[[cell_type]],AnnoBMIQ,auxfun = 'mean', type='features_table',featnames = colnames(AnnoBMIQ), missingv=NA)
+  pp_met <- subset_chromnet(pp_met, 'complete')
+  chas_random <- tryCatch(chaser::randomize(pp_met, nrandom = 10, dist.match = T), error=function(e) NULL)
+  lapply(chas_random, chaser::chas)
+})
+names(chas_random) <- Myelo_cell_lines
+```
+
+```{r}
+Rands_met_global <- lapply(names(chas_random), function(cell_line){
+    tmp <- unlist(chas_random[[cell_line]]) %>% unname()
+    data.frame(cell_lines = rep(cell_line, length(tmp)), values = tmp)
+  }) %>% dplyr::bind_rows()
+
+Rands_met_global <- dplyr::bind_rows(Rands_met_global)
+
+```
+
+```{r}
+Rands_met <- lapply(names(Pheno_met_chas), function(Comp){
+  tmp <- lapply(names(Pheno_met_chas[[Comp]][["pchics_pp"]]), function(cell_line){
+    tmp <- unlist(Pheno_met_chas[[Comp]][["pchics_pp"]][[cell_line]][["rand"]]) %>% unname()
+    data.frame(cell_lines = rep(cell_line, length(tmp)), 
+               values = tmp)
+  })
+  dplyr::bind_rows(tmp)
+})
+
+names(Rands_met) <- levels(Pheno_Cluster_DNAmeth)
+
+```
+
+```{r}
+Combined_plot_met <- lapply(names(Pheno_met_chas), function(comp){
+  n_samples <- unname(table(Pheno_met_chas[[comp]][["plot"]][["data"]]$cell_lines)[1])
+  p <- ggplot2::ggplot(Pheno_met_chas[[comp]][["plot"]][["data"]], aes(x = cell_lines, y = values, fill = cell_lines)) 
+  p <- p + ggplot2::geom_violin()
+  p <- p + ggplot2::geom_violin(Rands_met[[comp]], inherit.aes = F, mapping = aes(x = cell_lines, y = values, fill = cell_lines))
+  p <- p + geom_sina()
+  p <- p + theme(axis.line = element_line(colour = "black"),
+                 axis.text.x=element_text(size=16),
+                 axis.text.y=element_text(size=16),
+                 axis.title.x=element_text(size=16),
+                 axis.title.y=element_text(size=16))
+  p <- p + ggtitle(paste0(comp, " n=", n_samples))
+  p
+})
+names(Combined_plot_met) <- names(Pheno_met_chas)
+```
+
+
+```{r}
+png(file = "../Results/Chromatine_part/Combined_Chas_all_Clines_met.png", width = 1920, height = 1080)
+grid.arrange(Combined_plot_met[["Cluster_NR"]], Combined_plot_met[["Cluster_R"]],
+             ncol=2,
+             top = textGrob('Chas based on response',
+                            just = c('center'),
+                            gp = gpar(fontsize = 32)))
+dev.off()
+grid.arrange(Combined_plot_met[["Cluster_NR"]], Combined_plot_met[["Cluster_R"]],
+             ncol=2,
+             top = textGrob('Chas based on response',
+                            just = c('center'),
+                            gp = gpar(fontsize = 32)))
+```
+
+```{r}
+prand_met <- lapply(names(Rands_met), function(comp){
+  prand <- ggplot2::ggplot(Rands_met[[comp]], aes(x = cell_lines, y = values, fill = cell_lines))
+  prand <- prand + ggplot2::geom_violin()
+  prand <- prand + theme(axis.line = element_line(colour = "black"),
+                         axis.text.x=element_text(size=16),
+                         axis.text.y=element_text(size=16),
+                         axis.title.x=element_text(size=16),
+                         axis.title.y=element_text(size=16))
+  prand <- prand + ggplot2::geom_jitter()
+  prand <- prand + ggtitle(comp)
+})
+
+names(prand_met) <- levels(Pheno_Cluster_DNAmeth)
+
+```
+
+```{r}
+png(file = paste0("../Results/Chromatine_part/Chas_met_all_Clines_rand.png"), width = 1920, height = 1080)
+grid.arrange(prand_met[["NR.B"]], prand_met[["R.B"]], prand_met[["REL"]],
+             ncol=3,
+             top = textGrob('Chas rand met based on response',
+                            just = c('center'),
+                            gp = gpar(fontsize = 32)))
+dev.off()
+```
+
+```{r}
+Chas_met_rand_sd <- lapply(Rands_met, function(comp){
+  tmp <- split(comp, f = comp$cell_lines)
+  tmp <- sapply(tmp, function(cell_line){
+    sd(cell_line$values)
+  }) %>% as.data.frame() %>% t()
+  tmp
+})
+
+Chas_met_rand_mean <- lapply(Rands_met, function(comp){
+  tmp <- split(comp, f = comp$cell_lines)
+  tmp <- sapply(tmp, function(cell_line){
+    mean(cell_line$values)
+  }) %>% as.data.frame() %>% t()
+  tmp
+})
+
+Chas_met_zscore <- lapply(names(Pheno_met_chas), function(comp){
+  tmp <- Pheno_met_chas[[comp]][["plot"]][["data"]]
+  tmp <- split(tmp, tmp$cell_lines)
+  cell_lines <- colnames(Chas_met_rand_mean[[comp]]) %>% .[which(. %in% c("Mon", "Mac1", "Mac0", "Mac2", "MK", "Ery", "EP", "HSC"))]
+  n <- nrow(tmp[[cell_lines[1]]])
+  tmp <- lapply(cell_lines, function(cell_line){
+    message(cell_line)
+    tmp[[cell_line]] %>% mutate(zscore = (values - Chas_met_rand_mean[[comp]][,cell_line])/Chas_met_rand_sd[[comp]][,cell_line])
+  })
+  names(tmp) <- cell_lines
+  tmp <- sapply(tmp, function(cell_line){
+    as.vector(cell_line$zscore)
+  })
+  res <- data.frame(cell_lines = rep(cell_lines, each = n),
+                    zscore = as.vector(tmp))
+})
+names(Chas_met_zscore) <- levels(Pheno_Cluster_DNAmeth)
+```
+
+```{r}
+Chas_met_rand_sd_global <- split(Rands_met_global, f = Rands_met_global$cell_lines)
+Chas_met_rand_sd_global <- sapply(Chas_met_rand_sd_global, function(cell_line){
+  sd(cell_line$values)
+}) %>% as.data.frame() %>% t()
+
+Chas_met_rand_mean_global <- split(Rands_met_global, f = Rands_met_global$cell_lines)
+Chas_met_rand_mean_global <- sapply(Chas_met_rand_mean_global, function(cell_line){
+  mean(cell_line$values)
+}) %>% as.data.frame() %>% t()
+
+Chas_met_zscore_global <- lapply(names(Pheno_met_chas), function(comp){
+  tmp <- Pheno_met_chas[[comp]][["plot"]][["data"]]
+  tmp <- split(tmp, tmp$cell_lines)
+  cell_lines <- colnames(Chas_met_rand_mean[[comp]]) %>% .[which(. %in% c("Mon", "Mac1", "Mac0", "Mac2", "MK", "Ery", "EP", "HSC"))]
+  n <- nrow(tmp[[cell_lines[1]]])
+  tmp <- lapply(cell_lines, function(cell_line){
+    message(cell_line)
+    tmp[[cell_line]] %>% mutate(zscore = (values - Chas_met_rand_sd_global[,cell_line])/Chas_met_rand_sd_global[,cell_line])
+  })
+  names(tmp) <- cell_lines
+  tmp <- sapply(tmp, function(cell_line){
+    as.vector(cell_line$zscore)
+  })
+  res <- data.frame(cell_lines = rep(cell_lines, each = n),
+                    zscore = as.vector(tmp))
+})
+names(Chas_met_zscore_global) <- levels(Pheno_Cluster_DNAmeth)
+```
+
+```{r}
+Chas_met_zscore_plot <- lapply(names(Chas_met_zscore), function(comp){
+  n_samples <- unname(table(Chas_met_zscore[[comp]]$cell_lines)[1])
+  p <- ggplot2::ggplot(Chas_met_zscore[[comp]], aes(x = cell_lines, y = zscore, fill = cell_lines)) 
+  p <- p + ggplot2::geom_violin()
+  # p <- p + ggplot2::geom_jitter(Pheno_chas[[comp]][["plot"]][["data"]], inherit.aes = F, mapping =aes(x = cell_lines, y = values, fill = cell_lines))
+  p <- p + theme(axis.line = element_line(colour = "black"),
+                 axis.text.x=element_text(size=16),
+                 axis.text.y=element_text(size=16),
+                 axis.title.x=element_text(size=16),
+                 axis.title.y=element_text(size=16))
+  p <- p + ggtitle(paste0(comp, " n=", n_samples))
+  p
+})
+names(Chas_met_zscore_plot) <- levels(Pheno_Cluster_DNAmeth)
+```
+
+```{r}
+Chas_met_zscore_global_plot <- lapply(names(Chas_met_zscore_global), function(comp){
+  n_samples <- unname(table(Chas_met_zscore_global[[comp]]$cell_lines)[1])
+  p <- ggplot2::ggplot(Chas_met_zscore_global[[comp]], aes(x = cell_lines, y = zscore, fill = cell_lines)) 
+  p <- p + ggplot2::geom_violin()
+  # p <- p + ggplot2::geom_jitter(Pheno_chas[[comp]][["plot"]][["data"]], inherit.aes = F, mapping =aes(x = cell_lines, y = values, fill = cell_lines))
+  p <- p + theme(axis.line = element_line(colour = "black"),
+                 axis.text.x=element_text(size=16),
+                 axis.text.y=element_text(size=16),
+                 axis.title.x=element_text(size=16),
+                 axis.title.y=element_text(size=16))
+  p <- p + ggtitle(paste0(comp, " n=", n_samples))
+  p
+})
+names(Chas_met_zscore_global_plot) <- levels(Pheno_Cluster_DNAmeth)
+```
+
+```{r}
+png(file = paste0("../Results/Chromatine_part/Zscore_Chas_met_Myelo_Clines_PP.png"), width = 1920, height = 1080)
+grid.arrange(Chas_met_zscore_plot[["Cluster_NR"]], Chas_met_zscore_plot[["Cluster_R"]],
+             ncol=2,
+             top = textGrob('Chas zscore of methylation based on response',
+                            just = c('center'),
+                            gp = gpar(fontsize = 32)))
+dev.off()
+```
+
+```{r}
+png(file = paste0("../Results/Chromatine_part/Zscore_Chas_met_Myelo_Clines_PP_global.png"), width = 1920, height = 1080)
+grid.arrange(Chas_met_zscore_global_plot[["Cluster_NR"]], Chas_met_zscore_global_plot[["Cluster_R"]],
+             ncol=2,
+             top = textGrob('Chas zscore of methylation based on response',
+                            just = c('center'),
+                            gp = gpar(fontsize = 32)))
+dev.off()
+```
+
+```{r}
+HSC_Meth_zscore_NR <- Chas_met_zscore$Cluster_NR %>% .[.$cell_lines == "HSC",]
+HSC_Meth_zscore_NR$cluster <- rep("Cluster_NR", nrow(HSC_Meth_zscore_NR))
+HSC_Meth_zscore_R <- Chas_met_zscore$Cluster_R %>% .[.$cell_lines == "HSC",]
+HSC_Meth_zscore_R$cluster <- rep("Cluster_R", nrow(HSC_Meth_zscore_R))
+
+HSC_Meth_zscore <- rbind(HSC_Meth_zscore_NR, HSC_Meth_zscore_R)
+
+nr_samples <- nrow(HSC_Meth_zscore_NR)
+r_samples <- nrow(HSC_Meth_zscore_R)
+p <- ggplot2::ggplot(HSC_Meth_zscore, aes(x = cell_lines, y = zscore, fill = cluster)) 
+p <- p + ggplot2::geom_violin()
+p <- p + geom_sina()
+p <- p + ylim(c(0,5))
+p <- p + theme(axis.line = element_line(colour = "black"),
+               axis.text.x=element_text(size=16),
+               axis.text.y=element_text(size=16),
+               axis.title.x=element_text(size=16),
+               axis.title.y=element_text(size=16))
+p <- p + ggtitle(paste0("Cluster DNAmeth NR ", " n=", nr_samples, " & Cluster R n = ", r_samples))
+p
+png("../Results/Chromatine_part/Zscore_HSC_met.png")
+p
+dev.off()
+```
+
+```{r}
+t.test(Chas_met_zscore$Cluster_NR$zscore, Chas_met_zscore$Cluster_R$zscore)
+```
+
+```{r}
+Chas_met_zscore$Cluster_NR$Patient_sample <- rep(colnames(AnnoBMIQ)[4:60][Pheno_Cluster_DNAmeth == "Cluster_NR"], length(Myelo_cell_lines))
+Chas_met_zscore$Cluster_R$Patient_sample <- rep(colnames(AnnoBMIQ)[4:60][Pheno_Cluster_DNAmeth == "Cluster_R"], length(Myelo_cell_lines))
+
+n_patient_NR <- nrow(Chas_met_zscore$Cluster_NR) / length(Myelo_cell_lines)
+n_patient_R <- nrow(Chas_met_zscore$Cluster_R) / length(Myelo_cell_lines)
+tmp_NR <- t(Chas_met_zscore$Cluster_NR)
+colnames(tmp_NR) <- c(rep(1:n_patient_NR, length(Myelo_cell_lines)))
+
+chas_met_zscores_for_PCA_NR <- lapply(1:length(Myelo_cell_lines), function(cell_line){
+  border_1 <- (cell_line-1)*n_patient_NR+1
+  border_2 <- (cell_line)*n_patient_NR
+  tmp_NR[2, border_1:border_2] %>% t() %>% data.frame()
+}) %>% rbindlist() %>% as.data.frame()
+chas_met_zscores_for_PCA_NR <- sapply(chas_met_zscores_for_PCA_NR, as.numeric)
+rownames(chas_met_zscores_for_PCA_NR) <- Myelo_cell_lines
+colnames(chas_met_zscores_for_PCA_NR) <- Chas_met_zscore$Cluster_NR$Patient_sample[1:n_patient_NR]
+
+tmp_R <- t(Chas_met_zscore$Cluster_R)
+colnames(tmp_R) <- c(rep(1:n_patient_R, length(Myelo_cell_lines)))
+
+chas_met_zscores_for_PCA_R <- lapply(1:length(Myelo_cell_lines), function(cell_line){
+  border_1 <- (cell_line-1)*n_patient_R+1
+  border_2 <- (cell_line)*n_patient_R
+  tmp_R[2, border_1:border_2] %>% t() %>% data.frame()
+}) %>% rbindlist() %>% as.data.frame()
+chas_met_zscores_for_PCA_R <- sapply(chas_met_zscores_for_PCA_R, as.numeric)
+rownames(chas_met_zscores_for_PCA_R) <- Myelo_cell_lines
+colnames(chas_met_zscores_for_PCA_R) <- Chas_met_zscore$Cluster_R$Patient_sample[1:n_patient_R]
+
+Chas_met_zscore_for_PCA <- cbind(chas_met_zscores_for_PCA_NR, chas_met_zscores_for_PCA_R)
+```
+
+```{r}
+Pheno_chas <- c(rep("Cluster_NR", n_patient_NR), rep("Cluster_R", n_patient_R))
+res.pca <- prcomp(t(Chas_met_zscore_for_PCA))
+p <- fviz_pca_biplot(res.pca, label="all", habillage=Pheno_chas,
+                               addEllipses=T, ellipse.level=0.95)
+p <- p + ggtitle("PCA Zscore of Chas")
+p
+png("../Results/Chromatine_part/PCA_Koichi_Chas_zscore_Clusters.png")
+p
+dev.off()
+```
+
+```{r}
+Pheno_chas <- c(rep("Cluster_NR", n_patient_NR), rep("Cluster_R", n_patient_R))
+res.pca <- prcomp(Chas_met_zscore_for_PCA)
+p <- fviz_pca_biplot(res.pca, label="ind", )
+p <- p + ggtitle("PCA Zscore of Chas")
+p
+png("../Results/Chromatine_part/PCA_Koichi_Chas_zscore_cell_lines.png")
+p
+dev.off()
+```
+
+```{r}
+chas_met_for_PCA_NR <- Combined_plot_met$Cluster_NR$data
+chas_met_for_PCA_R <- Combined_plot_met$Cluster_R$data
+
+chas_met_for_PCA_NR$Patient_sample <- rep(colnames(AnnoBMIQ)[4:60][Pheno_Cluster_DNAmeth == "Cluster_NR"], length(Myelo_cell_lines))
+chas_met_for_PCA_R$Patient_sample <- rep(colnames(AnnoBMIQ)[4:60][Pheno_Cluster_DNAmeth == "Cluster_R"], length(Myelo_cell_lines))
+
+n_patient_NR <- nrow(chas_met_for_PCA_NR) / length(Myelo_cell_lines)
+n_patient_R <- nrow(chas_met_for_PCA_R) / length(Myelo_cell_lines)
+tmp_NR <- t(chas_met_for_PCA_NR)
+colnames(tmp_NR) <- c(rep(1:n_patient_NR, length(Myelo_cell_lines)))
+
+chas_met_for_PCA_NR_tmp <- lapply(1:length(Myelo_cell_lines), function(cell_line){
+  border_1 <- (cell_line-1)*n_patient_NR+1
+  border_2 <- (cell_line)*n_patient_NR
+  tmp_NR[2, border_1:border_2] %>% t() %>% data.frame()
+}) %>% rbindlist() %>% as.data.frame()
+chas_met_for_PCA_NR_tmp <- sapply(chas_met_for_PCA_NR_tmp, as.numeric)
+rownames(chas_met_for_PCA_NR_tmp) <- Myelo_cell_lines
+colnames(chas_met_for_PCA_NR_tmp) <- chas_met_for_PCA_NR$Patient_sample[1:n_patient_NR]
+
+tmp_R <- t(chas_met_for_PCA_R)
+colnames(tmp_R) <- c(rep(1:n_patient_R, length(Myelo_cell_lines)))
+
+chas_met_for_PCA_R_tmp <- lapply(1:length(Myelo_cell_lines), function(cell_line){
+  border_1 <- (cell_line-1)*n_patient_R+1
+  border_2 <- (cell_line)*n_patient_R
+  tmp_R[2, border_1:border_2] %>% t() %>% data.frame()
+}) %>% rbindlist() %>% as.data.frame()
+chas_met_for_PCA_R_tmp <- sapply(chas_met_for_PCA_R_tmp, as.numeric)
+rownames(chas_met_for_PCA_R_tmp) <- Myelo_cell_lines
+colnames(chas_met_for_PCA_R_tmp) <- chas_met_for_PCA_R$Patient_sample[1:n_patient_R]
+
+Chas_met_for_PCA <- cbind(chas_met_for_PCA_NR_tmp, chas_met_for_PCA_R_tmp)
+```
+
+```{r}
+Pheno_chas <- c(rep("Cluster_NR", n_patient_NR), rep("Cluster_R", n_patient_R))
+res.pca <- prcomp(t(Chas_met_for_PCA))
+p <- fviz_pca_biplot(res.pca, label="var", habillage=Pheno_chas,
+                               addEllipses=T, ellipse.level=0.95)
+p <- p + ggtitle("PCA Chas")
+p
+png("../Results/Chromatine_part/PCA_Koichi_Chas_Clusters.png")
+p
+dev.off()
+```
+
+```{r}
+res.pca <- prcomp(Chas_met_for_PCA)
+p <- fviz_pca_biplot(res.pca, label="ind")
+p <- p + ggtitle("PCA Chas")
+p
+png("../Results/Chromatine_part/PCA_Koichi_Chas_cell_lines.png")
+p
+dev.off()
+```
+
+
+```{r}
+res.pca <- prcomp(t(Chas_met_for_PCA[1:7,]))
+p <- fviz_pca_biplot(res.pca, label="var", habillage=Pheno_chas,
+                               addEllipses=T, ellipse.level=0.95)
+p <- p + ggtitle("PCA Chas")
+p
+png("../Results/Chromatine_part/PCA_Koichi_Chas_Clusters_no_HSC.png")
+p
+dev.off()
+```
+
+```{r}
+res.pca <- prcomp(Chas_met_for_PCA[1:7,])
+p <- fviz_pca_biplot(res.pca, label="ind")
+p <- p + ggtitle("PCA Chas")
+p
+png("../Results/Chromatine_part/PCA_Koichi_Chas_cell_lines_no_HSC.png")
+p
+dev.off()
+```
+
+
+```{r}
+Chas_met_zscore_global$Cluster_NR$Patient_sample <- rep(colnames(AnnoBMIQ)[4:60][Pheno_Cluster_DNAmeth == "Cluster_NR"], length(Myelo_cell_lines))
+Chas_met_zscore_global$Cluster_R$Patient_sample <- rep(colnames(AnnoBMIQ)[4:60][Pheno_Cluster_DNAmeth == "Cluster_R"], length(Myelo_cell_lines))
+
+n_patient_NR <- nrow(Chas_met_zscore_global$Cluster_NR) / length(Myelo_cell_lines)
+n_patient_R <- nrow(Chas_met_zscore_global$Cluster_R) / length(Myelo_cell_lines)
+tmp_NR <- t(Chas_met_zscore_global$Cluster_NR)
+colnames(tmp_NR) <- c(rep(1:n_patient_NR, length(Myelo_cell_lines)))
+
+chas_met_global_zscores_for_PCA_NR <- lapply(1:length(Myelo_cell_lines), function(cell_line){
+  border_1 <- (cell_line-1)*n_patient_NR+1
+  border_2 <- (cell_line)*n_patient_NR
+  tmp_NR[2, border_1:border_2] %>% t() %>% data.frame()
+}) %>% rbindlist() %>% as.data.frame()
+chas_met_global_zscores_for_PCA_NR <- sapply(chas_met_global_zscores_for_PCA_NR, as.numeric)
+rownames(chas_met_global_zscores_for_PCA_NR) <- Myelo_cell_lines
+colnames(chas_met_global_zscores_for_PCA_NR) <- Chas_met_zscore_global$Cluster_NR$Patient_sample[1:n_patient_NR]
+
+tmp_R <- t(Chas_met_zscore_global$Cluster_R)
+colnames(tmp_R) <- c(rep(1:n_patient_R, length(Myelo_cell_lines)))
+
+chas_met_global_zscores_for_PCA_R <- lapply(1:length(Myelo_cell_lines), function(cell_line){
+  border_1 <- (cell_line-1)*n_patient_R+1
+  border_2 <- (cell_line)*n_patient_R
+  tmp_R[2, border_1:border_2] %>% t() %>% data.frame()
+}) %>% rbindlist() %>% as.data.frame()
+chas_met_global_zscores_for_PCA_R <- sapply(chas_met_global_zscores_for_PCA_R, as.numeric)
+rownames(chas_met_global_zscores_for_PCA_R) <- Myelo_cell_lines
+colnames(chas_met_global_zscores_for_PCA_R) <- Chas_met_zscore_global$Cluster_R$Patient_sample[1:n_patient_R]
+
+chas_met_global_zscores_for_PCA <- cbind(chas_met_global_zscores_for_PCA_NR, chas_met_global_zscores_for_PCA_R)
+```
+
+```{r}
+t.test(Chas_met_zscore_global$Cluster_NR$zscore, Chas_met_zscore_global$Cluster_R$zscore)
+t.test(Pheno_met_chas$Cluster_NR$pchics_pp$HSC$chas, Pheno_met_chas$Cluster_R$pchics_pp$HSC$chas)
+
+```
+
+
+```{r}
+res.pca <- prcomp(t(chas_met_global_zscores_for_PCA))
+p <- fviz_pca_biplot(res.pca, label="var", habillage=Pheno_chas,
+                               addEllipses=T, ellipse.level=0.95)
+p <- p + ggtitle("PCA Zscore of Chas")
+p
+png("../Results/Chromatine_part/PCA_Koichi_Chas_global_zscore_Clusters.png")
+p
+dev.off()
+```
+
+```{r}
+res.pca <- prcomp(chas_met_global_zscores_for_PCA)
+p <- fviz_pca_biplot(res.pca, label="ind")
+p <- p + ggtitle("PCA Chas")
+p
+png("../Results/Chromatine_part/PCA_Koichi_Chas_global_cell_lines.png")
+p
+dev.off()
+```
+
+```{r}
+Make_heatmap <- function(DATA, Phenotype, method = "pearson", title, annotation_color, kmeans_k = NA, cuttree = NA, corr=T, scaling = "none") {
+  annotation_for_heatmap <- data.frame(Phenotype = Phenotype)
+  rownames(annotation_for_heatmap) <- colnames(DATA)
+  if(corr){
+    corr <- rcorr(as.matrix(DATA), type = method)$r
+    colnames(corr) <- colnames(DATA)
+    color <- colorRampPalette(brewer.pal(n = 9, name = "YlOrRd"))(100)
+
+  }else{
+    corr <- DATA
+    color <- rev(colorRampPalette(brewer.pal(n=9, name = "RdBu"))(100))
+  }
+  title <- paste0(title, " ", method)
+  heatmap <- pheatmap(corr, 
+                      color = color,
+                      annotation_col = annotation_for_heatmap,
+                      annotation_colors = annotation_color,
+                      legend = TRUE,
+                      treeheight_row = 20,
+                      main = title, 
+                      fontsize = 10,
+                      cutree_cols = cuttree, 
+                      scale = scaling
+  )
+  return(heatmap)
+}
+```
+
+
+```{r}
+ann_color_chas <- list(
+    Phenotype = c(Cluster_NR = "red", Cluster_R = "blue"))
+
+ann_color_cell_lines <- list(
+  Phenotype = c(Mon = "red", Mac1 = "orange", Mac0 = "pink", Mac2 = "purple", MK = "green", Ery = "yellow", EP = "blue", HSC = "black")
+)
+
+Cor_heatmap <- Make_heatmap(Chas_met_for_PCA, Phenotype = Pheno_chas, method = "pearson", title = "Corr_heatmap_chas", annotation_color = ann_color_chas, corr=T)
+Chas_heatmap <- Make_heatmap(Chas_met_for_PCA, Phenotype = Pheno_chas, method = "pearson", title = "Heatmap_chas", annotation_color = ann_color_chas, corr=F, scaling = "row")
+Cor_cell_lines_heatmap <- Make_heatmap(t(Chas_met_for_PCA), Phenotype = Myelo_cell_lines, method = "pearson", title = "Corr_heatmap_cell_lines", annotation_color = ann_color_cell_lines, corr=T)
+Cor_cell_lines_no_HSC_heatmap <- Make_heatmap(t(Chas_met_for_PCA[1:7,]), Phenotype = Myelo_cell_lines[1:7], method = "pearson", title = "Corr_heatmap_cell_lines", annotation_color = ann_color_cell_lines, corr=T)
+```
+
+```{r}
+png("../Results/Chromatine_part/Cor_chas_met_heatmap_pearson.png")
+Cor_heatmap
+dev.off()
+png("../Results/Chromatine_part/Chas_heatmap.png")
+Chas_heatmap
+dev.off()
+png("../Results/Chromatine_part/Cor_cell_lines_met_heatmap.png")
+Cor_cell_lines_heatmap
+dev.off()
+png("../Results/Chromatine_part/Cor_cell_lines_noHSC_heatmap.png")
+Cor_cell_lines_no_HSC_heatmap
+dev.off()
+```
+
+

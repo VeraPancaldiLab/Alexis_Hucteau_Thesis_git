@@ -1,0 +1,459 @@
+---
+title: "Making Phenotype multilayer network"
+subtitle: "Layer 4"
+author: Alexis Hucteau
+date: "`r Sys.Date()`"
+output:
+    html_document:
+      toc: yes
+      toc_float: yes
+      theme: united
+editor_options:
+  markdown:
+    wrap: sentence
+---
+
+# Libraries
+
+```{r, error=F, warning=F, echo=FALSE, include=F}
+rm(DmIALite, DOLite, DOLiteTerm, HsIALite, MmIALite, RnIALite)
+
+library(dplyr)
+library(matrixTests)
+library(factoextra)
+library(Hmisc)
+library(matrixStats)
+library(RColorBrewer)
+library(pheatmap)
+library(data.table)
+library(parallel)
+
+cores2use <- detectCores()
+
+
+source("~/Core_scripts/core_functions.R")
+```
+
+# Loading data
+
+## Reaction dataset
+
+```{r}
+mIDHi_react_scores_GEM <- read.csv("../../Datasets/mIDHi_react_scores_GEM.csv", check.names = F, row.names = 1)
+colnames(mIDHi_react_scores_GEM) <- colnames(mIDHi_react_scores_GEM) %>%
+  stringr::str_remove("X")
+Clinical_patient_data <- read.table("../../Datasets/Clinical_Koichi_data_isoform.tsv", sep = "\t", header = T)
+Clinical_patient_data$Baseline_phenotype_2 <- sapply(Clinical_patient_data$Best_response, function(resp){
+  switch(resp,
+         "CR" = "Responder",
+         "CRp" = "Responder",
+         "CRi" = "Responder",
+         "MLFS" = "Overall_Responder",
+         "HI" = "Overall_Responder",
+         "PR" = "Overall_Responder",
+         "SD" = "Non_Responder",
+         "PD" = "Non_Responder",
+         "Not_assessed" = "Not_assessed",
+         "NA" = "Control")
+})
+```
+
+## Split data into classes
+
+```{r}
+Pheno_classes <- colnames(mIDHi_react_scores_GEM) %>% lapply(function(sample){
+  fil <- Clinical_patient_data %>%
+    dplyr::filter(Baseline_RNAseq_data == sample)
+  data.frame("IDH" = fil$IDH_isoform, "Cluster" = fil$Cluster, 
+             "sample" = fil$Baseline_RNAseq_data, "Response" = fil$Baseline_phenotype_2)
+}) %>% data.table::rbindlist()
+
+
+Samples_NR <- Pheno_classes %>% dplyr::filter(Response == "Non_Responder") %>% .$sample
+Samples_R <- Pheno_classes %>% dplyr::filter(Response == "Responder") %>% .$sample
+
+Samples_mIDH1 <- Pheno_classes %>% dplyr::filter(IDH == "IDH1") %>% .$sample
+Samples_mIDH2 <- Pheno_classes %>% dplyr::filter(IDH == "IDH2_R140" | IDH == "IDH2_R172" | IDH == "IDH2") %>% .$sample
+
+Samples_IDH1_R <- Pheno_classes %>% dplyr::filter(Response == "Responder" & IDH == "IDH1") %>% .$sample
+Samples_IDH1_NR <- Pheno_classes %>% dplyr::filter(Response == "Non_Responder" & IDH == "IDH1") %>% .$sample
+
+Samples_IDH2_R <- Pheno_classes %>% dplyr::filter(Response == "Responder" & (IDH == "IDH2_R140" | IDH == "IDH2_R172" | IDH == "mIDH2")) %>% .$sample
+Samples_IDH2_NR <- Pheno_classes %>% dplyr::filter(Response =="Non_Responder"  & (IDH == "IDH2_R140" | IDH == "IDH2_R172")) %>% .$sample
+
+Phenos_list <- list("mIDH1_R" = Samples_IDH1_R, "mIDH2_R" = Samples_IDH2_R, 
+                    "mIDH2_NR" = Samples_IDH2_NR, "mIDH1_NR"= Samples_IDH1_NR)
+
+Reactions <- lapply(names(Phenos_list), function(Phenos){
+  mIDHi_react_scores_GEM[Phenos_list[[Phenos]]]
+})
+names(Reactions) <- names(Phenos_list)
+```
+
+## Loading metabolic network
+
+```{r}
+library(biomaRt)
+Human_GEM <- read.csv("../../Datasets/Human_GEM_2.csv")
+```
+
+
+
+
+```{r}
+Metabolic_network <- read.table("../../Datasets/Metabolic_network_clean.tsv",
+                                sep = "\t", header = T)
+
+From_reversible_equation_to_network <- function(Reactions_values, Reaction){
+  In_reaction_values <- Reactions_values[stringr::str_detect(rownames(Reactions_values), paste0(Reaction$ID, "_pos")), ]
+  if(nrow(In_reaction_values) ==0){
+    In_reaction_values_zscore <- 0
+    Out_reaction_values_zscore <- 0
+  }else{
+    In_reaction_values$mean <- rowMeans(In_reaction_values)
+    In_reaction_values$sd <- matrixStats::rowVars(as.matrix(dplyr::select(In_reaction_values, -c("mean"))))
+    In_reaction_values_zscore <- In_reaction_values$mean / In_reaction_values$sd
+    
+    Out_reaction_values <- Reactions_values[stringr::str_detect(rownames(Reactions_values), paste0(Reaction$ID, "_neg")), ]
+    if(nrow(Out_reaction_values) ==0){
+      Out_reaction_values_zscore <- 0
+    }else{
+      Out_reaction_values$mean <- rowMeans(Out_reaction_values)
+      Out_reaction_values$sd <- matrixStats::rowVars(as.matrix(dplyr::select(Out_reaction_values, -c("mean"))))
+      Out_reaction_values_zscore <- Out_reaction_values$mean / Out_reaction_values$sd
+    }
+  }
+  
+  equation <- Reaction$EQUATION
+  in_metabolites <- stringr::str_split_i(equation, pattern = "<=>", 1) %>% 
+    stringr::str_split(pattern = " \\+ ") %>% unlist %>% stringr::str_trim() %>% 
+    sapply(function(test){
+      first_element <- stringr::str_split_i(test, pattern = " ", 1)
+      if(stringr::str_detect(first_element, "[a-z]")){
+        test
+      }else{
+        coeff <- stringr::str_split(test, pattern = " ") %>% .[[1]] %>% length()
+        if(coeff > 2){
+          splitted <- stringr::str_split(test, pattern = " ") %>% unlist %>% .[2:coeff] %>% paste(collapse = "_")
+          splitted
+        }else{
+          stringr::str_split_i(test, pattern = " ", coeff)
+        }
+      }
+    }) %>% unname
+  out_metabolites <- stringr::str_split_i(equation, pattern = "<=>", 2) %>% 
+    stringr::str_split(pattern = " \\+ ") %>% unlist %>% stringr::str_trim()  %>% 
+    sapply(function(test){
+      first_element <- stringr::str_split_i(test, pattern = " ", 1)
+      if(stringr::str_detect(first_element, "[a-z]")){
+        test
+      }else{
+        coeff <- length(stringr::str_split(test, pattern = " ")[[1]])
+        if(coeff > 2){
+          splitted <- stringr::str_split(test, pattern = " ") %>% unlist %>% .[2:coeff] %>% paste(collapse = "_")
+          splitted
+        }else{
+          stringr::str_split_i(test, pattern = " ", coeff)
+        }
+      }
+    }) %>% unname %>% 
+    ifelse(. == "", in_metabolites, .)
+  
+  
+  in_reactions_data_frame <- lapply(in_metabolites, function(metabolite){
+    data.frame("A" = metabolite, "B" = Reaction$ID, "weight" = In_reaction_values_zscore)
+  }) %>% data.table::rbindlist()
+  
+  out_reaction_data_frame <- lapply(out_metabolites, function(metabolite){
+    data.frame("A" = Reaction$ID, "B" = metabolite, "weight" = Out_reaction_values_zscore)
+  }) %>% data.table::rbindlist()
+  
+  rbind(in_reactions_data_frame, out_reaction_data_frame)
+}
+
+From_irreversible_equation_to_network <- function(Reactions_values, Reaction){
+  In_reaction_values <- Reactions_values[stringr::str_detect(rownames(Reactions_values), paste0(Reaction$ID, "_pos")), ]
+  if(nrow(In_reaction_values) ==0){
+    In_reaction_values_zscore <- 0
+  }else{
+    In_reaction_values$mean <- rowMeans(In_reaction_values)
+    In_reaction_values$sd <- matrixStats::rowVars(as.matrix(dplyr::select(In_reaction_values, -c("mean"))))
+    In_reaction_values_zscore <- In_reaction_values$mean / In_reaction_values$sd
+  }
+  equation <- Reaction$EQUATION
+  in_metabolites <- stringr::str_split_i(equation, pattern = "=>", 1) %>% 
+    stringr::str_split(pattern = " \\+ ") %>% unlist %>% stringr::str_trim() %>% 
+    sapply(function(test){
+      first_element <- stringr::str_split_i(test, pattern = " ", 1)
+      if(stringr::str_detect(first_element, "[a-z]")){
+        test
+      }else{
+        coeff <- length(stringr::str_split(test, pattern = " ")[[1]])
+        if(coeff > 2){
+          splitted <- stringr::str_split(test, pattern = " ") %>% unlist %>% .[2:coeff] %>% paste(collapse = "_")
+          splitted
+        }else{
+          res <- stringr::str_split_i(test, pattern = " ", coeff)
+          res
+        }
+      }
+    }) %>% unname
+  out_metabolites <- stringr::str_split_i(equation, pattern = "=>", 2) %>% 
+    stringr::str_split(pattern = " \\+ ") %>% unlist %>% stringr::str_trim() %>% 
+    sapply(function(test){
+      if(stringr::str_detect(stringr::str_split_i(test, pattern = " ", 1), "[a-z]")){
+        test
+      }else{
+        coeff <- length(stringr::str_split(test, pattern = " ")[[1]])
+        if(coeff > 2){
+          splitted <- stringr::str_split(test, pattern = " ") %>% unlist %>% .[2:coeff] %>% paste(collapse = "_")
+          splitted
+        }else{
+          stringr::str_split_i(test, pattern = " ", coeff)
+        }
+      }
+    }) %>% unname
+  
+  in_reactions_data_frame <- lapply(in_metabolites, function(metabolite){
+    data.frame("A" = metabolite, "B" = Reaction$ID, "weight" = In_reaction_values_zscore)
+  }) %>% data.table::rbindlist()
+  
+  out_reaction_data_frame <- lapply(out_metabolites, function(metabolite){
+    data.frame("A" = Reaction$ID, "B" = metabolite, "weight" = In_reaction_values_zscore)
+  }) %>% data.table::rbindlist()
+  
+  rbind(in_reactions_data_frame)
+}
+
+From_Pheno_reaction_values_to_metabolic_network <- function(Class, Network = Human_GEM){
+  mclapply(1:nrow(Network), function(reaction){
+    if(stringr::str_detect(Network[reaction, "EQUATION"], pattern = "<=>")){
+      From_reversible_equation_to_network(Reactions[[Class]], Network[reaction, ])
+    }else{
+      From_irreversible_equation_to_network(Reactions[[Class]], Network[reaction, ])
+    }
+  }, mc.cores = cores2use) %>% data.table::rbindlist()
+}
+```
+
+```{r}
+Classes_networks <- lapply(names(Phenos_list), function(Pheno){
+  From_Pheno_reaction_values_to_metabolic_network(Pheno)
+})
+names(Classes_networks) <- names(Phenos_list)
+```
+
+
+# Calculate mean zscore values
+
+## Function
+
+```{r}
+# Calculate_values_through_samples <- function(Features){
+#   res <- Features
+#   res$mean <- rowMeans(res)
+#   res$sd <- matrixStats::rowVars(as.matrix(Features))
+#   res$zscore <- res$mean / res$sd
+#   zscore_max <- max(res$zscore[res$zscore != Inf])
+#   res$zscore <- sapply(res$zscore, function(zscore){
+#     ifelse(zscore == Inf, zscore_max, zscore)
+#   })
+#   res
+# }
+```
+
+## Calculate reactions values per classes
+
+```{r}
+# Reactions <- lapply(names(Reactions), function(Pheno){
+#   Calculate_values_through_samples(Reactions[[Pheno]])
+# })
+# names(Reactions) <- names(Phenos_list)
+```
+
+```{r}
+# plot(x = log10(Reactions[["R"]]$zscore), y = log10(Reactions[["NR"]]$zscore))
+```
+
+# Calculate edges weight
+
+## Function
+
+```{r}
+Scale_edges_weight <- function(Network){
+  w_no_inf <- Network$weight %>% .[. != Inf]
+  zscore_IQR <- (quantile(na.omit(w_no_inf), 0.75) - quantile(na.omit(w_no_inf), 0.25)) * 1.5
+  zscore_weight_max <- quantile(na.omit(w_no_inf), 0.75) + zscore_IQR
+  w_min <- Network$weight %>% .[. != 0] %>% min
+  res <- Network
+  res$scaled_weight <- sapply(Network$weight, function(w){
+    if(w > zscore_weight_max){
+      1
+    }else if(w == 0){
+      0
+    }else{
+      log(w)/log(zscore_weight_max)
+    }
+  })
+  res
+}
+```
+
+```{r}
+Classes_networks_scaled <- lapply(names(Classes_networks), function(Class){
+  Scale_edges_weight(Classes_networks[[Class]])
+})
+names(Classes_networks_scaled) <- names(Classes_networks)
+```
+
+NO_DATA <- lapply(names(Pp_met_features), function(Pheno){
+  d <- density(na.omit(Pp_met_features[[Pheno]]$mean))
+  png(paste0("~/GitHub/Thesis_paper/Results/Multi_layer_pheno_like/Layer_Figures/Layer_1/", Pheno, "_methylations_values.png"))
+  plot(d, main = Pheno)
+  dev.off()
+  plot(d, main = Pheno)
+
+})
+
+
+```{r}
+lapply(names(Classes_networks_scaled), function(Class){
+  png(paste0("~/GitHub/Thesis_paper/Results/Multi_layer_pheno_like/Layer_Figures/Layer_4/", Class, "_reactions_values.png"))
+  p <- Classes_networks_scaled[[Class]] %>%  .$scaled_weight %>% density %>% plot(main = Class)
+  dev.off()
+  p
+})
+```
+
+```{r}
+Plotting_function <- function(A, B, title, xlabel, ylabel){
+  a_no_null_weight <- A$weight !=0 & A$scaled_weight != 1
+  b_no_null_weight <- B$weight !=0 & B$scaled_weight != 1
+  no_null <- (a_no_null_weight | b_no_null_weight)
+  a <- A[no_null,]
+  b <- B[no_null,]
+  df <- data.frame(x = (a$scaled_weight), y = (b$scaled_weight))
+  d <- MASS::kde2d(df$x, df$y)
+  dens <- data.frame(expand.grid(x = d$x, y = d$y), z = as.vector(d$z))
+  plot_final <- ggplot() +
+    geom_contour_filled(data = dens, aes(x=x, y=y, z =z, alpha = after_stat(level))) +
+    theme(legend.position = "none") + xlab(xlabel) + ylab(ylabel)                     
+    ggsave(paste0("~/GitHub/Thesis_paper/Results/Multi_layer_pheno_like/Layer_Figures/Layer_4/", title, "_Cross_weight.png"), plot_final, height = 2100, width = 2100, units = "px")
+  plot_final
+}
+```
+
+```{r}
+Plotting_function(Classes_networks_scaled[["mIDH1_NR"]], Classes_networks_scaled[["mIDH1_R"]], "Response in IDH1", "mIDH1 Non responder", "mIDH1 Responder")
+Plotting_function(Classes_networks_scaled[["mIDH2_NR"]], Classes_networks_scaled[["mIDH2_R"]], "Response in IDH2", "mIDH2 Non responder", "mIDH2 Responder")
+Plotting_function(Classes_networks_scaled[["mIDH2_R"]], Classes_networks_scaled[["mIDH1_R"]], "IDH in Responder", "mIDH2 Responder", "mIDH1 Responder")
+Plotting_function(Classes_networks_scaled[["mIDH2_NR"]], Classes_networks_scaled[["mIDH1_NR"]], "IDH in Non responder", "mIDH2 Non responder", "mIDH1 Non responder")
+```
+
+
+
+
+```{r, eval = F}
+Calculate_edges_weight <- function(Features, Network = Metabolic_network){
+  pos_features <- dplyr::filter(Features, stringr::str_detect(rownames(Features), pattern = "_pos"))
+  rownames(pos_features) <- stringr::str_remove(rownames(pos_features), pattern = "_pos")
+
+  neg_features <- dplyr::filter(Features, stringr::str_detect(rownames(Features), pattern = "_neg"))
+  rownames(neg_features) <- stringr::str_remove(rownames(neg_features), pattern = "_neg")
+  res <- mclapply(1:nrow(Network), function(interaction){
+    a <- Network[interaction, "A"]
+    b <- Network[interaction, "B"]
+    if(a %in% rownames(neg_features)){
+      data.frame("source" = a,
+                 "target" = b,
+                 "weight_zscore" = pos_features[a, "zscore"] + neg_features[a, "zscore"] /2,
+                 "weight_mean" = pos_features[a, "mean"] + neg_features[a, "mean"] / 2)
+    }else{
+      data.frame("source" = a,
+               "target" = b,
+               "weight_zscore" = pos_features[a, "zscore"],
+               "weight_mean" = pos_features[a, "mean"])
+    }
+  }, mc.cores = cores2use) %>% data.table::rbindlist()
+  res$weight_zscore <- log10(res$weight_zscore)
+  mean_IQR <- (quantile(na.omit(res$weight_mean), 0.75) - quantile(na.omit(res$weight_mean), 0.25)) * 1.5
+  zscore_IQR <- (quantile(na.omit(res$weight_zscore), 0.75) - quantile(na.omit(res$weight_zscore), 0.25)) * 1.5
+  mean_weight_max <- quantile(na.omit(res$weight_mean), 0.75) + mean_IQR
+  zscore_weight_max <- quantile(na.omit(res$weight_zscore), 0.75) + zscore_IQR
+  med_mean_weight <- quantile(na.omit(res$weight_mean), 0.5)
+  med_zscore <- quantile(na.omit(res$weight_zscore), 0.5)
+  res$weight_mean_scaled <- sapply(res$weight_mean, function(w){
+    if(is.na(w)){
+      med_mean_weight / mean_weight_max
+    }else if(w > mean_weight_max){
+      1
+    }else{
+      w / mean_weight_max
+    }
+  })
+  res$weight_zscore_scaled <- sapply(res$weight_zscore, function(w){
+    if(is.na(w)){
+      med_zscore / zscore_weight_max
+    }else if(w > zscore_weight_max){
+      1
+    }else{
+      w / zscore_weight_max
+    }
+  })
+  res
+}
+```
+
+
+
+
+
+## Calculs
+
+```{r, eval = F}
+Reactions_weighted <- mclapply(names(Reactions), function(Pheno){
+  Calculate_edges_weight(Reactions[[Pheno]], Metabolic_network)
+}, mc.cores = cores2use)
+names(Reactions_weighted) <- names(Reactions)
+
+```
+
+## Density plots
+
+```{r, eval = F}
+lapply(names(Reactions_weighted), function(Pheno){
+  plot(density(na.omit(Reactions_weighted[[Pheno]]$weight_zscore_scaled)))
+})
+```
+
+```{r, eval = F}
+Reactions_weighted <- mclapply(names(Reactions_weighted), function(Pheno){
+  tmp <- Reactions_weighted[[Pheno]]
+  tmp$target <- stringr::str_replace_all(tmp$target, pattern = " ", replacement = "_")
+  tmp
+}, mc.cores = cores2use)
+names(Reactions_weighted) <- names(Reactions)
+```
+
+```{r, eval = F}
+Top_weighted <- function(Metabo_net, N_top){
+  Metabo_net <- Metabo_net[order(Metabo_net$weight_zscore_scaled, decreasing = T),]
+  Metabo_net[1:N_top,]
+}
+```
+
+# Saving networks
+
+```{r}
+Folder_mulilayer <- "~/GitHub/Thesis_paper/Results/Multi_layer_pheno_like/Final_mutlilayer/"
+
+NULL_lapply <- lapply(names(Classes_networks_scaled), function(Pheno){
+  dir.create(paste0(Folder_mulilayer, Pheno), showWarnings = F)
+  dir.create(paste0(Folder_mulilayer, Pheno, "/Layer_4"), showWarnings = F)
+  Classes_networks_scaled[[Pheno]][,c(1,2,4)] %>%
+    write.table(paste0(Folder_mulilayer, "/", Pheno, "/Layer_4/", Pheno, "_Reactions_weighted.tsv"),
+              sep = "\t", quote = F, row.names = F)
+})
+rm(NULL_lapply)
+```
+

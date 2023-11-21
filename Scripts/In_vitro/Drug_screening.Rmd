@@ -1,0 +1,67 @@
+---
+title: "Analyse Drug screening"
+author: Alexis Hucteau
+date: "`r Sys.Date()`"
+output:
+    html_document:
+      toc: yes
+      toc_float: yes
+      theme: united
+editor_options:
+  markdown:
+    wrap: sentence
+---
+
+```{r}
+library(dplyr)
+```
+
+
+
+```{r}
+Drug_interaction <- read.table("~/GitHub/Thesis_paper/Manip lignee IDH/drug_interaction.csv", sep = "\t", header = T, quote = "\"")
+
+Drug_interaction <- tidyr::separate_rows(Drug_interaction, gene.symbol.of.protein.target, sep = ";")
+Drug_interaction <- dplyr::filter(Drug_interaction, gene.symbol.of.protein.target != "")
+Drug_interaction <- tidyr::separate_rows(Drug_interaction, compound.synonyms, sep = ",") %>% unique
+
+Drug_interaction$compound.synonyms <- stringr::str_trim(Drug_interaction$compound.synonyms)
+Drug_interaction <- unique(Drug_interaction)
+Drug_interaction <- Drug_interaction
+
+
+Drug_screening <- xlsx::read.xlsx("~/GitHub/Thesis_paper/Manip lignee IDH/230704_Chemo_MOLM-13_WT_IDH1_IDH2.xlsx", 
+                                  sheetIndex = 1, header = T)[1:9]
+
+Drug_screening <- dplyr::filter(Drug_screening, IDH1.IDH2 > 2.5 | IDH1.IDH2 < 0.4)
+View(Drug_screening)
+```
+
+```{r}
+(Drug_screening$Name %in% Drug_interaction$compound.synonyms) %>% table
+Drug_missed <- Drug_screening$Name[Drug_screening$Name %in% Drug_interaction$compound.synonyms]
+
+Drug_missed
+```
+
+```{r}
+Drung_interactome <- c(Drug_interaction$compound.name, Drug_interaction$compound.synonyms) %>% unique()
+Drugs <- Drug_screening$Name %>% unique
+```
+
+```{r}
+Drugs %>% lapply(function(drug){
+  if(drug %in% Drung_interactome){
+    B <- drug
+  }else{
+    Drung_interactome[stringr::str_detect()]
+  }
+  data.frame(
+    "Drug_screening" = drug,
+    "Drug_interaction" = B
+  )
+})
+```
+
+
+

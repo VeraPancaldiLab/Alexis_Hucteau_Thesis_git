@@ -1,0 +1,775 @@
+---
+title: "Combine networks"
+author: Alexis Hucteau
+date: "`r Sys.Date()`"
+output:
+    html_document:
+      toc: yes
+      toc_float: yes
+      theme: united
+editor_options:
+  markdown:
+    wrap: sentence
+  chunk_output_type: inline
+---
+
+# Libraries
+
+```{r, error=F, warning=F, echo=FALSE, include=F}
+rm(DmIALite, DOLite, DOLiteTerm, HsIALite, MmIALite, RnIALite)
+
+library(dplyr)
+library(parallel)
+cores2Use <- detectCores()
+
+"%ni%" <- Negate("%in%")
+```
+
+# Create Intra layer links
+
+## Functions
+
+```{r}
+Formattage_layers <- function(Layer, n){
+  Layer <- Layer[1:3]
+  colnames(Layer) <- c("from", "to", "weight")
+  Layer$layer_from <- rep(n, nrow(Layer))
+  Layer$layer_to <- rep(n, nrow(Layer))
+  Layer <- Layer[, c("from", "layer_from", "to", "layer_to", "weight")]
+  Layer[Layer$weight !=0,]
+}
+
+Intra_layer_links <- function(Layer_1, Layer_2, Layer_3, Layer_4){
+  layers.list <- list(Layer_1, Layer_2, Layer_3, Layer_4)
+  layers.list <- mclapply(1:4, function(layer){
+    Formattage_layers(layers.list[[layer]], layer)
+  }, mc.cores = cores2Use)
+  
+  intra_links <- purrr::reduce(layers.list, rbind) %>%
+    unique
+  
+  unique_nodes <- c(intra_links$from, intra_links$to) %>%
+    unique
+  
+  id_conversion <- data.frame(id_node = 1:length(unique_nodes),
+                              label_node = unique_nodes)
+  
+  intra_links <- merge(intra_links, id_conversion, by.x = "from", by.y = "label_node", all.x = T)
+  intra_links$from <- intra_links$id_node
+  intra_links <- intra_links[,c("from", "layer_from", "to", "layer_to", "weight")]
+  intra_links <- merge(intra_links, id_conversion, by.x = "to", by.y = "label_node", all.x = T)
+  intra_links$to <- intra_links$id_node
+  intra_links <- intra_links[,c("from", "layer_from", "to", "layer_to", "weight")]
+  
+  list("Intra_links" = intra_links, "ID_conversion" = id_conversion)
+}
+```
+
+## Layer tests
+
+```{r, eval=F}
+layer_test_1 <- read.delim("~/GitHub/Thesis_paper/Scripts/Making_Phenotype_multilayer_network_scripts/Multi_test/Test_multi_interlayer/layer_test_1.csv", header=F)
+layer_test_1_conversion <- read.delim("~/GitHub/Thesis_paper/Scripts/Making_Phenotype_multilayer_network_scripts/Multi_test/Test_multi_interlayer/layer_test_1_conversion.csv", header=F)
+layer_test_2 <- read.delim("~/GitHub/Thesis_paper/Scripts/Making_Phenotype_multilayer_network_scripts/Multi_test/Test_multi_interlayer/layer_test_2.csv", header=F)
+layer_test_3 <- read.delim("~/GitHub/Thesis_paper/Scripts/Making_Phenotype_multilayer_network_scripts/Multi_test/Test_multi_interlayer/layer_test_3.csv", header=F)
+layer_test_4 <- read.delim("~/GitHub/Thesis_paper/Scripts/Making_Phenotype_multilayer_network_scripts/Multi_test/Test_multi_interlayer/layer_test_4.csv", header=F)
+layer_test_4_conversion <- read.delim("~/GitHub/Thesis_paper/Scripts/Making_Phenotype_multilayer_network_scripts/Multi_test/Test_multi_interlayer/layer_test_4_conversion.csv", header=F)
+
+test <- Intra_layer_links(layer_test_1, layer_test_2, layer_test_3, layer_test_4)
+```
+
+## Real layers
+
+```{r}
+Top_weighted <- function(Network, N_top){
+  last_col <- ncol(Network)
+  Network <- Network[order(Network[last_col], decreasing = T),]
+  Network[1:N_top,]
+}
+```
+
+# All links multi layer intra scaled
+
+```{r}
+Folder_multilayers <- "~/GitHub/Thesis_paper/Results/Multi_layer_pheno_like/Final_mutlilayer/"
+Phenos <- c("mIDH1_R", "mIDH1_NR", "mIDH2_R", "mIDH2_NR") 
+
+Layers_All_links_multi_layer_intra_scaled <- lapply(Phenos, function(Pheno){
+  pheno_folder <- paste0(Folder_multilayers, Pheno, "/")
+  layer_1 <- read.table(paste0(pheno_folder, "Layer_1/Network.tsv"), 
+                        sep = "\t", header = T)
+  layer_1$weight <- layer_1$weight %>% as.numeric
+  layer_2 <- read.table(paste0(pheno_folder, "Layer_2/", Pheno, "_GRN_network.tsv"),
+                        sep = "\t", header = T) %>%
+    .[c(1,2,5)]
+  layer_2$weight_corr <- layer_2$weight_corr %>% as.numeric
+
+  layer_3 <- read.table(paste0(pheno_folder, "Layer_3/PPI.tsv"),
+                        sep = "\t", header = T) 
+  layer_3$weight <- layer_3$weight %>% as.numeric
+  
+  layer_4 <- read.table(paste0(pheno_folder, "Layer_4/", Pheno, "_Reactions_weighted.tsv"),
+                        sep = "\t", header = T, quote = "\"") 
+  layer_4$scaled_weight <- layer_4$scaled_weight %>% as.numeric
+
+  Intra_layer_links(layer_1, layer_2, layer_3, layer_4)
+})
+names(Layers_All_links_multi_layer_intra_scaled) <- Phenos
+```
+
+# Create Custom Inter layer links
+
+## Functions
+
+```{r}
+Create_Custom_Inter_layer_links <- function(Intra_layer, Layer_conversion, layer){
+  frag_in_network <- dplyr::filter(Layer_conversion, V1 %in% Intra_layer[["ID_conversion"]]$label_node)
+  gene_not_in_ID_conversion <- Layer_conversion$V2[Layer_conversion$V2 %ni% Intra_layer[["ID_conversion"]]$label_node] %>% unique
+  new_ids <- max(Intra_layer[["ID_conversion"]]$id_node) + 1
+  new_ids_max <- new_ids + length(gene_not_in_ID_conversion) - 1
+  new_ids_range <- new_ids:new_ids_max
+  gene_not_in_ID_conversion <- data.frame("Node_label" = gene_not_in_ID_conversion, 
+                                          "Node_ID" = new_ids_range)
+  tmp <- mclapply(1:nrow(frag_in_network), function(ele){
+    id_to <- dplyr::filter(Intra_layer[["ID_conversion"]], label_node %in% frag_in_network[ele, "V2"]) %>%
+    .$id_node 
+    id_from <- dplyr::filter(Intra_layer[["ID_conversion"]], label_node %in% frag_in_network[ele, "V1"]) %>%
+    .$id_node 
+    if(length(id_to) == 0){
+      new_gene_data <- dplyr::filter(gene_not_in_ID_conversion, Node_label == frag_in_network[ele, "V2"])
+      new_node_id <- new_gene_data$Node_ID
+      new_node_label <- new_gene_data$Node_label
+      layer_to <- ifelse(layer == 1, 2, 3)
+      new_edge <- data.frame("from" = id_from, "layer_from" = layer, 
+                 "to" = new_node_id, "layer_to" = layer_to, 
+                 "weight" = 0.5)
+      new_ID <- data.frame("id_node" = new_node_id, "label_node" = new_node_label)
+    }else{
+      layer_to <- ifelse(layer == 1, 2, 3)
+      new_edge <- data.frame("from" = id_from, "layer_from" = layer, 
+                   "to" = id_to, "layer_to" = layer_to, 
+                   "weight" = 0.5)
+      new_ID <- NULL
+    }
+    list("Intra_links" = new_edge, "ID_conversion" = new_ID)
+  }, mc.cores = 8) 
+  new_intra_links <- mclapply(1:length(tmp), function(new_id){
+    tmp[[new_id]][["Intra_links"]]
+  }, mc.cores = cores2Use) %>% data.table::rbindlist() %>% unique %>% data.frame
+  new_id_converted <- mclapply(1:length(tmp), function(new_id){
+    tmp[[new_id]][["ID_conversion"]]
+  }, mc.cores = cores2Use) %>% data.table::rbindlist() %>% unique %>% data.frame
+  links <- rbind(Intra_layer[["Intra_links"]], new_intra_links) %>% unique
+  ID_conversion <- rbind(Intra_layer[["ID_conversion"]], new_id_converted) %>% unique
+  
+  if(layer == 4){
+    inter_links <- Add_inter_links_of_common_nodes(links, ID_conversion)
+  }else{
+    inter_links <- links
+  }
+  
+  list("Intra_links" = inter_links, "ID_conversion" = ID_conversion)
+}
+
+Add_inter_links_of_common_nodes <- function(Links, Nodes){
+  nodes_layers <- mclapply(2:3, function(Layers){
+    node.from <- dplyr::filter(Links, layer_from == Layers) %>% .$from
+    node.to <- dplyr::filter(Links, layer_to == Layers) %>% .$to
+    unique(c(node.from, node.to))
+  }, mc.cores = cores2Use)
+  common_nodes <- intersect(nodes_layers[[1]], nodes_layers[[2]])
+  if(!is.null(common_nodes)){
+    new_links <- mclapply(common_nodes, function(Nodes){
+      data.frame("from" = common_nodes, "layer_from" = 2, 
+                 "to" = common_nodes, "layer_to" = 3, 
+                 "weight" = 0.75
+                 )
+    }, mc.cores = cores2Use) %>% data.table::rbindlist() %>% unique
+  }else{
+    new_links <- data.frame()
+  }
+  rbind(Links, new_links)
+}
+```
+
+## Data conversion
+
+```{r}
+layer_1_dataconversion <- read.table("~/GitHub/Thesis_paper/Datasets/Chromatine_part/Associate_fragment_to_gene_promoter.tsv",
+                                 sep = "\t", header = T)
+colnames(layer_1_dataconversion) <- c("V1", "V2")
+
+layer_4_dataconversion <- read.table("~/GitHub/Thesis_paper/Datasets/Metabolic_datasets/Gene_reactions_network.tsv",
+                                     sep = "\t", header = T)
+colnames(layer_4_dataconversion) <- c("V1", "V2")
+```
+
+```{r}
+Inter_layered <- lapply(Phenos, function(Pheno){
+  res <- Create_Custom_Inter_layer_links(Layers_All_links_multi_layer_intra_scaled[[Pheno]], layer_1_dataconversion, 1)
+  res <- Create_Custom_Inter_layer_links(res, layer_4_dataconversion, 4)
+  res
+})
+names(Inter_layered) <- Phenos
+```
+
+
+```{r, eval = F}
+save.image("/media/alexis/DATA/Session/R_session/Thesis_paper_Rsessions/Multi_layer_phenolike/Directed_multi_layer.RData")
+system("bash ~/shutdown_o_clock.sh")
+```
+
+# Scale intralayer connections
+
+```{r}
+Make_intra_scaled_link <- function(Link_line, intra_weight){
+  if(Link_line$layer_from < Link_line$layer_to){
+    res <-data.frame("from" = c(Link_line$from, Link_line$to), 
+             "layer_from" = c(Link_line$layer_from, Link_line$layer_to),
+             "to" = c(Link_line$to, Link_line$from), 
+             "layer_to" = c(Link_line$layer_to, Link_line$layer_from), 
+             "weight" = c(intra_weight[[Link_line$layer_from]][[1]], 
+                          intra_weight[[Link_line$layer_from]][[2]]))
+  }else{
+    res <- data.frame("from" = c(Link_line$from, Link_line$to), 
+               "layer_from" = c(Link_line$layer_from, Link_line$layer_to),
+               "to" = c(Link_line$to, Link_line$from), 
+               "layer_to" = c(Link_line$layer_to, Link_line$layer_from), 
+               "weight" = c(intra_weight[[Link_line$layer_to]][[2]], 
+                          intra_weight[[Link_line$layer_to]][[1]]))
+  }
+  return(res)
+}
+
+
+Scaling_intralayer_connection <- function(Multilayer){
+  layer_network <- lapply(1:4, function(layer){
+    dplyr::filter(Multilayer[["Intra_links"]], layer_from == layer & layer_to == layer) %>%
+      .[c(1,3)] %>% unique %>% igraph::graph.data.frame(directed = F) %>%
+      igraph::degree(mode = "all") %>% summary
+  })
+  
+  intra_layer_links <- lapply(1:3, function(intra){
+    n_nodes_in <- layer_network[[intra]][[3]]
+    n_nodes_out <- layer_network[[intra + 1]][[3]]
+    in2out <- n_nodes_in/n_nodes_out
+    in2out <- (1-1/(in2out+1))
+    in2out <- 0.2+0.6*in2out
+    out2in <- n_nodes_out/n_nodes_in 
+    out2in <- (1-1/(out2in+1))
+    out2in <- 0.2+0.6*out2in
+    list(in2out, out2in)
+  }) 
+  intra_links <- dplyr::filter(Multilayer[["Intra_links"]], layer_from != layer_to)
+  new_intra_links <- lapply(1:nrow(intra_links), function(link){
+    Make_intra_scaled_link(intra_links[link,], intra_layer_links)
+  }) %>% data.table::rbindlist() %>% unique
+  inter_links <- dplyr::filter(Multilayer[["Intra_links"]], layer_from == layer_to)
+  rbind(inter_links, new_intra_links)
+}
+
+```
+
+```{r}
+x <- seq(1:10)
+x_low <- 1/x
+x <- c(x_low, x) %>% .[order(., decreasing = F)]
+y <- 0.2+0.6*(1-(1/(x+1)))
+z <- 0.2+0.6*(1-(1/((1/x)+1)))
+plot(x,y, type = "l", col = "red", ylim = c(0.2, 0.8), xlab = "Rapport de densité couche A / couche B", ylab = "poids inter-layer")
+lines(x = x, y = z, col = "blue")
+legend("topleft", c("Poids couche A vers B","Poids couche B vers A"), fill=c("blue","red"))
+```
+```{r}
+Multi_layers_scaled <- mclapply(names(Inter_layered), function(Multi_layer){
+  ID_conversion <- Inter_layered[[Multi_layer]][["ID_conversion"]]
+  Intra_links <- Scaling_intralayer_connection(Inter_layered[[Multi_layer]])
+  list("ID_conversion" = ID_conversion, "Intra_links" = Intra_links)
+}, mc.cores = 2)
+
+names(Multi_layers_scaled) <- Phenos
+```
+
+```{r}
+Folder_multilayers <- "~/GitHub/Thesis_paper/Results/Multi_layer_pheno_like/Final_mutlilayer/"
+
+Make_Multilayer_file <- function(Multilayer, Class){
+  vertices <- Multilayer[[Class]][["ID_conversion"]]
+  multilayer <- Multilayer[[Class]][["Intra_links"]]
+  multilayer <- multilayer[,c(2,1,4,3,5)]
+  
+  dir.create(paste0(Folder_multilayers, Class), showWarnings = F)
+  n_vertices <- unique(vertices$id_node) %>% length
+  n_edges <- nrow(multilayer)
+  file_edge <- paste0(Folder_multilayers, Class, "/", Class, "_multilayer_infomap.edges")
+  if(file.exists(file_edge)){
+    file.remove(file_edge)
+  }
+  fileConn <- file(file_edge, open = "at")
+  writeLines(c(paste("*Vertices", n_vertices), "# node_id name"), fileConn)
+  utils::write.table(
+      vertices,
+      file = fileConn,
+      row.names = F,
+      col.names = F,
+      quote = F
+    )
+  intra <- dplyr::filter(multilayer, layer_from == layer_to)
+  n_intra <- nrow(intra)
+  writeLines(c(paste("*Multilayer", n_edges), "# layer_id node_id layer_id node_id weight", paste("# intra", n_intra)), fileConn)
+  inter <- dplyr::filter(multilayer, layer_from != layer_to)
+  n_inter <- nrow(inter)
+  utils::write.table(
+      intra,
+      file = fileConn,
+      row.names = F,
+      col.names = F,
+      quote = F
+    )
+  writeLines(paste("# inter", n_inter), fileConn)
+  utils::write.table(
+      inter,
+      file = fileConn,
+      row.names = F,
+      col.names = F,
+      quote = F
+    )
+  close(fileConn)
+  multilayer %>%
+    write.table(paste0(Folder_multilayers, Class, "/", Class, "_multilayer_infomap.tsv"), sep = "\t", row.names = F)
+  vertices %>%
+    write.table(paste0(Folder_multilayers, Class, "/", Class, "_multilayer_infomap_vertices.tsv"), sep = "\t", row.names = F)
+  return(NULL)
+}
+```
+
+```{r}
+mclapply(names(Multi_layers_scaled), function(Class){
+  Make_Multilayer_file(Multi_layers_scaled, Class)
+  NULL
+}, mc.cores = cores2Use)
+```
+
+```{r}
+system("bash ./Send_multilayer_to_genologin.sh")
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+```{r}
+Folder_multilayers
+
+trash <- mclapply(names(Multi_layers_scaled), function(multi){
+  dir.create(paste0(Folder_multilayers, "/Scaled_intra_links_v2/"), showWarnings = F)
+  dir.create(paste0(Folder_multilayers, "/Scaled_intra_links_v2/", multi), showWarnings = F)
+  Multi_layers_scaled[[multi]][["ID_conversion"]] %>%
+  write.table(paste0(Folder_multilayers, "/Scaled_intra_links_v2/", multi, "/layout.txt"),
+              sep = " ", col.names = c("nodeID", "nodeLabel"), quote = F, row.names = F)
+  Multi_layers_scaled[[multi]][["Intra_links"]] %>%
+  write.table(paste0(Folder_multilayers, "/Scaled_intra_links_v2/", multi, "/Multilayer.edges"),
+              sep = " ", col.names=FALSE, quote = F, row.names = F)
+  folder_Pheno <- paste0("~/GitHub/Thesis_paper/Results/Multi_layer_pheno_like/Scaled_intra_links_v2/", multi, "/")
+  config_file <- paste0(folder_Pheno, "Multilayer.edges;", folder_Pheno, "layers.txt;", folder_Pheno, "layout.txt")
+  config_path <- paste0(folder_Pheno, "config.txt")
+  fileConn <- file(config_path)
+  writeLines(config_file, fileConn)
+  close(fileConn)
+  layers_file <- c("layerID layerLabel", 
+                   "1 3D_chromatin_network", 
+                   "2 Gene_regulatory_network", 
+                   "3 Functionnal_Protein_protein_network", 
+                   "4 Metabolic_network")
+  layers_path <- paste0(folder_Pheno, "layers.txt")
+  fileConn <- file(layers_path)
+  writeLines(layers_file, fileConn)
+  close(fileConn)
+})
+rm(trash)
+```
+
+
+# Create layer 1 to layer 4 links
+
+## Function
+
+```{r, eval = F}
+Make_crossed_links <- function(Vector_A, Vector_B){
+  mclapply(Vector_A, function(frag){
+    mclapply(Vector_B, function(react){
+      data.frame("from" = frag, "layer_from" = 1, "to" = react, "layer_to" = 4, "weight" = 1)
+    }, mc.cores = cores2Use) %>% data.table::rbindlist() %>% unique
+  }, mc.cores = cores2Use) %>% data.table::rbindlist() %>% unique
+}
+
+Create_layer_1_to_layer_4_links <- function(Intra_layer, Layer_1_conversion, Layer_4_conversion){
+  frag_in_network <- dplyr::filter(Layer_1_conversion, V1 %in% Intra_layer[["ID_conversion"]]$label_node)
+  reaction_in_network <- dplyr::filter(Layer_4_conversion, V1 %in% Intra_layer[["ID_conversion"]]$label_node)
+  
+  gene_associated_to_frag <- frag_in_network$V2 %>% unique
+  gene_associated_to_reaction <- reaction_in_network$V2 %>% unique
+  
+  genes_associated_to_frag_n_reaction <- intersect(gene_associated_to_frag, gene_associated_to_reaction)
+  new_intra_links <- mclapply(genes_associated_to_frag_n_reaction, function(gene){
+    frag_label <- dplyr::filter(frag_in_network, V2 == gene) %>% .$V1
+    react_label <- dplyr::filter(reaction_in_network, V2 == gene) %>% .$V1
+    frag_ids <- dplyr::filter(Intra_layer[["ID_conversion"]], label_node %in% frag_label) %>% .$id_node
+    react_ids <- dplyr::filter(Intra_layer[["ID_conversion"]], label_node %in% react_label) %>% .$id_node
+    Make_crossed_links(frag_ids, react_ids) 
+  }, mc.cores = cores2Use) %>% data.table::rbindlist() %>% unique
+  rbind(Intra_layer[["Intra_links"]], new_intra_links) %>% unique
+}
+```
+
+### Cluster NR
+
+```{r}
+message(date())
+# Cluster_NR_multilayer[["Intra_links"]] <- Create_layer_1_to_layer_4_links(Cluster_NR_multilayer, layer_1_dataconversion, layer_4_dataconversion)
+```
+
+### Cluster R
+
+```{r}
+message(date())
+# Cluster_R_multilayer[["Intra_links"]] <- Create_layer_1_to_layer_4_links(Cluster_R_multilayer, layer_1_dataconversion, layer_4_dataconversion)
+```
+
+### mIDH1
+
+```{r}
+message(date())
+# mIDH1_multilayer[["Intra_links"]] <- Create_layer_1_to_layer_4_links(mIDH1_multilayer, layer_1_dataconversion, layer_4_dataconversion)
+```
+
+### mIDH2
+
+```{r}
+message(date())
+# mIDH2_multilayer[["Intra_links"]] <- Create_layer_1_to_layer_4_links(mIDH2_multilayer, layer_1_dataconversion, layer_4_dataconversion)
+message(date())
+```
+
+# Saving multilayers and ID_converter
+
+## ARACNe GRN no filter
+
+### Cluster_NR
+
+```{r, eval = F}
+Cluster_NR_multilayer[["Intra_links"]] %>%
+  write.table("../../Results/Multi_layer_pheno_like/Cluster_NR/Multi_layer/Multilayer.edges",
+              sep = " ", col.names=FALSE, quote = F, row.names = F)
+
+Cluster_NR_multilayer[["ID_conversion"]] %>%
+  write.table("../../Results/Multi_layer_pheno_like/Cluster_NR/Multi_layer/layout.txt",
+              sep = " ", col.names = c("nodeID", "nodeLabel"), quote = F, row.names = F)
+```
+
+### Cluster_R
+
+```{r, eval = F}
+Cluster_R_multilayer[["Intra_links"]] %>%
+  write.table("../../Results/Multi_layer_pheno_like/Cluster_R/Multi_layer/Multilayer.edges",
+              sep = " ", col.names=FALSE, quote = F, row.names = F)
+
+Cluster_R_multilayer[["ID_conversion"]] %>%
+  write.table("../../Results/Multi_layer_pheno_like/Cluster_R/Multi_layer/layout.txt",
+              sep = " ", col.names = c("nodeID", "nodeLabel"), quote = F, row.names = F)
+```
+
+### mIDH1
+
+```{r, eval = F}
+mIDH1_multilayer[["Intra_links"]] %>%
+  write.table("../../Results/Multi_layer_pheno_like/mIDH1/Multi_layer/Multilayer.edges",
+              sep = " ", col.names=FALSE, quote = F, row.names = F)
+
+mIDH1_multilayer[["ID_conversion"]] %>%
+  write.table("../../Results/Multi_layer_pheno_like/mIDH1/Multi_layer/layout.txt",
+              sep = " ", col.names = c("nodeID", "nodeLabel"), quote = F, row.names = F)
+```
+
+### mIDH2
+
+```{r, eval = F}
+mIDH2_multilayer[["Intra_links"]] %>%
+  write.table("../../Results/Multi_layer_pheno_like/mIDH2/Multi_layer/Multilayer.edges",
+              sep = " ", col.names=FALSE, quote = F, row.names = F)
+
+mIDH2_multilayer[["ID_conversion"]] %>%
+  write.table("../../Results/Multi_layer_pheno_like/mIDH2/Multi_layer/layout.txt",
+              sep = " ", col.names = c("nodeID", "nodeLabel"), quote = F, row.names = F)
+```
+
+## Filtered Layers
+
+### Cluster_NR
+
+```{r, eval = F}
+dir.create("../../Results/Multi_layer_pheno_like/Cluster_NR_filtered/Multi_layer/")
+
+Cluster_NR_multilayer_filtered[["Intra_links"]] %>%
+  write.table("../../Results/Multi_layer_pheno_like/Cluster_NR_filtered/Multi_layer/Multilayer.edges",
+              sep = " ", col.names=FALSE, quote = F, row.names = F)
+
+Cluster_NR_multilayer_filtered[["ID_conversion"]] %>%
+  write.table("../../Results/Multi_layer_pheno_like/Cluster_NR_filtered/Multi_layer/layout.txt",
+              sep = " ", col.names = c("nodeID", "nodeLabel"), quote = F, row.names = F)
+```
+
+### Cluster_R
+
+```{r, eval = F}
+dir.create("../../Results/Multi_layer_pheno_like/Cluster_R_filtered/Multi_layer/")
+
+Cluster_R_multilayer_filtered[["Intra_links"]] %>%
+  write.table("../../Results/Multi_layer_pheno_like/Cluster_R_filtered/Multi_layer/Multilayer.edges",
+              sep = " ", col.names=FALSE, quote = F, row.names = F)
+
+Cluster_R_multilayer_filtered[["ID_conversion"]] %>%
+  write.table("../../Results/Multi_layer_pheno_like/Cluster_R_filtered/Multi_layer/layout.txt",
+              sep = " ", col.names = c("nodeID", "nodeLabel"), quote = F, row.names = F)
+```
+
+### mIDH1
+
+```{r, eval = F}
+dir.create("../../Results/Multi_layer_pheno_like/mIDH1_filtered/Multi_layer/")
+
+mIDH1_multilayer_filtered[["Intra_links"]] %>%
+  write.table("../../Results/Multi_layer_pheno_like/mIDH1_filtered/Multi_layer/Multilayer.edges",
+              sep = " ", col.names=FALSE, quote = F, row.names = F)
+
+mIDH1_multilayer_filtered[["ID_conversion"]] %>%
+  write.table("../../Results/Multi_layer_pheno_like/mIDH1_filtered/Multi_layer/layout.txt",
+              sep = " ", col.names = c("nodeID", "nodeLabel"), quote = F, row.names = F)
+```
+
+### mIDH2
+
+```{r, eval = F}
+dir.create("../../Results/Multi_layer_pheno_like/mIDH2_filtered/Multi_layer/")
+
+mIDH2_multilayer_filtered[["Intra_links"]] %>%
+  write.table("../../Results/Multi_layer_pheno_like/mIDH2_filtered/Multi_layer/Multilayer.edges",
+              sep = " ", col.names=FALSE, quote = F, row.names = F)
+
+mIDH2_multilayer_filtered[["ID_conversion"]] %>%
+  write.table("../../Results/Multi_layer_pheno_like/mIDH2_filtered/Multi_layer/layout.txt",
+              sep = " ", col.names = c("nodeID", "nodeLabel"), quote = F, row.names = F)
+```
+
+## Sub multilayer
+
+### Cluster IDH1 R
+
+```{r, eval = F}
+dir.create("../../Results/Multi_layer_pheno_like/Cluster_IDH1_R/Multi_layer", showWarnings = F)
+  
+Cluster_mIDH1_R_multilayer_filtered[["Intra_links"]] %>%
+  write.table("../../Results/Multi_layer_pheno_like/Cluster_IDH1_R/Multi_layer/Multilayer.edges",
+              sep = " ", col.names=FALSE, quote = F, row.names = F)
+
+Cluster_mIDH1_R_multilayer_filtered[["ID_conversion"]] %>%
+  write.table("../../Results/Multi_layer_pheno_like/Cluster_IDH1_R/Multi_layer/layout.txt",
+              sep = " ", col.names = c("nodeID", "nodeLabel"), quote = F, row.names = F)
+```
+
+### Cluster IDH2 R
+
+```{r, eval = F}
+dir.create("../../Results/Multi_layer_pheno_like/Cluster_IDH2_R/Multi_layer", showWarnings = F)
+
+Cluster_mIDH2_R_multilayer_filtered[["Intra_links"]] %>%
+  write.table("../../Results/Multi_layer_pheno_like/Cluster_IDH2_R/Multi_layer/Multilayer.edges",
+              sep = " ", col.names=FALSE, quote = F, row.names = F)
+
+Cluster_mIDH2_R_multilayer_filtered[["ID_conversion"]] %>%
+  write.table("../../Results/Multi_layer_pheno_like/Cluster_IDH2_R/Multi_layer/layout.txt",
+              sep = " ", col.names = c("nodeID", "nodeLabel"), quote = F, row.names = F)
+```
+
+### Cluster IDH2 NR
+
+```{r, eval = F}
+dir.create("../../Results/Multi_layer_pheno_like/Cluster_IDH2_NR/Multi_layer", showWarnings = F)
+
+Cluster_mIDH2_NR_multilayer_filtered[["Intra_links"]] %>%
+  write.table("../../Results/Multi_layer_pheno_like/Cluster_IDH2_NR/Multi_layer/Multilayer.edges",
+              sep = " ", col.names=FALSE, quote = F, row.names = F)
+
+Cluster_mIDH2_NR_multilayer_filtered[["ID_conversion"]] %>%
+  write.table("../../Results/Multi_layer_pheno_like/Cluster_IDH2_NR/Multi_layer/layout.txt",
+              sep = " ", col.names = c("nodeID", "nodeLabel"), quote = F, row.names = F)
+```
+
+##25k Filtered Layers 25k
+
+### Cluster_NR
+
+```{r, eval = F}
+dir.create("../../Results/Multi_layer_pheno_like/Cluster_NR_filtered_25k/", showWarnings = F)
+dir.create("../../Results/Multi_layer_pheno_like/Cluster_NR_filtered_25k/Multi_layer/", showWarnings = F)
+
+Cluster_NR_multilayer_filtered_25k[["Intra_links"]] %>%
+  write.table("../../Results/Multi_layer_pheno_like/Cluster_NR_filtered_25k/Multi_layer/Multilayer.edges",
+              sep = " ", col.names=FALSE, quote = F, row.names = F)
+
+Cluster_NR_multilayer_filtered_25k[["ID_conversion"]] %>%
+  write.table("../../Results/Multi_layer_pheno_like/Cluster_NR_filtered_25k/Multi_layer/layout.txt",
+              sep = " ", col.names = c("nodeID", "nodeLabel"), quote = F, row.names = F)
+```
+
+### Cluster_R
+
+```{r, eval = F}
+dir.create("../../Results/Multi_layer_pheno_like/Cluster_R_filtered_25k/", showWarnings = F)
+dir.create("../../Results/Multi_layer_pheno_like/Cluster_R_filtered_25k/Multi_layer/", showWarnings = F)
+
+Cluster_R_multilayer_filtered_25k[["Intra_links"]] %>%
+  write.table("../../Results/Multi_layer_pheno_like/Cluster_R_filtered_25k/Multi_layer/Multilayer.edges",
+              sep = " ", col.names=FALSE, quote = F, row.names = F)
+
+Cluster_R_multilayer_filtered_25k[["ID_conversion"]] %>%
+  write.table("../../Results/Multi_layer_pheno_like/Cluster_R_filtered_25k/Multi_layer/layout.txt",
+              sep = " ", col.names = c("nodeID", "nodeLabel"), quote = F, row.names = F)
+```
+
+### mIDH1
+
+```{r, eval = F}
+dir.create("../../Results/Multi_layer_pheno_like/mIDH1_filtered_25k/", showWarnings = F)
+dir.create("../../Results/Multi_layer_pheno_like/mIDH1_filtered_25k/Multi_layer/", showWarnings = F)
+
+mIDH1_multilayer_filtered_25k[["Intra_links"]] %>%
+  write.table("../../Results/Multi_layer_pheno_like/mIDH1_filtered_25k/Multi_layer/Multilayer.edges",
+              sep = " ", col.names=FALSE, quote = F, row.names = F)
+
+mIDH1_multilayer_filtered_25k[["ID_conversion"]] %>%
+  write.table("../../Results/Multi_layer_pheno_like/mIDH1_filtered_25k/Multi_layer/layout.txt",
+              sep = " ", col.names = c("nodeID", "nodeLabel"), quote = F, row.names = F)
+```
+
+### mIDH2
+
+```{r, eval = F}
+dir.create("../../Results/Multi_layer_pheno_like/mIDH2_filtered_25k/", showWarnings = F)
+dir.create("../../Results/Multi_layer_pheno_like/mIDH2_filtered_25k/Multi_layer/", showWarnings = F)
+
+mIDH2_multilayer_filtered_25k[["Intra_links"]] %>%
+  write.table("../../Results/Multi_layer_pheno_like/mIDH2_filtered_25k/Multi_layer/Multilayer.edges",
+              sep = " ", col.names=FALSE, quote = F, row.names = F)
+
+mIDH2_multilayer_filtered_25k[["ID_conversion"]] %>%
+  write.table("../../Results/Multi_layer_pheno_like/mIDH2_filtered_25k/Multi_layer/layout.txt",
+              sep = " ", col.names = c("nodeID", "nodeLabel"), quote = F, row.names = F)
+```
+
+## Sub multilayer
+
+### Cluster IDH1 R
+
+```{r, eval = F}
+dir.create("../../Results/Multi_layer_pheno_like/Cluster_IDH1_R_25k", showWarnings = F)
+dir.create("../../Results/Multi_layer_pheno_like/Cluster_IDH1_R_25k/Multi_layer", showWarnings = F)
+
+Cluster_mIDH1_R_multilayer_filtered_25k[["Intra_links"]] %>%
+  write.table("../../Results/Multi_layer_pheno_like/Cluster_IDH1_R_25k/Multi_layer/Multilayer.edges",
+              sep = " ", col.names=FALSE, quote = F, row.names = F)
+
+Cluster_mIDH1_R_multilayer_filtered_25k[["ID_conversion"]] %>%
+  write.table("../../Results/Multi_layer_pheno_like/Cluster_IDH1_R_25k/Multi_layer/layout.txt",
+              sep = " ", col.names = c("nodeID", "nodeLabel"), quote = F, row.names = F)
+```
+
+### Cluster IDH2 R
+
+```{r, eval = F}
+dir.create("../../Results/Multi_layer_pheno_like/Cluster_IDH2_R_25k", showWarnings = F)
+dir.create("../../Results/Multi_layer_pheno_like/Cluster_IDH2_R_25k/Multi_layer", showWarnings = F)
+
+Cluster_mIDH2_R_multilayer_filtered_25k[["Intra_links"]] %>%
+  write.table("../../Results/Multi_layer_pheno_like/Cluster_IDH2_R_25k/Multi_layer/Multilayer.edges",
+              sep = " ", col.names=FALSE, quote = F, row.names = F)
+
+Cluster_mIDH2_R_multilayer_filtered_25k[["ID_conversion"]] %>%
+  write.table("../../Results/Multi_layer_pheno_like/Cluster_IDH2_R_25k/Multi_layer/layout.txt",
+              sep = " ", col.names = c("nodeID", "nodeLabel"), quote = F, row.names = F)
+```
+
+### Cluster IDH2 NR
+
+```{r, eval = F}
+dir.create("../../Results/Multi_layer_pheno_like/Cluster_IDH2_NR_25k", showWarnings = F)
+dir.create("../../Results/Multi_layer_pheno_like/Cluster_IDH2_NR_25k/Multi_layer", showWarnings = F)
+
+Cluster_mIDH2_NR_multilayer_filtered_25k[["Intra_links"]] %>%
+  write.table("../../Results/Multi_layer_pheno_like/Cluster_IDH2_NR_25k/Multi_layer/Multilayer.edges",
+              sep = " ", col.names=FALSE, quote = F, row.names = F)
+
+Cluster_mIDH2_NR_multilayer_filtered_25k[["ID_conversion"]] %>%
+  write.table("../../Results/Multi_layer_pheno_like/Cluster_IDH2_NR_25k/Multi_layer/layout.txt",
+              sep = " ", col.names = c("nodeID", "nodeLabel"), quote = F, row.names = F)
+```
+
+```{r, eval = F}
+save.image("/media/alexis/DATA/Session/R_session/Thesis_paper_Rsessions/Multi_layer_phenolike/Combined_layers.RData")
+system("bash ~/shutdown_o_clock.sh")
+```
+
+# Connectivity for each layer and each pheno
+
+```{r}
+Calculate_degree_distribution_function <- function(Multi_layer){
+  layer_network <- lapply(1:4, function(layer){
+    dplyr::filter(Multi_layer[["Intra_links"]], layer_from == layer & layer_to == layer) %>%
+      .[c(1,3)] %>% unique %>% igraph::graph.data.frame(directed = F) %>%
+      igraph::degree(mode = "all")
+  })
+}
+
+
+
+```
+
+```{r, eval = F}
+Degree_ditrib <- list()
+
+Degree_ditrib[["Cluster_mIDH2_NR_degree"]] <- Calculate_degree_distribution_function(Cluster_mIDH2_NR_multilayer_filtered)
+Degree_ditrib[["Cluster_mIDH2_NR_degree_25k"]] <- Calculate_degree_distribution_function(Cluster_mIDH2_NR_multilayer_filtered_25k)
+Degree_ditrib[["Cluster_mIDH2_R_degree"]] <- Calculate_degree_distribution_function(Cluster_mIDH2_R_multilayer_filtered)
+Degree_ditrib[["Cluster_mIDH2_R_degree_25k"]] <- Calculate_degree_distribution_function(Cluster_mIDH2_R_multilayer_filtered_25k)
+Degree_ditrib[["Cluster_NR_degree"]] <- Calculate_degree_distribution_function(Cluster_NR_multilayer_filtered)
+Degree_ditrib[["Cluster_N_degree_25k"]] <- Calculate_degree_distribution_function(Cluster_NR_multilayer_filtered_25k)
+Degree_ditrib[["Cluster_R_mIDH1_degree"]] <- Calculate_degree_distribution_function(Cluster_R_mIDH1_multilayer_filtered)
+Degree_ditrib[["Cluster_R_mIDH1_degree_25k"]] <- Calculate_degree_distribution_function(Cluster_R_mIDH1_multilayer_filtered_25k)
+Degree_ditrib[["Cluster_R_degree"]] <- Calculate_degree_distribution_function(Cluster_R_multilayer_filtered)
+Degree_ditrib[["Cluster_R_degree_25k"]] <- Calculate_degree_distribution_function(Cluster_R_multilayer_filtered_25k)
+Degree_ditrib[["mIDH1_degree"]] <- Calculate_degree_distribution_function(mIDH1_multilayer_filtered)
+Degree_ditrib[["mIDH1_degree_25k"]] <- Calculate_degree_distribution_function(mIDH1_multilayer_filtered_25k)
+Degree_ditrib[["mIDH2_degree"]] <- Calculate_degree_distribution_function(mIDH2_multilayer_filtered)
+Degree_ditrib[["mIDH2_degree_25k"]] <- Calculate_degree_distribution_function(mIDH2_multilayer_filtered_25k)
+
+```
+
+```{r, eval = F}
+lapply(names(Degree_ditrib), function(multilayer){
+  par(mfrow=c(2,2))
+  lapply(1:4, function(l){
+    density(log(Degree_ditrib[[multilayer]][[l]])) %>% plot(main = paste0("layer ", l)) 
+  })
+  mtext(multilayer, side = 3, line = -25, outer = TRUE)
+})
+
+```

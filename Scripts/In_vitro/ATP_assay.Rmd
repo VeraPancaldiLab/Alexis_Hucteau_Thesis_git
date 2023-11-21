@@ -1,0 +1,163 @@
+---
+title: "R Notebook"
+output:
+  pdf_document: default
+  html_notebook: default
+---
+
+```{r}
+library(dplyr)
+library(ggplot2)
+```
+
+
+
+```{r}
+DATA_ATP <- read.table("../../Results/In_vitro/ATP_assay.csv", sep = "\t", col.names = c("Cell_line", "IDH", "Treatment", "Technique_replicat", "Biological_replicat", "Value"))
+DATA_ATP$pheno <- paste(DATA_ATP$Cell_line, DATA_ATP$IDH, DATA_ATP$Treatment, DATA_ATP$Biological_replicat, sep = "_")
+Pulled_values <- sapply(unique(DATA_ATP$pheno), function(Pheno){
+  tmp <- dplyr::filter(DATA_ATP, pheno == Pheno)
+  mean(tmp[,"Value"])
+}) 
+Data_ATP_pulled <- DATA_ATP[DATA_ATP$Technique_replicat == 1, 1:5]
+Data_ATP_pulled$Value <- Pulled_values
+Data_ATP_pulled
+```
+
+ATP tot = PBS - Combo
+ATP mito = (Iodo - Combo) / ATP tot
+ATP glyco = 1 - ATP mito
+
+```{r}
+ATP_assay <- lapply(1:3, function(Bio_replicat){
+  dat <- dplyr::filter(Data_ATP_pulled, Biological_replicat == Bio_replicat)
+  res <- lapply(c("Molm13", "K562"), function(cell_line){
+    mIDH_cond <- lapply(c("WT", "IDH1", "IDH2"), function(mIDH){
+      condition <- dplyr::filter(dat, Cell_line == cell_line & IDH == mIDH)
+      PBS <- dplyr::filter(condition, Treatment == "PBS") %>% .$Value
+      Combo <- dplyr::filter(condition, Treatment == "Combo") %>% .$Value
+      Iodo <- dplyr::filter(condition, Treatment == "Iodo") %>% .$Value 
+      
+      ATP_tot <- PBS - Combo
+      ATP_mito <- (Iodo - Combo) / ATP_tot
+      ATP_glyco <- 1 - ATP_mito
+      list("PBS" = PBS, "Combo" = Combo, "Iodo" = Iodo, 
+           "ATP_Total" = ATP_tot, "ATP_mitochondrial" = ATP_mito, "ATP_glycolyse" = ATP_glyco)
+    })
+    names(mIDH_cond) <- c("WT", "IDH1", "IDH2")
+    mIDH_cond
+  })
+  names(res) <- c("Molm13", "K562")
+  res
+})
+names(ATP_assay) <- c("Biological_replicat_1", "Biological_replicat_2", "Biological_replicat_3")
+```
+
+```{r}
+ATP_mito <- lapply(c("Molm13", "K562"), function(Cell_line){
+  lapply(c("WT", "IDH1", "IDH2"), function(mIDH){
+    ATP_mito <- sapply(1:3, function(replicat){
+      ATP_assay[[paste0("Biological_replicat_", replicat)]][[Cell_line]][[mIDH]]$ATP_mitochondrial
+    }) %>% c %>% unname
+    data.frame("Cell_line" = rep(Cell_line, 3),
+               "mIDH" = rep(mIDH, 3),
+               "Condition" = paste(Cell_line, mIDH, sep = "_"),
+               "Biological_replicat" = 1:3,
+               "ATP_mito" = ATP_mito)
+  }) %>% data.table::rbindlist()
+}) %>% data.table::rbindlist()
+
+ATP_glyco <- lapply(c("Molm13", "K562"), function(Cell_line){
+  lapply(c("WT", "IDH1", "IDH2"), function(mIDH){
+    ATP_glyco <- sapply(1:3, function(replicat){
+      ATP_assay[[paste0("Biological_replicat_", replicat)]][[Cell_line]][[mIDH]]$ATP_glycolyse
+    }) %>% c %>% unname
+    data.frame("Cell_line" = rep(Cell_line, 3),
+               "mIDH" = rep(mIDH, 3),
+               "Condition" = paste(Cell_line, mIDH, sep = "_"),
+               "Biological_replicat" = 1:3,
+               "ATP_glyco" = ATP_glyco)
+  }) %>% data.table::rbindlist()
+}) %>% data.table::rbindlist()
+```
+
+```{r}
+ATP_mito$Scaled <- 1:nrow(ATP_mito) %>% sapply(function(row){
+  Ligne <- ATP_mito[row,]
+  Wt_cond <- dplyr::filter(ATP_mito, Biological_replicat == Ligne$Biological_replicat & Cell_line == Ligne$Cell_line & mIDH == "WT")[1,]
+  mean <- Wt_cond$ATP_mito
+  (Ligne$ATP_mito - mean)
+})
+
+ATP_glyco$Scaled <- 1:nrow(ATP_glyco) %>% sapply(function(row){
+  Ligne <- ATP_glyco[row,]
+  Wt_cond <- dplyr::filter(ATP_glyco, Biological_replicat == Ligne$Biological_replicat & Cell_line == Ligne$Cell_line & mIDH == "WT")[1,]
+  mean <- Wt_cond$ATP_glyco
+  Ligne$ATP_glyco - mean
+})
+```
+
+```{r}
+p <- ggplot(ATP_mito, aes(x = Cell_line, y = ATP_mito,fill = factor(mIDH, levels = c("WT", "IDH1", "IDH2"))))
+p + geom_boxplot(position = position_dodge(width = 0.7), width = 0.5) +
+  geom_point(aes(x = Cell_line), shape = 21, position = position_dodge(width = 0.7)) + labs(fill = c("IDH")) +
+  scale_fill_manual(values = c("#44BB44", "#4444BB", "#BB4444")) + ggtitle("ATP mitochondrial")
+
+p <- ggplot(ATP_glyco, aes(x = Cell_line, y = ATP_glyco,fill = factor(mIDH, levels = c("WT", "IDH1", "IDH2"))))
+p + geom_boxplot(position = position_dodge(width = 0.7), width = 0.5) +
+  geom_errorbar(stat = 'summary', position = position_dodge(width = 0.7), width = 0.2) +
+  geom_point(aes(x = Cell_line), shape = 21, position = position_dodge(width = 0.7)) + labs(fill = c("IDH")) +
+  scale_fill_manual(values = c("#44BB44", "#4444BB", "#BB4444")) + ggtitle("ATP glycolyse")
+```
+
+
+```{r}
+p <- ggplot(ATP_mito, aes(x = Cell_line, y = Scaled,fill = factor(mIDH, levels = c("WT", "IDH1", "IDH2"))))
+p + geom_boxplot(position = position_dodge(width = 0.7), width = 0.5) +
+  geom_point(aes(x = Cell_line), shape = 21, position = position_dodge(width = 0.7)) + labs(fill = c("IDH")) +
+  scale_fill_manual(values = c("#44BB44", "#4444BB", "#BB4444")) + ggtitle("ATP mitochondrial")
+
+p <- ggplot(ATP_glyco, aes(x = Cell_line, y = Scaled,fill = factor(mIDH, levels = c("WT", "IDH1", "IDH2"))))
+p + geom_boxplot(position = position_dodge(width = 0.7), width = 0.5) +
+  geom_point(aes(x = Cell_line), shape = 21, position = position_dodge(width = 0.7)) + labs(fill = c("IDH")) +
+  scale_fill_manual(values = c("#44BB44", "#4444BB", "#BB4444")) + ggtitle("ATP glycolyse")
+```
+
+```{r}
+ATP_total <- ATP_mito <- lapply(c("Molm13", "K562"), function(Cell_line){
+  lapply(c("WT", "IDH1", "IDH2"), function(mIDH){
+    ATP_Tot <- sapply(1:3, function(replicat){
+      ATP_assay[[paste0("Biological_replicat_", replicat)]][[Cell_line]][[mIDH]]$ATP_Total
+    }) %>% c %>% unname
+    data.frame("Cell_line" = rep(Cell_line, 3),
+               "mIDH" = rep(mIDH, 3),
+               "Condition" = paste(Cell_line, mIDH, sep = "_"),
+               "Biological_replicat" = 1:3,
+               "ATP_Tot" = ATP_Tot)
+  }) %>% data.table::rbindlist()
+}) %>% data.table::rbindlist()
+```
+
+```{r}
+ATP_total$Scaled <- 1:nrow(ATP_total) %>% sapply(function(row){
+  Ligne <- ATP_total[row,]
+  Wt_cond <- dplyr::filter(ATP_total, Biological_replicat == Ligne$Biological_replicat & Cell_line == Ligne$Cell_line & mIDH == "WT")[1,]
+  mean <- Wt_cond$ATP_Tot
+  (Ligne$ATP_Tot - mean)
+})
+```
+
+```{r}
+p <- ggplot(ATP_total, aes(x = Cell_line, y = Scaled,fill = factor(mIDH, levels = c("WT", "IDH1", "IDH2"))))
+p + geom_boxplot(position = position_dodge(width = 0.7), width = 0.5) +
+  geom_point(aes(x = Cell_line), shape = 21, position = position_dodge(width = 0.7)) + labs(fill = c("IDH")) +
+  scale_fill_manual(values = c("#44BB44", "#4444BB", "#BB4444")) + ggtitle("ATP Total Scaled")
+```
+
+```{r}
+p <- ggplot(ATP_total, aes(x = Cell_line, y = ATP_Tot,fill = factor(mIDH, levels = c("WT", "IDH1", "IDH2"))))
+p + geom_boxplot(position = position_dodge(width = 0.7), width = 0.5) +
+  geom_point(aes(x = Cell_line), shape = 21, position = position_dodge(width = 0.7)) + labs(fill = c("IDH")) +
+  scale_fill_manual(values = c("#44BB44", "#4444BB", "#BB4444")) + ggtitle("ATP Total")
+```
+

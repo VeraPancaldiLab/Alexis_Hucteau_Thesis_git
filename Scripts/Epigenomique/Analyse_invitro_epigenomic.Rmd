@@ -1,0 +1,757 @@
+---
+title: "Epigenomic In vitro analysis"
+author: Alexis Hucteau
+date: "`r Sys.Date()`"
+output:
+    html_document:
+      toc: yes
+      toc_float: yes
+      theme: united
+editor_options:
+  markdown:
+    wrap: sentence
+---
+
+# Libraries
+
+
+```{r, error=F, warning=F, echo=FALSE, include=F}
+library(dplyr)
+library(matrixTests)
+library(factoextra)
+library(Hmisc)
+library(matrixStats)
+library(RColorBrewer)
+library(pheatmap)
+library(data.table)
+library(parallel)
+library(ggpubr)
+library("grid")
+library("gridExtra")
+library(ggplotify)
+library(ChAMP)
+library(EnhancedVolcano)
+library(limma)
+library(VennDiagram)
+library(biomaRt)
+library(org.Hs.eg.db)
+library(clusterProfiler)
+library(simplifyEnrichment)
+library(DOSE)
+
+cores2use <- detectCores() - 2
+
+
+source("~/Core_scripts/core_functions.R")
+```
+
+```{r}
+Files_table <- read.table("/media/alexis/DATA/In_vitro_multi_omics/DNA_methylome/Phenotype.csv", sep = ",", header = T)
+
+list.files_meth <- list.files("/media/alexis/DATA/In_vitro_multi_omics/DNA_methylome/")
+list.files_meth <- list.files_meth[stringr::str_detect(list.files_meth, "dat")]
+list.files_meth
+```
+
+
+```{r}
+ANno_EPICv2 <- read.table("~/tmp/InfiniumMethylationEPICv2.0ProductFiles(ZIPFormat)/MethylationEPIC v2.0 Files/EPIC-8v2-0_A1.csv",
+                          sep = ",", header = T, skip = 7)
+
+Anno_EPIC_v2_4_Champ_import <- ANno_EPICv2[,c("Name", "AddressA_ID", "AddressB_ID", "Color_Channel")]
+Anno_EPIC_v2_4_Champ_import$M.index <- sapply(1:nrow(Anno_EPIC_v2_4_Champ_import), function(cpg){
+  if(Anno_EPIC_v2_4_Champ_import[cpg, "Color_Channel"] == "Red"){
+    paste("R", Anno_EPIC_v2_4_Champ_import[cpg, "AddressB_ID"], sep = "-")
+  }else if(Anno_EPIC_v2_4_Champ_import[cpg, "Color_Channel"] == "Grn"){
+    paste("G", Anno_EPIC_v2_4_Champ_import[cpg, "AddressB_ID"], sep = "-")
+  }else{
+    paste("G", Anno_EPIC_v2_4_Champ_import[cpg, "AddressA_ID"], sep = "-")
+  }
+})
+Anno_EPIC_v2_4_Champ_import$U.index <- sapply(1:nrow(Anno_EPIC_v2_4_Champ_import), function(cpg){
+  if(Anno_EPIC_v2_4_Champ_import[cpg, "Color_Channel"] == "Red"){
+    paste("R", Anno_EPIC_v2_4_Champ_import[cpg, "AddressA_ID"], sep = "-")
+  }else if(Anno_EPIC_v2_4_Champ_import[cpg, "Color_Channel"] == "Grn"){
+    paste("G", Anno_EPIC_v2_4_Champ_import[cpg, "AddressA_ID"], sep = "-")
+  }else{
+    paste("R", Anno_EPIC_v2_4_Champ_import[cpg, "AddressA_ID"], sep = "-")
+  }
+})
+
+Anno_v2 <- list(
+  "Annotation" = dplyr::filter(Anno_EPIC_v2_4_Champ_import, stringr::str_detect(Name, "cg")),
+  "ControlProbe" = dplyr::filter(Anno_EPIC_v2_4_Champ_import, !stringr::str_detect(Name, "cg"))
+)
+
+Anno_v2$ControlProbe <- dplyr::filter(ANno_EPICv2, stringr::str_detect(Name, "NEGATIVE"))
+rownames(Anno_v2$ControlProbe) <- Anno_v2$ControlProbe$IlmnID
+Anno_v2$ControlProbe <- Anno_v2$ControlProbe[c(1:3)]
+
+# Files_table$filenames <- sapply(Files_table$Sample_name, function(sample){
+#   file <- list.files_meth[stringr::str_detect(list.files_meth, sample)] %>% .[1] %>% stringr::str_remove(., "_Grn.idat.gz")
+# })
+# Files_table$Basename <- Files_table$filenames
+# Files_table$Slide <- stringr::str_split_i(Files_table$filenames, "_", 1)
+# Files_table$Array <- sapply(1:nrow(Files_table), function(sample){
+#   To_remove <- Files_table[sample, "Slide"]
+#   print(To_remove)
+#   Files_table[sample, "filenames"] %>% stringr::str_remove(., pattern = To_remove) %>% stringr::str_remove("_")
+# })
+
+# write.table(Files_table, "/media/alexis/DATA/Thesis_paper_DATA/Koichi_DNAmethylomes/GSE153347_RAW/Phenotype_Feng_Meth.csv", sep = ",", row.names = F)
+```
+
+
+```{r}
+champ.import_2 <- function (directory = getwd(), offset = 100, arraytype = "450K") 
+{
+  message("[===========================]")
+  message("[<<<< ChAMP.IMPORT START >>>>>]")
+  message("-----------------------------")
+  message("\n[ Section 1: Read PD Files Start ]")
+  if (!file.exists(directory) || is.na(file.info(directory)$isdir) || 
+    file.info(directory)$isdir == FALSE) {
+    stop("  Your 'directory' for loading does not exists, please assign a correct directory.")
+  }
+  csvfile <- list.files(directory, recursive = TRUE, pattern = "csv$", 
+    full.names = TRUE)
+  if (length(csvfile) == 0) {
+    stop(paste("  champ.import can not find any csv file in ", 
+      directory, ". Please check your folder."))
+  }
+  else if (length(csvfile) >= 2) {
+    stop(paste("  champ.import finds more than one csv file in ", 
+      directory, ". Please check your folder."))
+  }
+  message("  CSV Directory: ", csvfile)
+  message("  Find CSV Success")
+  message("  Reading CSV File")
+  skipline <- which(substr(readLines(csvfile), 1, 6) == "[Data]")
+  if (length(skipline) == 0) 
+    suppressWarnings(pd <- read.csv(csvfile, stringsAsFactor = FALSE, 
+      header = TRUE))
+  else suppressWarnings(pd <- read.csv(csvfile, skip = skipline, 
+    stringsAsFactor = FALSE, header = TRUE))
+  if ("Sentrix_Position" %in% colnames(pd)) {
+    colnames(pd)[which(colnames(pd) == "Sentrix_Position")] <- "Array"
+    message("  Replace Sentrix_Position into Array")
+  }
+  else {
+    message("  Your pd file contains NO Array(Sentrix_Position) information.")
+  }
+  if ("Sentrix_ID" %in% colnames(pd)) {
+    colnames(pd)[which(colnames(pd) == "Sentrix_ID")] <- "Slide"
+    message("  Replace Sentrix_ID into Slide")
+  }
+  else {
+    message("  Your pd file contains NO Slide(Sentrix_ID) information.")
+  }
+  sapply(c("Pool_ID", "Sample_Plate", "Sample_Well"), function(x) if (x %in% 
+    colnames(pd)) 
+    pd[, x] <- as.character(pd[, x])
+  else message("  There is NO ", x, " in your pd file."))
+  GrnPath <- unlist(sapply(paste(pd$Slide, pd$Array, "Grn.idat", 
+    sep = "_"), function(x) grep(x, list.files(directory, 
+    recursive = T, full.names = TRUE), value = TRUE)))
+  RedPath <- unlist(sapply(paste(pd$Slide, pd$Array, "Red.idat", 
+    sep = "_"), function(x) grep(x, list.files(directory, 
+    recursive = T, full.names = TRUE), value = TRUE)))
+  if (!identical(names(GrnPath), paste(pd$Slide, pd$Array, 
+    "Grn.idat", sep = "_"))) 
+    stop("  Error Match between pd file and Green Channel IDAT file.")
+  if (!identical(names(RedPath), paste(pd$Slide, pd$Array, 
+    "Red.idat", sep = "_"))) 
+    stop("  Error Match between pd file and Red Channel IDAT file.")
+  message("[ Section 1: Read PD file Done ]")
+  message("\n\n[ Section 2: Read IDAT files Start ]")
+  count <- 1
+  G.idats <- lapply(GrnPath, function(x) {
+    message("  Loading:", x, " ---- (", which(GrnPath == 
+      x), "/", length(GrnPath), ")")
+    illuminaio::readIDAT(x)
+  })
+  count <- 1
+  R.idats <- lapply(RedPath, function(x) {
+    message("  Loading:", x, " ---- (", which(RedPath == 
+      x), "/", length(RedPath), ")")
+    illuminaio::readIDAT(x)
+  })
+  names(G.idats) <- pd$Sample_Name
+  names(R.idats) <- pd$Sample_Name
+  checkunique <- unique(c(sapply(G.idats, function(x) nrow(x$Quants)), 
+    sapply(R.idats, function(x) nrow(x$Quants))))
+  if (length(checkunique) > 1) {
+    message("\n  !!! Important !!! ")
+    message("  Seems your IDAT files not from one Array, because they have different numbers of probe.")
+    message("  ChAMP wil continue analysis with only COMMON CpGs exist across all your IDAt files. However we still suggest you to check your source of data.\n")
+  }
+  CombineIDAT <<- append(G.idats, R.idats)
+  commonAddresses <- as.character(Reduce("intersect", lapply(CombineIDAT, 
+    function(x) rownames(x$Quants))))
+  message("\n  Extract Mean value for Green and Red Channel Success")
+  G.Load <- do.call(cbind, lapply(G.idats, function(x) x$Quants[commonAddresses, 
+    "Mean"]))
+  R.Load <- do.call(cbind, lapply(R.idats, function(x) x$Quants[commonAddresses, 
+    "Mean"]))
+  message("    Your Red Green Channel contains ", nrow(G.Load))
+  message("[ Section 2: Read IDAT Files Done ]")
+  message("\n\n[ Section 3: Use Annotation Start ]")
+  message("\n  Reading ", arraytype, " Annotation >>")
+  # if (arraytype == "EPIC") 
+    # data(AnnoEPIC)
+  # else data(Anno450K)
+  message("\n  Fetching NEGATIVE ControlProbe.")
+  control_probe <- rownames(Anno_v2$ControlProbe)[which(Anno_v2$ControlProbe[, 
+    2] == "NEGATIVE")]
+  message("    Totally, there are ", length(control_probe), 
+    " control probes in Annotation.")
+  control_probe <- control_probe[control_probe %in% rownames(R.Load)]
+  message("    Your data set contains ", length(control_probe), 
+    " control probes.")
+  rMu <- matrixStats::colMedians(R.Load[control_probe, ])
+  rSd <- matrixStats::colMads(R.Load[control_probe, ])
+  gMu <- matrixStats::colMedians(G.Load[control_probe, ])
+  gSd <- matrixStats::colMads(G.Load[control_probe, ])
+  rownames(G.Load) <- paste("G", rownames(G.Load), sep = "-")
+  rownames(R.Load) <- paste("R", rownames(R.Load), sep = "-")
+  IDAT <- rbind(G.Load, R.Load)
+  message("\n  Generating Meth and UnMeth Matrix")
+  message("    Extracting Meth Matrix...")
+  M.check <- Anno_v2$Annotation[, "M.index"] %in% rownames(IDAT)
+  message("      Totally there are ", nrow(Anno_v2$Annotation), 
+    " Meth probes in ", arraytype, " Annotation.")
+  message("      Your data set contains ", length(M.check[M.check]), 
+    " Meth probes.")
+  M <- IDAT[Anno_v2$Annotation[, "M.index"][M.check], ]
+  message("    Extracting UnMeth Matrix...")
+  U.check <- Anno_v2$Annotation[, "U.index"] %in% rownames(IDAT)
+  message("      Totally there are ", nrow(Anno_v2$Annotation), 
+    " UnMeth probes in ", arraytype, " Annotation.")
+  message("      Your data set contains ", length(U.check[U.check]), 
+    " UnMeth probes.")
+  U <- IDAT[Anno_v2$Annotation[, "U.index"][U.check], ]
+  
+  # if (!identical(M.check, U.check)) {
+  #   stop("  Meth Matrix and UnMeth Matrix seems not paried correctly.")
+  # }
+  # else {
+  CpG.index <- Anno_v2$Annotation[, "Name"][M.check]
+  # }
+  rownames(M) <- CpG.index
+  rownames(U) <- CpG.index
+  message("\n  Generating beta Matrix")
+  BetaValue <- M/(M + U + offset)
+  message("  Generating M Matrix")
+  MValue <- log2(M/U)
+  message("  Generating intensity Matrix")
+  intensity <- M + U
+  message("  Calculating Detect P value")
+  detP <- matrix(NA, nrow = nrow(intensity), ncol = ncol(intensity))
+  rownames(detP) <- rownames(intensity)
+  colnames(detP) <- colnames(intensity)
+  type_II <- rownames(Anno_v2$Annotation)[Anno_v2$Annotation[, "Color_Channel"] == 
+    ""]
+  type_II <- type_II[type_II %in% rownames(detP)]
+  type_I.red <- rownames(Anno_v2$Annotation)[Anno_v2$Annotation[, 
+    "Color_Channel"] == "Red"]
+  type_I.red <- type_I.red[type_I.red %in% rownames(detP)]
+  type_I.grn <- rownames(Anno_v2$Annotation)[Anno_v2$Annotation[, 
+    "Color_Channel"] == "Grn"]
+  type_I.grn <- type_I.grn[type_I.grn %in% rownames(detP)]
+  for (i in 1:ncol(detP)) {
+    detP[type_II, i] <- 1 - pnorm(intensity[type_II, i], 
+      mean = rMu[i] + gMu[i], sd = rSd[i] + gSd[i])
+    detP[type_I.red, i] <- 1 - pnorm(intensity[type_I.red, 
+      i], mean = rMu[i] * 2, sd = rSd[i] * 2)
+    detP[type_I.grn, i] <- 1 - pnorm(intensity[type_I.grn, 
+      i], mean = gMu[i] * 2, sd = gSd[i] * 2)
+  }
+  if (sum(is.na(detP))) 
+    message("    !!! There are NA values in your detP matrix.\n")
+  message("  Counting Beads")
+  NBeads <- do.call(cbind, lapply(R.idats, function(x) x$Quants[commonAddresses, 
+    "NBeads"]))
+  Mbead <- NBeads[substr(Anno_v2$Annotation$M.index[(M.check)], 
+    3, 100), ]
+  Ubead <- NBeads[substr(Anno_v2$Annotation$U.index[(U.check)], 
+    3, 100), ]
+  Ubead[Ubead < 3 | Mbead < 3] <- NA
+  rownames(Ubead) <- rownames(intensity)
+  message("[ Section 3: Use Annotation Done ]")
+  message("\n[<<<<< ChAMP.IMPORT END >>>>>>]")
+  message("[===========================]")
+  message("[You may want to process champ.filter() next.]\n")
+  return(list(beta = BetaValue, M = MValue, pd = pd, intensity = intensity, 
+    detP = detP, beadcount = Ubead, Meth = M, UnMeth = U))
+}
+```
+
+
+```{r}
+myImport <- champ.import_2("/media/alexis/DATA/In_vitro_multi_omics/DNA_methylome/", arraytype = "EPIC")
+
+myLoad <- champ.filter(beta = myImport$beta, pd = myImport$pd, arraytype = "EPIC")
+```
+
+```{r}
+champ.QC(myLoad$beta)
+```
+
+```{r}
+BMIQ <- champ.norm(beta = myLoad$beta, arraytype="EPIC", cores = 6, method = "BMIQ")
+colnames(BMIQ) <- c("Molm_wt.1", "Molm_1.1", "Molm_2.1", "Molm_wt.2", "Molm_1.2", "Molm_2.2")
+saveRDS(BMIQ, "/media/alexis/DATA/Thesis_paper_DATA/Molm13_DNAmethylomes/BMIQ.RDS")
+```
+
+```{r}
+BMIQ_test <- readRDS("/media/alexis/DATA/Thesis_paper_DATA/Molm13_DNAmethylomes/BMIQ.RDS")
+```
+
+
+## PCA
+
+```{r}
+Make_PCA_pheno <- function(data, pheno, title){
+  res.pca <- prcomp(t(data))
+  p <- fviz_pca_ind(res.pca, label="none", habillage=pheno, addEllipses=T, ellipse.level=0.95)
+  p <- p + ggtitle(paste("PCA DNA methylome ~ ", title))
+  p
+}
+```
+
+
+```{r}
+Pheno <- c("Molm_wt", "Molm_1", "Molm_2", "Molm_wt", "Molm_1", "Molm_2")
+```
+
+```{r}
+Make_PCA_pheno(BMIQ, Pheno, "Molm13")
+```
+
+```{r}
+DMP <- Differential_analysis(Pheno, BMIQ)
+
+BMIQ_dataframe <- as.data.frame(BMIQ)
+BMIQ_dataframe$cpg <- rownames(BMIQ_dataframe)
+
+rownames(DMP$`Molm_1-Molm_2`) <- sapply(DMP$`Molm_1-Molm_2`$ID, function(cpg_row){
+  BMIQ_dataframe$cpg[as.integer(cpg_row)]
+})
+
+rownames(DMP$`Molm_1-Molm_wt`) <- sapply(DMP$`Molm_1-Molm_wt`$ID, function(cpg_row){
+  BMIQ_dataframe$cpg[as.integer(cpg_row)]
+})
+
+rownames(DMP$`Molm_2-Molm_wt`) <- sapply(DMP$`Molm_2-Molm_wt`$ID, function(cpg_row){
+  BMIQ_dataframe$cpg[as.integer(cpg_row)]
+})
+  
+DMP$`Molm_1-Molm_wt`$ID <- rownames(DMP$`Molm_1-Molm_wt`)
+
+DMP$`Molm_2-Molm_wt`$ID <- rownames(DMP$`Molm_2-Molm_wt`)
+
+DMP$`Molm_1-Molm_2`$ID <- rownames(DMP$`Molm_1-Molm_2`)
+```
+
+```{r}
+DMP$`Molm_1-Molm_2` %>%
+  write.table("~/GitHub/Thesis_paper/Results/Epigenomic/DMP_Molm13.tsv", sep = "\t", col.names = NA)
+```
+
+```{r}
+volcano_IDH1_IDHwt <- EnhancedVolcano(toptable = DMP$`Molm_1-Molm_wt`, lab = rownames(DMP$`Molm_1-Molm_wt`),
+                x = "logFC", y = "P.Value",
+                FCcutoff = 0.1, pCutoff = 0.05, xlim = c(-1, 1), ylim = c(0, 10),
+                title = "IDH1 vs IDHwt methylation", subtitle = NA,
+                subtitleLabSize = 0)
+volcano_IDH1_IDHwt
+
+volcano_IDH2_IDHwt <- EnhancedVolcano(toptable = DMP$`Molm_2-Molm_wt`, lab = rownames(DMP$`Molm_2-Molm_wt`),
+                x = "logFC", y = "P.Value",
+                FCcutoff = 0.1, pCutoff = 0.05, xlim = c(-1, 1), ylim = c(0, 10),
+                title = "IDH1 vs IDH2 methylation", subtitle = NA,
+                subtitleLabSize = 0)
+volcano_IDH2_IDHwt
+
+volcano_IDH1_IDH2 <- EnhancedVolcano(toptable = DMP$`Molm_1-Molm_2`, lab = rownames(DMP$`Molm_1-Molm_2`),
+                x = "logFC", y = "P.Value",
+                FCcutoff = 0.1, pCutoff = 0.05, xlim = c(-1, 1), ylim = c(0, 10),
+                title = "IDH1 vs IDH2 methylation", subtitle = NA,
+                subtitleLabSize = 0)
+volcano_IDH1_IDH2
+```
+
+# Enhancer part
+
+## Making 3D network
+
+```{r}
+prepare_pchic <- function(cell_lines = NULL, minimum_interaction = 5, pchic = NULL){
+  if (is.null(pchic)){
+    load("/media/alexis/DATA/pchic.RData")
+  }
+  if (is.null(cell_lines)){
+    cell_lines = c("Mon", "Mac0", "Mac1", "Mac2", "Neu", "MK", "EP", "Ery", "FoeT", "nCD4", "tCD4", "aCD4", "naCD4", "nCD8", "tCD8", "nB", "tB")
+  }
+  pchic <- data.frame(pchic[rowSums(pchic[,cell_lines] >= minimum_interaction) >= 1,c(1,2,3,6,7,8)]) %>% na.omit(.)
+  pchic$baitChr <- paste0("chr", pchic$baitChr)
+  pchic$oeChr <- paste0("chr", pchic$oeChr)
+  return(pchic)
+}
+```
+
+```{r}
+Myelo_cell_lines <- c("Mon", "Mac1", "Mac0", "Mac2", "MK", "Ery", "EP")
+
+pchic <- prepare_pchic(cell_lines = Myelo_cell_lines)
+ps <- chaser::make_chromnet(pchic)
+# baits <- chaser::export(ps, 'baits')
+# pchic_chaser <- chaser::subset_chromnet(ps, method = "nodes", nodes1 = baits)
+```
+
+
+
+```{r}
+Anno_EPIC <- read.table("/media/alexis/DATA/Illumina_manifest/infinium-methylationepic.tsv", sep = "\t", header = T)
+
+Anno_EPIC_2 <- ANno_EPICv2[c("Name", "MAPINFO", "Strand_FR", "CHR")]
+colnames(Anno_EPIC_2)[3] <- "Strand"
+Anno_EPIC_2 <- dplyr::filter(Anno_EPIC_2, stringr::str_detect(Name, "cg") & CHR != "chr0")
+Anno_EPIC_2 <- unique(Anno_EPIC_2)
+
+pvalue_function <- function(a){
+  if(length(a)>1){
+    poolr::fisher(na.omit(a))$p
+  }else{
+    a
+  }
+}
+```
+
+## Functions
+
+```{r}
+logFC_function <- function(a){
+  if(length(a)>1){
+    median(na.omit(a))
+  }else{
+    a
+  }
+}
+
+Localised_DMP <- function(DMPs, Annotation = Anno_EPIC_2){
+  dmp_annoted <- merge(DMPs, Annotation, by.x = "ID", by.y = "Name")
+  colnames(dmp_annoted) <- c("ID", "logFC", "AveExpr", "t", "P.Value", "adj.P.Val", "B", "start", "strand", "chrom")
+  dmp_annoted$end <- dmp_annoted$start +1
+  dmp_annoted <- dmp_annoted[c("chrom", "start", "end", "logFC", "P.Value")]
+  dmp_annoted <<- dmp_annoted[c("chrom", "start", "end", "logFC", "P.Value")]
+
+  logFCchaser <- chaser::load_features(ps, dmp_annoted[c("chrom", "start", "end", "logFC")], auxfun = "logFC_function", type = 'features_table', featnames = "logFC", missingv = 0)
+  PVALUE_chaser <- chaser::load_features(ps, dmp_annoted[c("chrom", "start", "end", "P.Value")], auxfun = "pvalue_function", type = 'features_table', featnames = "P.Value", missingv = 1)
+  logFCchaser$features<- data.frame("Fragment" = rownames(logFCchaser$features),
+                                    "logFC" = unname(logFCchaser$features),
+                                    "P.Value" = unname(PVALUE_chaser$features)
+  )
+  logFCchaser
+}
+```
+
+## Localised DMP
+
+```{r}
+Localised_DMPs <- mclapply(names(DMP), function(dmp){
+  Localised_DMP(DMP[[dmp]])
+}, mc.cores = cores2use)
+names(Localised_DMPs) <- names(DMP)
+```
+
+```{r}
+load("/media/alexis/DATA/pchic.RData")
+
+pchic$NodeIn <- paste0("chr", pchic$baitChr, ":", pchic$baitStart, "-", pchic$baitEnd)
+pchic$NodeOut <- paste0("chr", pchic$oeChr, ":", pchic$oeStart, "-", pchic$oeEnd)
+
+pchic <- data.frame(pchic[rowSums(pchic[,Myelo_cell_lines] >= 5) >= 1,c(31, 5, 10, 32)]) %>% na.omit(.)
+pchic$oeName_changed <- sapply(1:nrow(pchic), function(interaction){
+  if(pchic[interaction, "oeName"] == "."){
+    pchic[interaction, "NodeOut"]
+  }else{
+    pchic[interaction, "oeName"]
+  }
+})
+pchic_anno <- pchic[c(1:2)] %>% unique()
+```
+
+```{r}
+Features <- lapply(names(Localised_DMPs), function(comp){
+  feats <- Localised_DMPs[[comp]]$features %>%
+    merge(pchic_anno, by.x = "Fragment", by.y = "NodeIn", all.x = T, all.y = T) 
+  feats$chrom <- feats$Fragment %>% 
+    stringr::str_split(pattern = ":") %>% lapply(function(frag){frag[[1]]}) %>% as.character()
+  feats %>%
+    write.table(paste0("~/GitHub/Thesis_paper/Results/Epigenomic/", comp, "_Molm13_pchic_features.tsv"), 
+                sep = "\t", row.names = F, quote = F)
+  feats
+})
+names(Features) <- names(Localised_DMPs)
+```
+
+## Finding direct indirect affected genes 
+
+### Function
+
+```{r}
+List_gene_affected_directly_or_indirectly_by_methylation <- function(features, neg = F){
+  if(neg){
+    fragments_DMP <- dplyr::filter(features, P.Value < 0.01 & logFC < -0.7) %>% .$Fragment %>% unique
+  }else{
+    fragments_DMP <- dplyr::filter(features, P.Value < 0.01 & logFC > 0.7) %>% .$Fragment %>% unique
+  }
+  direct_genes <- dplyr::filter(pchic, NodeIn %in% fragments_DMP) %>% .$baitName %>% stringr::str_split(";") %>% unlist() %>% unique
+  indirect_genes <- dplyr::filter(pchic, NodeOut %in% fragments_DMP) %>% .$baitName %>% unlist() %>%  stringr::str_split(";") %>% unlist() %>% unique
+  list("Direct" = direct_genes,
+       "Indirect" = indirect_genes)
+}
+```
+
+
+```{r}
+Direct_indirect_methylation <- lapply(names(Features), function(comp){
+  res <- List_gene_affected_directly_or_indirectly_by_methylation(Features[[comp]])
+  res$Direct %>%
+    write.table(paste0("~/GitHub/Thesis_paper/Results/Epigenomic/", comp, "_Molm13_localised_directly_affected.tsv"), 
+              sep = "\t" , col.names = NA)
+  res$Indirect %>%
+    write.table(paste0("~/GitHub/Thesis_paper/Results/Epigenomic/", comp, "_Molm13_localised_indirectly_affected.tsv"), 
+              sep = "\t" , col.names = NA)
+  res
+})
+names(Direct_indirect_methylation) <- names(Features)
+Direct_indirect_methylation$`Molm_2-Molm_1` <- List_gene_affected_directly_or_indirectly_by_methylation(Features$`Molm_1-Molm_2`, neg = T)
+Direct_indirect_methylation$`Molm_2-Molm_1`$Direct %>%
+    write.table(paste0("~/GitHub/Thesis_paper/Results/Epigenomic/Molm_2-Molm_1_Molm13_localised_directly_affected.tsv"), 
+              sep = "\t" , col.names = NA)
+Direct_indirect_methylation$`Molm_2-Molm_1`$Indirect %>%
+    write.table(paste0("~/GitHub/Thesis_paper/Results/Epigenomic/Molm_2-Molm_1_Molm13_localised_indirectly_affected.tsv"), 
+              sep = "\t" , col.names = NA)
+```
+
+
+```{r}
+GO_KEGG_WP_MKEGG <- function(List_direct, List_indirect){
+  list_enrichments <- list()
+  list_enrichments[["GO_direct"]] <- enrichGO(List_direct, OrgDb = org.Hs.eg.db, universe = GO_direct_universe, keyType = "SYMBOL", pvalueCutoff = 0.05) 
+  list_enrichments[["GO_indirect"]] <- enrichGO(List_indirect, OrgDb = org.Hs.eg.db, universe = GO_direct_universe, keyType = "SYMBOL", pvalueCutoff = 0.05)
+  
+  entrez_id_direct <- dplyr::filter(genes, hgnc_symbol %in% List_direct) %>%
+    .$entrezgene_id %>% unique
+  entrez_id_indirect <- dplyr::filter(genes, hgnc_symbol %in% List_indirect) %>%
+    .$entrezgene_id %>% unique
+  universe_entrez <- dplyr::filter(genes, hgnc_symbol %in% GO_direct_universe) %>%
+    .$entrezgene_id %>% as.character %>% unique 
+  
+  list_enrichments[["KEGG_direct"]] <- enrichKEGG(entrez_id_direct, organism = "hsa", 
+                                                  keyType = 'ncbi-geneid', pvalueCutoff = 0.05, 
+                                                  pAdjustMethod = "none", universe = universe_entrez) 
+  list_enrichments[["KEGG_indirect"]] <- enrichKEGG(entrez_id_indirect, organism = "hsa", 
+                                                    keyType = 'ncbi-geneid', pvalueCutoff = 0.05, 
+                                                    pAdjustMethod = "none", universe = universe_entrez)
+  
+  
+  res <- lapply(names(list_enrichments), function(onto){
+    list_enrichments[[onto]]@result$qvalue <- list_enrichments[[onto]]@result$pvalue
+    list_enrichments[[onto]]@result$p.adjust <- list_enrichments[[onto]]@result$pvalue
+    list_enrichments[[onto]]
+  })
+  
+  names(res) <- names(list_enrichments)
+  
+  return(res)
+}
+
+Make_enrich_plot <- function(enrichment, path){
+  n_enrich <- nrow(dplyr::filter(enrichment@result, pvalue < 0.05))
+  if(n_enrich == 0){
+    return(NULL)
+  }
+  if(enrichment@keytype !=  "SYMBOL"){
+    enrichment <- enrichment %>%
+      setReadable(OrgDb = org.Hs.eg.db, keyType = "ENTREZID")
+  }
+  height_plot <- 200 + (n_enrich *120)
+  p <- dotplot(enrichment, showCategory = n_enrich)
+  cplot <- cnetplot(enrichment, showCategory = n_enrich)
+  ggsave(paste0(path, "_dotplot.png"), p, bg = "white", width = 3800, height = height_plot, units = "px", limitsize = FALSE)
+  ggsave(paste0(path, "_cnetplot.png"), cplot, bg = "white", width = 3800, height = 3800, units = "px", limitsize = FALSE)
+  p
+  cplot
+  list(p, cplot)
+}
+```
+
+
+## Annotations Entrez
+
+```{r}
+mart <- biomaRt::useMart(biomart = "ENSEMBL_MART_ENSEMBL",
+                         dataset = "hsapiens_gene_ensembl")
+
+baitnames <- pchic$baitName %>% stringr::str_split(pattern = ";") %>% unlist %>% unique
+
+genes <- getBM(filters = "hgnc_symbol",
+               attributes = c("ensembl_gene_id","entrezgene_id", "hgnc_symbol"),
+               values = baitnames,
+               mart = mart)
+
+GO_direct_universe <- sapply(names(Features), function(comp){
+  Features[[comp]]$baitName %>% stringr::str_split(pattern = ";") %>% unlist %>% unique
+}) %>% unlist() %>% as.vector() %>% unique %>% na.omit
+```
+
+
+```{r}
+Enrichments <- lapply(names(Direct_indirect_methylation), function(comp){
+  GO_KEGG_WP_MKEGG(Direct_indirect_methylation[[comp]]$Direct, Direct_indirect_methylation[[comp]]$Indirect)
+})
+names(Enrichments) <- names(Direct_indirect_methylation)
+```
+
+```{r}
+mclapply(names(Enrichments), function(comp){
+  mclapply(names(Enrichments[[comp]]), function(enrichment){
+    Make_enrich_plot(Enrichments[[comp]][[enrichment]], paste0("~/GitHub/Thesis_paper/Results/Epigenomic/", comp, "_Molm13_", enrichment))
+  }, mc.cores = 8)
+}, mc.cores = 3)
+```
+
+
+# Compare Results
+
+## Function
+
+```{r}
+Compare_Enrichments <- function(List_DEGs, indir = T){
+  if(indir == F){
+    list_direct_ID <- lapply(names(List_DEGs), function(Comparison){
+      direct <- List_DEGs[[Comparison]]
+      data.table(Entrez = direct, group = Comparison)
+    })
+  }else{
+    list_direct_ID <- lapply(names(List_DEGs), function(Comparison){
+      direct <- List_DEGs[[Comparison]]$Direct 
+      indirect <- List_DEGs[[Comparison]]$Indirect 
+      ids <- c(direct, indirect) %>% unique
+      data.table(Entrez = ids, group = Comparison)
+    })
+  }
+  names(list_direct_ID) <- names(List_DEGs)
+  mydf <- data.table::rbindlist(list_direct_ID)
+  go_cluster <- compareCluster(Entrez~group, data = mydf, fun = "enrichGO", OrgDb = org.Hs.eg.db, 
+                 keyType = "SYMBOL", pvalueCutoff = 0.05, pAdjustMethod = "none", qvalueCutoff = 1)
+  mydf_entrez <- merge(mydf, genes, by.x = "Entrez", by.y = "hgnc_symbol")
+  kegg_cluster <- compareCluster(entrezgene_id~group, data = mydf_entrez, fun = "enrichKEGG", 
+                                 organism = "hsa", qvalueCutoff = 1,
+                                 keyType = 'ncbi-geneid', pvalueCutoff = 0.05, 
+                                 pAdjustMethod = "none") 
+  
+  List("GO" = go_cluster,
+       "KEGG" = kegg_cluster)
+}
+
+Auto_set_readable <- function(Results_cluster_KEGG_WP){
+  setReadable(Results_cluster_KEGG_WP, OrgDb = org.Hs.eg.db, keyType = "ENTREZID")
+}
+```
+
+## Comparing results 
+
+```{r}
+List_IDs <- list("IDH1_vs_IDHwt" = Direct_indirect_methylation$`Molm_1-Molm_wt`, 
+                 "IDH2_vs_IDHwt" = Direct_indirect_methylation$`Molm_2-Molm_wt`, 
+                 "IDH1_vs_IDH2" = Direct_indirect_methylation$`Molm_1-Molm_2`,
+                 "IDH2_vs_IDH1" = Direct_indirect_methylation$`Molm_2-Molm_1`
+                 )
+```
+
+
+```{r}
+Cluster_comparison <- Compare_Enrichments(List_IDs)
+```
+
+```{r}
+lapply(names(Cluster_comparison), function(ont){
+  n <- 10
+  p <- dotplot(Cluster_comparison[[ont]], showCategory = n) 
+  height_param <- n*6*120 +200
+  ggsave(paste0("~/GitHub/Thesis_paper/Results/Epigenomic/Molm_13_comparisons_", ont, "_dotplot.png"), 
+         p, bg = "white", width = 5700, 
+         height = height_param, units = "px", limitsize = FALSE)
+  if(ont == "KEGG"){
+    pcnet <- Auto_set_readable(Cluster_comparison[[ont]]) %>% cnetplot(showCategory = n) 
+  }else{
+    pcnet <- cnetplot(Cluster_comparison[[ont]], showCategory = n) 
+  }
+  height_param <- n*4*120 +200
+  ggsave(paste0("~/GitHub/Thesis_paper/Results/Epigenomic/Molm_13_comparisons_", ont, "_cnetplot.png"), 
+         pcnet, bg = "white", width = 5700, 
+         height = 5700, units = "px", limitsize = FALSE)
+  p
+  pcnet
+})
+
+```
+
+# Network analysis
+
+## Functions
+
+```{r}
+From_DMP_to_neighborhood_network <- function(DMPs, Network, neg = F){
+  if(neg){
+    sig_DMP <- dplyr::filter(DMPs, logFC < -0.7 & P.Value < 0.05) %>% .$Fragment
+  }else{
+    sig_DMP <- dplyr::filter(DMPs, logFC > 0.7 & P.Value < 0.05) %>% .$Fragment
+  }
+  dplyr::filter(pchic, NodeIn %in% sig_DMP | NodeOut %in% sig_DMP)
+}
+
+Mergeing_networks <- function(Network_A, Network_B, Main_Network, Network_C = NULL, Network_D=NULL){
+  nodes_network_A <- paste(Network_A$NodeIn, Network_A$NodeOut, sep = "_") %>% unique
+  print(length(nodes_network_A))
+  nodes_network_B <- paste(Network_B$NodeIn, Network_B$NodeOut, sep = "_") %>% unique
+  print(length(nodes_network_B))
+  if(!is.null(Network_C)){
+    nodes_network_C <- paste(Network_C$NodeIn, Network_C$NodeOut, sep = "_") %>% unique
+    print(length(nodes_network_C))
+    nodes_network_B <- intersect(nodes_network_B, nodes_network_C)
+    print(length(nodes_network_B))
+  }
+  if(!is.null(Network_D)){
+    nodes_network_D <- paste(Network_D$NodeIn, Network_D$NodeOut, sep = "_") %>% unique
+    print(length(nodes_network_D))
+    nodes_network_B <- intersect(nodes_network_B, nodes_network_D)
+    print(length(nodes_network_B))
+  }
+  common_nodes <- intersect(nodes_network_A, nodes_network_B)
+  print(length(common_nodes))
+  Main_Network$edge <- paste(Main_Network$NodeIn, Main_Network$NodeOut, sep = "_")
+  
+  dplyr::filter(Main_Network, edge %in% common_nodes)
+}
+```
+
+## Making networks
+
+```{r, eval = F}
+Networks <- list(
+  "IDH1" =  From_DMP_to_neighborhood_network(Features$`Molm_1-Molm_wt`, pchic),
+  "IDH2" =  From_DMP_to_neighborhood_network(Features$`Molm_2-Molm_wt`, pchic),
+  "IDH1_vs_IDH2" =  From_DMP_to_neighborhood_network(Features$`Molm_1-Molm_2`, pchic),
+  "IDH2_vs_IDH1" =  From_DMP_to_neighborhood_network(Features$`Molm_1-Molm_2`, pchic, T)
+)
+
+lapply(names(Networks), function(comp){
+  Networks[[comp]] %>% write.table(paste0("~/GitHub/Thesis_paper/Results/Epigenomic/Networks/", comp, "_Molm13_network.tsv"), 
+                                   sep = "\t", col.names = NA, quote = F)
+})
+```

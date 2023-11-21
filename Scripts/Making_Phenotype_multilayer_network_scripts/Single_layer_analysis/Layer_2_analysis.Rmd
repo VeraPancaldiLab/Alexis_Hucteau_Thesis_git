@@ -1,0 +1,55 @@
+---
+title: "Analyse Layers"
+subtitle: "Layer 2"
+author: Alexis Hucteau
+date: "`r Sys.Date()`"
+output:
+    html_document:
+      toc: yes
+      toc_float: yes
+      theme: united
+editor_options:
+  markdown:
+    wrap: sentence
+---
+
+# Libraries
+
+```{r, error=F, warning=F, echo=FALSE, include=F}
+rm(DmIALite, DOLite, DOLiteTerm, HsIALite, MmIALite, RnIALite)
+
+library(dplyr)
+```
+
+# Loading Data
+
+## Cluster NR
+
+```{r}
+Cluster_NR_layer_2 <- read.table("../../../Results/Multi_layer_pheno_like/Cluster_NR/Layer_2/Cluster_NR_Common_regulonlaml_GRN_network.tsv", sep = "\t", header = T)
+```
+
+## Cluster R
+
+```{r}
+Cluster_R_layer_2 <- read.table("../../../Results/Multi_layer_pheno_like/Cluster_R/Layer_2/Cluster_R_Common_regulonlaml_GRN_network.tsv", sep = "\t", header = T)
+```
+
+## Cluster NR
+
+```{r}
+mIDH1_layer_2 <- read.table("../../../Results/Multi_layer_pheno_like/mIDH1/Layer_2/mIDH1_Common_regulonlaml_GRN_network.tsv", sep = "\t", header = T)
+```
+
+## Cluster NR
+
+```{r}
+mIDH2_layer_2 <- read.table("../../../Results/Multi_layer_pheno_like/mIDH2/Layer_2/mIDH2_Common_regulonlaml_GRN_network.tsv", sep = "\t", header = T)
+```
+
+
+```{r}
+save.image("/media/alexis/DATA/Session/R_session/Thesis_paper_Rsessions/Multi_layer_phenolike/Analysing_Multilayer.RData")
+system("bash ~/shutdown_o_clock.sh")
+```
+

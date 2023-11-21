@@ -1,0 +1,438 @@
+---
+title: "Making Phenotype multilayer network"
+subtitle: "Layer 2"
+author: Alexis Hucteau
+date: "`r Sys.Date()`"
+output:
+    html_document:
+      toc: yes
+      toc_float: yes
+      theme: united
+editor_options:
+  markdown:
+    wrap: sentence
+---
+
+# Libraries
+
+```{r, error=F, warning=F, echo=FALSE, include=F}
+rm(DmIALite, DOLite, DOLiteTerm, HsIALite, MmIALite, RnIALite)
+
+library(dplyr)
+```
+
+# Loading DATA
+
+## Loading Clinical data
+
+```{r}
+Clinical_patient_data <- read.table("../../Datasets/Clinical_Koichi_data.tsv", sep = "\t", header = T)
+```
+
+## Loading networks
+
+```{r}
+Dorothea_D_network <- read.table("../../Datasets/Dorothea_D.tsv", sep = "\t", header = T)
+
+ARACNE_GRN_network <- read.table("../../Datasets/Data_4_ARACNe/Koichi_network/network.txt", sep = "\t", header = T)
+```
+
+## Loading Gene expression
+
+```{r}
+RNAseq_Koichi <- read.csv("~/GitHub/Koichi_gene_expression_analyses_git/Koichi_gene_expression_analyses/DATA/RNAseq_parsed.csv", row.names = 1, header = T, check.names = F)
+```
+
+
+```{r}
+RNAseq4Aracn_TPM_Baseline <- read.table("../../Datasets/Data_4_ARACNe/RNAseq4Aracn_TPM_Baseline.tsv", sep = "\t", header = T, row.names = 1, check.names = F)
+
+Phenos <- colnames(RNAseq4Aracn_TPM_Baseline) %>% lapply(function(sample){
+  fil <- Clinical_patient_data %>%
+    dplyr::filter(Baseline_RNAseq_data == sample) 
+  data.frame("IDH" = fil$IDH_isoform, "Cluster" = fil$Cluster, sample = fil$Baseline_RNAseq_data)
+}) %>% data.table::rbindlist()
+
+Samples_Cluster_R <- Phenos %>% dplyr::filter(Cluster == "Cluster_R") %>% .$sample
+Samples_Cluster_NR <- Phenos %>% dplyr::filter(Cluster == "Cluster_NR") %>% .$sample
+Samples_mIDH1 <- Phenos %>% dplyr::filter(IDH == "IDH1") %>% .$sample
+Samples_mIDH2 <- Phenos %>% dplyr::filter(IDH == "IDH2") %>% .$sample
+
+RNAseq4Aracn_TPM_Cluster_R <- RNAseq4Aracn_TPM_Baseline[,Samples_Cluster_R]
+RNAseq4Aracn_TPM_Cluster_NR <- RNAseq4Aracn_TPM_Baseline[,Samples_Cluster_NR]
+RNAseq4Aracn_TPM_mIDH1 <- RNAseq4Aracn_TPM_Baseline[,Samples_mIDH1]
+RNAseq4Aracn_TPM_mIDH2  <- RNAseq4Aracn_TPM_Baseline[,Samples_mIDH2]
+
+RNAseq4Aracn_TPM_Cluster_R %>% write.table("../../Datasets/Data_4_ARACNe/RNAseq4Aracn_TPM_Cluster_R.tsv", row.names = T, quote = F, sep = "\t", col.names = NA)
+RNAseq4Aracn_TPM_Cluster_NR %>% write.table("../../Datasets/Data_4_ARACNe/RNAseq4Aracn_TPM_Cluster_NR.tsv", row.names = T, quote = F, sep = "\t", col.names = NA)
+RNAseq4Aracn_TPM_mIDH1 %>% write.table("../../Datasets/Data_4_ARACNe/RNAseq4Aracn_TPM_mIDH1.tsv", row.names = T, quote = F, sep = "\t", col.names = NA)
+RNAseq4Aracn_TPM_mIDH2 %>% write.table("../../Datasets/Data_4_ARACNe/RNAseq4Aracn_TPM_mIDH2.tsv", row.names = T, quote = F, sep = "\t", col.names = NA)
+```
+
+## Loading TF activities 
+
+```{r}
+IDH_Koichi_TF_actitity_ARACNe <- read.table("../../Results/DGEA/TF_activities_tables/Koichi_TF_activities_ARACNe.tsv", 
+                                            sep = "\t", check.names = F)
+IDH_Koichi_TF_actitity_dorothea_D <- read.table("../../Results/DGEA/TF_activities_tables/Koichi_TF_activities_dorothea_D.tsv", 
+                                                sep = "\t", check.names = F)
+```
+
+# Combining DATA
+
+## Combining networks
+
+```{r}
+Dorothea_D_network <- Dorothea_D_network[,c("tf", "target")]
+
+ARACNE_GRN_network <- ARACNE_GRN_network[,c("Regulator", "Target")]
+colnames(ARACNE_GRN_network)  <- c("tf", "target")
+
+Combined_GRN_network <- rbind(Dorothea_D_network, ARACNE_GRN_network)
+Combined_GRN_network <- Combined_GRN_network[!duplicated(Combined_GRN_network),]
+```
+
+## Combining TF activities
+
+### Filter Samples classes
+
+```{r}
+Phenos <- colnames(IDH_Koichi_TF_actitity_ARACNe) %>% lapply(function(sample){
+  fil <- Clinical_patient_data %>%
+    dplyr::filter(Baseline_RNAseq_data == sample) 
+  data.frame("IDH" = fil$IDH_isoform, "Cluster" = fil$Cluster, sample = fil$Baseline_RNAseq_data)
+}) %>% data.table::rbindlist()
+
+Samples_Cluster_R <- Phenos %>% dplyr::filter(Cluster == "Cluster_R") %>% .$sample
+Samples_Cluster_NR <- Phenos %>% dplyr::filter(Cluster == "Cluster_NR") %>% .$sample
+Samples_mIDH1 <- Phenos %>% dplyr::filter(IDH == "IDH1") %>% .$sample
+Samples_mIDH2 <- Phenos %>% dplyr::filter(IDH == "IDH2") %>% .$sample
+
+IDH_Koichi_TF_actitity_ARACNe_Cluster_R <- IDH_Koichi_TF_actitity_ARACNe[,Samples_Cluster_R]
+IDH_Koichi_TF_actitity_ARACNe_Cluster_NR <- IDH_Koichi_TF_actitity_ARACNe[,Samples_Cluster_NR]
+IDH_Koichi_TF_actitity_ARACNe_mIDH1 <- IDH_Koichi_TF_actitity_ARACNe[,Samples_mIDH1]
+IDH_Koichi_TF_actitity_ARACNe_mIDH2  <- IDH_Koichi_TF_actitity_ARACNe[,Samples_mIDH2]
+```
+
+### Calculate mean TF activity
+
+#### Cluster R
+
+```{r}
+IDH_Koichi_TF_actitity_ARACNe_Cluster_R$mean <- rowMeans(IDH_Koichi_TF_actitity_ARACNe_Cluster_R) 
+IDH_Koichi_TF_actitity_ARACNe_Cluster_R$sd <- matrixStats::rowVars(as.matrix(IDH_Koichi_TF_actitity_ARACNe_Cluster_R))
+IDH_Koichi_TF_actitity_ARACNe_Cluster_R$zscore <- IDH_Koichi_TF_actitity_ARACNe_Cluster_R$mean / IDH_Koichi_TF_actitity_ARACNe_Cluster_R$sd
+```
+
+#### Cluster NR
+
+```{r}
+IDH_Koichi_TF_actitity_ARACNe_Cluster_NR$mean <- rowMeans(IDH_Koichi_TF_actitity_ARACNe_Cluster_NR) 
+IDH_Koichi_TF_actitity_ARACNe_Cluster_NR$sd <- matrixStats::rowVars(as.matrix(IDH_Koichi_TF_actitity_ARACNe_Cluster_NR))
+IDH_Koichi_TF_actitity_ARACNe_Cluster_NR$zscore <- IDH_Koichi_TF_actitity_ARACNe_Cluster_NR$mean / IDH_Koichi_TF_actitity_ARACNe_Cluster_NR$sd
+```
+
+#### mIDH1
+
+```{r}
+IDH_Koichi_TF_actitity_ARACNe_mIDH1$mean <- rowMeans(IDH_Koichi_TF_actitity_ARACNe_mIDH1) 
+IDH_Koichi_TF_actitity_ARACNe_mIDH1$sd <- matrixStats::rowVars(as.matrix(IDH_Koichi_TF_actitity_ARACNe_mIDH1))
+IDH_Koichi_TF_actitity_ARACNe_mIDH1$zscore <- IDH_Koichi_TF_actitity_ARACNe_mIDH1$mean / IDH_Koichi_TF_actitity_ARACNe_mIDH1$sd
+```
+
+#### mIDH2
+
+```{r}
+IDH_Koichi_TF_actitity_ARACNe_mIDH2$mean <- rowMeans(IDH_Koichi_TF_actitity_ARACNe_mIDH2) 
+IDH_Koichi_TF_actitity_ARACNe_mIDH2$sd <- matrixStats::rowVars(as.matrix(IDH_Koichi_TF_actitity_ARACNe_mIDH2))
+IDH_Koichi_TF_actitity_ARACNe_mIDH2$zscore <- IDH_Koichi_TF_actitity_ARACNe_mIDH2$mean / IDH_Koichi_TF_actitity_ARACNe_mIDH2$sd
+```
+
+### Calculate Gene expression Zscores
+
+#### Filter Sampels classes
+
+```{r}
+Phenos <- colnames(RNAseq_Koichi) %>% lapply(function(sample){
+  fil <- Clinical_patient_data %>%
+    dplyr::filter(Baseline_RNAseq_data == sample) 
+  data.frame("IDH" = fil$IDH_isoform, "Cluster" = fil$Cluster, sample = fil$Baseline_RNAseq_data)
+}) %>% data.table::rbindlist()
+
+Samples_Cluster_R <- Phenos %>% dplyr::filter(Cluster == "Cluster_R") %>% .$sample
+Samples_Cluster_NR <- Phenos %>% dplyr::filter(Cluster == "Cluster_NR") %>% .$sample
+Samples_mIDH1 <- Phenos %>% dplyr::filter(IDH == "IDH1") %>% .$sample
+Samples_mIDH2 <- Phenos %>% dplyr::filter(IDH == "IDH2") %>% .$sample
+
+IDH_Koichi_Gene_expression_Cluster_R <- RNAseq_Koichi[,Samples_Cluster_R]
+IDH_Koichi_Gene_expression_Cluster_NR <- RNAseq_Koichi[,Samples_Cluster_NR]
+IDH_Koichi_Gene_expression_mIDH1 <- RNAseq_Koichi[,Samples_mIDH1]
+IDH_Koichi_Gene_expression_mIDH2  <- RNAseq_Koichi[,Samples_mIDH2]
+```
+
+### Calculate zscore gene expression
+
+#### Cluster R
+
+```{r}
+IDH_Koichi_Gene_expression_Cluster_R$mean <- rowMeans(IDH_Koichi_Gene_expression_Cluster_R) 
+IDH_Koichi_Gene_expression_Cluster_R$sd <- matrixStats::rowVars(as.matrix(IDH_Koichi_Gene_expression_Cluster_R))
+IDH_Koichi_Gene_expression_Cluster_R$zscore <- IDH_Koichi_Gene_expression_Cluster_R$mean / IDH_Koichi_Gene_expression_Cluster_R$sd
+```
+
+#### Cluster NR
+
+```{r}
+IDH_Koichi_Gene_expression_Cluster_NR$mean <- rowMeans(IDH_Koichi_Gene_expression_Cluster_NR) 
+IDH_Koichi_Gene_expression_Cluster_NR$sd <- matrixStats::rowVars(as.matrix(IDH_Koichi_Gene_expression_Cluster_NR))
+IDH_Koichi_Gene_expression_Cluster_NR$zscore <- IDH_Koichi_Gene_expression_Cluster_NR$mean / IDH_Koichi_Gene_expression_Cluster_NR$sd
+```
+
+#### mIDH1
+
+```{r}
+IDH_Koichi_Gene_expression_mIDH1$mean <- rowMeans(IDH_Koichi_Gene_expression_mIDH1) 
+IDH_Koichi_Gene_expression_mIDH1$sd <- matrixStats::rowVars(as.matrix(IDH_Koichi_Gene_expression_mIDH1))
+IDH_Koichi_Gene_expression_mIDH1$zscore <- IDH_Koichi_Gene_expression_mIDH1$mean / IDH_Koichi_Gene_expression_mIDH1$sd
+```
+
+#### mIDH2
+
+```{r}
+IDH_Koichi_Gene_expression_mIDH2$mean <- rowMeans(IDH_Koichi_Gene_expression_mIDH2) 
+IDH_Koichi_Gene_expression_mIDH2$sd <- matrixStats::rowVars(as.matrix(IDH_Koichi_Gene_expression_mIDH2))
+IDH_Koichi_Gene_expression_mIDH2$zscore <- IDH_Koichi_Gene_expression_mIDH2$mean / IDH_Koichi_Gene_expression_mIDH2$sd
+```
+
+# Calculate Egdes weight Common GRN
+
+## Functions
+
+```{r}
+Return_zscore_value <- function(Feature_TF, Feature_Gene, Node){
+  if(Node %in% rownames(Feature_TF)){
+    Feature_TF[Node, "zscore"]
+  }else if(Node %in% rownames(Feature_Gene)){
+    Feature_Gene[Node, "zscore"]
+  }
+}
+
+Return_value <- function(Feature_TF, Feature_Gene, Node){
+  if(Node %in% rownames(Feature_TF)){
+    select(Feature_TF[Node, ], -c("mean", "zscore", "sd")) %>% unlist
+  }else if(Node %in% rownames(Feature_Gene)){
+    select(Feature_Gene[Node, ], -c("mean", "zscore", "sd")) %>% unlist
+  }else{
+    c(0)
+  }
+}
+
+Return_mean <- function(Feature_TF, Feature_Gene, Node){
+  if(Node %in% rownames(Feature_TF)){
+    Feature_TF[Node, "mean"]
+  }else if(Node %in% rownames(Feature_Gene)){
+    Feature_Gene[Node, "mean"]
+  }else{
+    c(0)
+  }
+}
+
+Calculate_edges_weight_corr <- function(Network, Features_TF, Features_Gene){
+  sapply(1:nrow(Network), function(node){
+    A <- Return_value(Features_TF, Features_Gene, Network[node, "tf"])
+    B <- Return_value(Features_TF, Features_Gene, Network[node, "target"])
+    Hmisc::rcorr(A,B, type = "pearson")$r[1,2]
+  })
+}
+
+Calculate_edges_weight <- function(Network, Features_TF, Features_Gene){
+  sapply(1:nrow(Network), function(node){
+    A <- Return_mean(Features_TF, Features_Gene, Network[node, "tf"])
+    B <- Return_mean(Features_TF, Features_Gene, Network[node, "target"])
+    A*B
+  })
+}
+```
+
+### Cluster NR
+
+```{r}
+Cluster_NR_GRN_network <- ARACNE_GRN_network
+Cluster_NR_GRN_network$weight_corr <- Calculate_edges_weight_corr(Cluster_NR_GRN_network, IDH_Koichi_TF_actitity_ARACNe_Cluster_NR, IDH_Koichi_Gene_expression_Cluster_NR)
+d <- density(Cluster_NR_GRN_network$weight_corr)
+plot(d)
+```
+
+### Cluster R
+
+```{r}
+Cluster_R_GRN_network <- ARACNE_GRN_network
+Cluster_R_GRN_network$weight_corr <- Calculate_edges_weight_corr(Cluster_R_GRN_network, IDH_Koichi_TF_actitity_ARACNe_Cluster_R, IDH_Koichi_Gene_expression_Cluster_R)
+d <- density(Cluster_R_GRN_network$weight_corr)
+plot(d)
+```
+
+### Cluster R
+
+```{r}
+mIDH1_GRN_network <- ARACNE_GRN_network
+mIDH1_GRN_network$weight_corr <- Calculate_edges_weight_corr(mIDH1_GRN_network, IDH_Koichi_TF_actitity_ARACNe_mIDH1, IDH_Koichi_Gene_expression_mIDH1)
+d <- density(mIDH1_GRN_network$weight_corr)
+plot(d)
+```
+
+### Cluster NR
+
+```{r}
+mIDH2_GRN_network <- ARACNE_GRN_network
+mIDH2_GRN_network$weight_corr <- Calculate_edges_weight_corr(mIDH2_GRN_network, IDH_Koichi_TF_actitity_ARACNe_mIDH2, IDH_Koichi_Gene_expression_mIDH2)
+d <- density(mIDH2_GRN_network$weight_corr)
+plot(d)
+```
+
+# Scale egde weight
+
+## Function
+
+```{r}
+Scale_edge_weight <- function(Network){
+  w <- Network$weight_corr
+  scaled_weight <- sapply(w, function(we) abs(we))
+  scaled_weight
+}
+```
+
+## Scaling wedge weight
+
+```{r}
+Cluster_NR_GRN_network$weight_corr_scaled <- Scale_edge_weight(Cluster_NR_GRN_network)
+Cluster_R_GRN_network$weight_corr_scaled <- Scale_edge_weight(Cluster_R_GRN_network)
+mIDH1_GRN_network$weight_corr_scaled <- Scale_edge_weight(mIDH1_GRN_network)
+mIDH2_GRN_network$weight_corr_scaled <- Scale_edge_weight(mIDH2_GRN_network)
+```
+
+
+
+
+# Saving networks
+
+## Unique ARACNe GRN 
+
+```{r}
+Cluster_NR_GRN_network %>% 
+  write.table("../../Results/Multi_layer_pheno_like/Cluster_NR/Layer_2/Cluster_NR_Common_GRN_network.tsv", 
+              sep = "\t", row.names = F)
+Cluster_R_GRN_network %>% 
+  write.table("../../Results/Multi_layer_pheno_like/Cluster_R/Layer_2/Cluster_R_Common_GRN_network.tsv", 
+              sep = "\t", row.names = F)
+mIDH1_GRN_network %>%
+  write.table("../../Results/Multi_layer_pheno_like/mIDH1/Layer_2/mIDH1_Common_GRN_network.tsv", 
+              sep = "\t", row.names = F)
+mIDH2_GRN_network %>% 
+  write.table("../../Results/Multi_layer_pheno_like/mIDH2/Layer_2/mIDH2_Common_GRN_network.tsv", 
+              sep = "\t", row.names = F)
+```
+
+# Calculate Egdes weight diff GRN
+
+## Cluster NR
+
+```{r}
+Cluster_NR_specific_GRN_network <- read.table("../../Datasets/Data_4_ARACNe/Cluster_NR/network.txt", 
+                                     sep = "\t", header = T)[1:2]
+colnames(Cluster_NR_specific_GRN_network) <- c("tf", "target")
+
+Cluster_NR_specific_GRN_network$weight_corr <- Calculate_edges_weight_corr(Cluster_NR_specific_GRN_network, IDH_Koichi_TF_actitity_ARACNe_Cluster_NR, IDH_Koichi_Gene_expression_Cluster_NR)
+
+Cluster_NR_specific_GRN_network$weight <- Calculate_edges_weight(Cluster_NR_specific_GRN_network, IDH_Koichi_TF_actitity_ARACNe_Cluster_NR, IDH_Koichi_Gene_expression_Cluster_NR)
+
+d <- density(Cluster_NR_specific_GRN_network$weight_corr)
+plot(d)
+```
+
+## Cluster R
+
+```{r}
+Cluster_R_specific_GRN_network <- read.table("../../Datasets/Data_4_ARACNe/Cluster_R/network.txt", 
+                                     sep = "\t", header = T)[1:2]
+colnames(Cluster_R_specific_GRN_network) <- c("tf", "target")
+
+Cluster_R_specific_GRN_network$weight_corr <- Calculate_edges_weight_corr(Cluster_R_specific_GRN_network, IDH_Koichi_TF_actitity_ARACNe_Cluster_R, IDH_Koichi_Gene_expression_Cluster_R)
+
+Cluster_R_specific_GRN_network$weight <- Calculate_edges_weight(Cluster_R_specific_GRN_network, IDH_Koichi_TF_actitity_ARACNe_Cluster_R, IDH_Koichi_Gene_expression_Cluster_R)
+
+d <- density(Cluster_R_specific_GRN_network$weight_corr)
+plot(d)
+```
+
+## mIDH1
+
+```{r}
+mIDH1_specific_GRN_network <- read.table("../../Datasets/Data_4_ARACNe/mIDH1/network.txt", 
+                                     sep = "\t", header = T)[1:2]
+colnames(mIDH1_specific_GRN_network) <- c("tf", "target")
+
+mIDH1_specific_GRN_network$weight_corr <- Calculate_edges_weight_corr(mIDH1_specific_GRN_network, IDH_Koichi_TF_actitity_ARACNe_mIDH1, IDH_Koichi_Gene_expression_mIDH1)
+
+mIDH1_specific_GRN_network$weight <- Calculate_edges_weight(mIDH1_specific_GRN_network, IDH_Koichi_TF_actitity_ARACNe_mIDH1, IDH_Koichi_Gene_expression_mIDH1)
+
+d <- density(mIDH1_specific_GRN_network$weight_corr)
+plot(d)
+```
+
+## mIDH2
+
+```{r}
+mIDH2_specific_GRN_network <- read.table("../../Datasets/Data_4_ARACNe/mIDH2/network.txt", 
+                                     sep = "\t", header = T)[1:2]
+colnames(mIDH2_specific_GRN_network) <- c("tf", "target")
+
+mIDH2_specific_GRN_network$weight_corr <- Calculate_edges_weight_corr(mIDH2_specific_GRN_network, IDH_Koichi_TF_actitity_ARACNe_mIDH2, IDH_Koichi_Gene_expression_mIDH2)
+
+mIDH2_specific_GRN_network$weight <- Calculate_edges_weight(mIDH2_specific_GRN_network, IDH_Koichi_TF_actitity_ARACNe_mIDH2, IDH_Koichi_Gene_expression_mIDH2)
+
+d <- density(mIDH2_specific_GRN_network$weight_corr)
+plot(d)
+```
+
+```{r}
+Cluster_NR_specific_GRN_network$weight_corr_scaled <- Scale_edge_weight(Cluster_NR_specific_GRN_network)
+Cluster_R_specific_GRN_network$weight_corr_scaled <- Scale_edge_weight(Cluster_R_specific_GRN_network)
+mIDH1_specific_GRN_network$weight_corr_scaled <- Scale_edge_weight(mIDH1_specific_GRN_network)
+mIDH2_specific_GRN_network$weight_corr_scaled <- Scale_edge_weight(mIDH2_specific_GRN_network)
+```
+
+```{r}
+plot(density(na.omit(Cluster_NR_specific_GRN_network$weight_corr_scaled)))
+plot(density(na.omit(Cluster_R_specific_GRN_network$weight_corr_scaled)))
+plot(density(na.omit(mIDH1_specific_GRN_network$weight_corr_scaled)))
+plot(density(na.omit(mIDH2_specific_GRN_network$weight_corr_scaled)))
+```
+
+
+
+# Saving networks
+
+## Diff ARACNe GRN 
+
+```{r}
+Cluster_NR_specific_GRN_network %>% 
+  write.table("../../Results/Multi_layer_pheno_like/Cluster_NR/Layer_2/Cluster_NR_Common_specific_GRN_network.tsv",
+              sep = "\t", row.names = F)
+Cluster_R_specific_GRN_network %>% 
+  write.table("../../Results/Multi_layer_pheno_like/Cluster_R/Layer_2/Cluster_R_Common_specific_GRN_network.tsv", 
+              sep = "\t", row.names = F)
+mIDH1_specific_GRN_network %>%
+  write.table("../../Results/Multi_layer_pheno_like/mIDH1/Layer_2/mIDH1_Common_specific_GRN_network.tsv", 
+              sep = "\t", row.names = F)
+mIDH2_specific_GRN_network %>% 
+  write.table("../../Results/Multi_layer_pheno_like/mIDH2/Layer_2/mIDH2_Common_specific_GRN_network.tsv", 
+              sep = "\t", row.names = F)
+```
+
+
+
+```{r}
+save.image("/media/alexis/DATA/Session/R_session/Thesis_paper_Rsessions/Multi_layer_phenolike/layer_2.RData")
+```
+

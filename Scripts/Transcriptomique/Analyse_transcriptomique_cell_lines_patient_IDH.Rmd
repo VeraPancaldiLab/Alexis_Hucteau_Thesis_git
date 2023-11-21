@@ -1,0 +1,210 @@
+---
+title: "Analysis Transcriptomics cell line + Patient data"
+author: Alexis Hucteau
+date: "`r Sys.Date()`"
+output:
+    html_document:
+      toc: yes
+      toc_float: yes
+      theme: united
+editor_options:
+  markdown:
+    wrap: sentence
+---
+
+# Libraries
+
+```{r}
+library(dplyr)
+library(limma)
+library(FactoMineR)
+library(factoextra)
+library(sva)
+library(EnhancedVolcano)
+library(edgeR)
+library(biomaRt)
+library(singscore)
+library(GSEABase)
+```
+
+rsem-generate-data-matrix ./*.genes.results.genes.results > Counts.txt
+
+# Loading data
+
+## Counts
+
+```{r}
+Counts_data <- read.table("~/GitHub/Thesis_paper/Datasets/Transcriptomics/RNAseq/Counts.txt", sep = "\t", header = T, row.names = 1)
+colnames(Counts_data) <- colnames(Counts_data) %>% stringr::str_remove(".genes.results.genes.results")
+```
+
+## Phenos
+
+```{r}
+IDH_var <- c("IDH1", "IDH2", "IDHwt", "IDH1", "IDH2", "IDHwt", "IDH1", "IDH2", "IDH1", "IDH1", "IDH2", "IDH2", "IDH1_IDH2", "IDH1_IDH2", "IDH2")
+Type_of_data <- c("K562", "K562", "K562", "Molm13", "Molm13", "Molm13", "Patient_data", "Patient_data", "Patient_data", "Patient_data", "Patient_data", "Patient_data", "Patient_data", "Patient_data", "Patient_data")
+```
+
+# DEG analysis
+
+## Cell lines
+
+```{r}
+design <- model.matrix(~ IDH_var[c(1,2,4,5)])
+d0 <- DGEList(Counts_data[c(1,2,4,5)], group = IDH_var[c(1,2,4,5)])
+d0$samples
+keep <- filterByExpr(d0, group = IDH_var[c(1,2,4,5)])
+d0 <- d0[keep, , keep.lib.sizes=FALSE]
+
+y <- normLibSizes(d0)
+y$samples
+y <- estimateDisp(y, design)
+
+fit <- glmQLFit(y, design)
+qlf <- glmQLFTest(fit,coef=2)
+topTags(qlf)
+```
+
+```{r}
+mart <- useMart('ENSEMBL_MART_ENSEMBL')
+mart <- useDataset('hsapiens_gene_ensembl', mart)
+
+attrmart <- listAttributes(mart)
+
+annotLookup <- getBM(
+  mart = mart,
+  attributes = c(
+    'hgnc_symbol',
+    'entrezgene_id', 
+    'ensembl_gene_id'),
+  uniqueRows = TRUE,
+  values = rownames(qlf$table))
+```
+
+```{r}
+IDH1_IDH2_cell_lines_DEG <- merge(qlf$table, annotLookup, by.x = 0, by.y = "ensembl_gene_id")
+```
+
+```{r}
+fit2 <- glmFit(y,design)
+lrt <- glmLRT(fit2,coef=2)
+topTags(lrt)
+IDH1_IDH2_cell_lines_DEG_2 <- merge(lrt$table, annotLookup, by.x = 0, by.y = "ensembl_gene_id")
+head(IDH1_IDH2_cell_lines_DEG_2)
+```
+
+```{r}
+colnames(Counts_data)
+```
+
+## Patient data
+
+```{r}
+design_patient <- model.matrix(~ IDH_var[c(7:12, 15)])
+d0_patient <- DGEList(Counts_data[c(7:12, 15)], group = IDH_var[c(7:12, 15)])
+d0_patient$samples
+keep <- filterByExpr(d0_patient, group = IDH_var[c(7:12, 15)])
+d0_patient <- d0_patient[keep, , keep.lib.sizes=FALSE]
+
+y_patient <- normLibSizes(d0_patient)
+y_patient$samples
+y_patient <- estimateDisp(y_patient, design_patient)
+
+QLfit_patient <- glmQLFit(y_patient, design_patient)
+qlf_patient <- glmQLFTest(QLfit_patient,coef=2)
+topTags(qlf_patient)
+fit_patient <- glmFit(y_patient, design_patient)
+lrt_patient <- glmLRT(fit_patient,coef=2)
+topTags(lrt_patient)
+```
+
+```{r}
+IDH1_IDH2_patients_DEG_QL <- merge(qlf_patient$table, annotLookup, by.x = 0, by.y = "ensembl_gene_id")
+head(IDH1_IDH2_patients_DEG_QL)
+
+IDH1_IDH2_patients_DEG <- merge(lrt_patient$table, annotLookup, by.x = 0, by.y = "ensembl_gene_id")
+head(IDH1_IDH2_patients_DEG)
+```
+
+# Gene set analysis
+
+## Creating gene signatures
+
+```{r}
+DEG_NR_R_Koichi_up <- read.table("~/GitHub/Thesis_paper/Results/Transcriptomique/Koichi/Tables/DEGS/NR_R_DEG_tables.tsv", sep = "\t", header = T) %>% 
+  merge(annotLookup, by.x = "display_label", by.y = "hgnc_symbol") %>% 
+  dplyr::filter(., !is.na(entrezgene_id)) %>% .[order(.$log2FoldChange, decreasing = T),] %>% 
+  .$ensembl_gene_id %>% unique %>% 
+  .[1:100]
+
+DEG_NR_R_Koichi_down <- read.table("~/GitHub/Thesis_paper/Results/Transcriptomique/Koichi/Tables/DEGS/NR_R_DEG_tables.tsv", sep = "\t", header = T) %>% 
+  merge(annotLookup, by.x = "display_label", by.y = "hgnc_symbol") %>% 
+  dplyr::filter(., !is.na(entrezgene_id)) %>% .[order(.$log2FoldChange),] %>% 
+  .$ensembl_gene_id %>% unique %>%
+  .[1:100] 
+```
+
+```{r}
+DEG_IDH2_IDH1_Koichi_up <- read.table("~/GitHub/Thesis_paper/Results/Transcriptomique/Koichi/Tables/DEGS/IDH1_IDH2_DEG_tables.tsv", sep = "\t", header = T) %>% 
+  merge(annotLookup, by.x = "display_label", by.y = "hgnc_symbol") %>% 
+  dplyr::filter(., !is.na(entrezgene_id)) %>% .[order(.$log2FoldChange, decreasing = T),] %>% 
+  .$ensembl_gene_id %>% unique %>% 
+  .[1:100]
+
+DEG_IDH2_IDH1_Koichi_down <- read.table("~/GitHub/Thesis_paper/Results/Transcriptomique/Koichi/Tables/DEGS/IDH1_IDH2_DEG_tables.tsv", sep = "\t", header = T) %>% 
+  merge(annotLookup, by.x = "display_label", by.y = "hgnc_symbol") %>% 
+  dplyr::filter(., !is.na(entrezgene_id)) %>% .[order(.$log2FoldChange),] %>% 
+  .$ensembl_gene_id %>% unique %>%
+  .[1:100] 
+```
+
+```{r}
+library(loonR)
+library(GSVA)
+customGS <- data.frame("1" = c("Response"), "2" = DEG_NR_R_Koichi_up) %>% 
+  rbind(data.frame("1" = c("IDH"), "2" = DEG_IDH2_IDH1_Koichi_up)) %>%
+  rbind(data.frame("1" = c("Response_down"), "2" = DEG_NR_R_Koichi_down)) %>%
+  rbind(data.frame("1" = c("IDH_down"), "2" = DEG_IDH2_IDH1_Koichi_down))
+
+g <- IDH1_IDH2_cell_lines_DEG_2$logFC
+names(g) <- IDH1_IDH2_cell_lines_DEG$Row.names
+
+g <- g[order(g, decreasing = T)]
+
+test <- clusterProfiler::GSEA(geneList = g, TERM2GENE = customGS, minGSSize = 10, nPerm = 2000, pAdjustMethod = "BH", pvalueCutoff = 1, verbose = F)
+```
+
+```{r}
+enrichplot::gseaplot(test, geneSetID = 1, by = "runningScore", title = "Response")
+p2 <- gseaplot(edo2, geneSetID = 1, by = "preranked", title = edo2$Description[1])
+p3 <- gseaplot(edo2, geneSetID = 1, title = edo2$Description[1])
+cowplot::plot_grid(p1, p2, p3, ncol=1, labels=LETTERS[1:3])
+```
+
+```{r}
+Calculate_zscore <- function(Gene_exp, Rownames){
+  names(Gene_exp) <- Rownames
+  Gene_exp <- na.omit(Gene_exp)
+  name_genes <- names(Gene_exp)
+  Gene_exp <- unname(Gene_exp)
+  mean_gene_exp <- mean(Gene_exp)
+  sd_gene_exp <- sd(Gene_exp)
+  res <- sapply(Gene_exp, function(gene){
+    (gene - mean_gene_exp)/sd_gene_exp
+  })
+  names(res) <- name_genes
+  res[order(res, decreasing = T)]
+}
+
+Zscores_counts <- lapply(colnames(Counts_data), function(sample){
+  Calculate_zscore(Counts_data[,sample], rownames(Counts_data))
+})
+names(Zscores_counts) <- colnames(Counts_data)
+
+Enrichment_Response_IDH <- lapply(names(Zscores_counts), function(sample){
+  clusterProfiler::GSEA(geneList = Zscores_counts[[sample]], TERM2GENE = customGS, minGSSize = 10, nPerm = 2000, pAdjustMethod = "BH", pvalueCutoff = 1, verbose = F)
+})
+names(Enrichment_Response_IDH) <- names(Zscores_counts)
+
+```
+

@@ -1,0 +1,565 @@
+---
+title: "Transcripto-epigenomic analysis"
+author: Alexis Hucteau
+date: "`r Sys.Date()`"
+output:
+    html_document:
+      toc: yes
+      toc_float: yes
+      theme: united
+editor_options:
+  markdown:
+    wrap: sentence
+---
+
+# Libraries
+
+
+```{r, error=F, warning=F, echo=FALSE, include=F}
+library(dplyr)
+library(matrixTests)
+library(factoextra)
+library(Hmisc)
+library(matrixStats)
+library(RColorBrewer)
+library(data.table)
+library(parallel)
+library(ggpubr)
+library("grid")
+library("gridExtra")
+library(ggplotify)
+library(EnhancedVolcano)
+library(VennDiagram)
+library(biomaRt)
+library(clusterProfiler)
+library(org.Hs.eg.db)
+
+
+cores2use <- detectCores() - 2
+
+
+source("~/Core_scripts/core_functions.R")
+```
+
+# Loading Epigenomics
+
+```{r}
+IDH_in_Responder_localised_affected <- list()
+IDH_in_Responder_localised_affected$Indirect <- read.table("~/GitHub/Thesis_paper/Results/Epigenomic/IDH_in_Responder_localised_affected.tsv",
+                                                           sep = "\t" , header = T) %>%
+  .$x
+
+IDH_in_Non_Responder_localised_affected <- list()
+IDH_in_Non_Responder_localised_affected$Indirect <- read.table("~/GitHub/Thesis_paper/Results/Epigenomic/IDH_in_Non_Responder_localised_affected.tsv", 
+                                                               sep = "\t" , header = T) %>%
+  .$x
+
+Response_in_IDH2_localised_affected <- list()
+Response_in_IDH2_localised_affected$Indirect <- read.table("~/GitHub/Thesis_paper/Results/Epigenomic/Response_in_IDH2_localised_affected.tsv",
+                                                           sep = "\t" , header = T) %>%
+  .$x
+
+Response_in_IDH1_localised_affected <- list()
+Response_in_IDH1_localised_affected$Indirect <- read.table("~/GitHub/Thesis_paper/Results/Epigenomic/Response_in_IDH1_localised_affected.tsv",
+                                                           sep = "\t" , header = T) %>%
+  .$x
+
+
+IDH_in_Responder_localised_affected$Direct <- read.table("~/GitHub/Thesis_paper/Results/Epigenomic/IDH_in_Responder_localised_directly_affected.tsv", 
+                                                         sep = "\t" , header = T) %>%
+  .$x
+
+
+IDH_in_Non_Responder_localised_affected$Direct <- read.table("~/GitHub/Thesis_paper/Results/Epigenomic/IDH_in_Non_Responder_localised_directly_affected.tsv", 
+                                                             sep = "\t" , header = T) %>%
+  .$x
+
+
+Response_in_IDH2_localised_affected$Direct <- read.table("~/GitHub/Thesis_paper/Results/Epigenomic/Response_in_IDH2_localised_directly_affected.tsv", 
+                                                         sep = "\t" , header = T) %>%
+  .$x
+
+
+Response_in_IDH1_localised_affected$Direct <- read.table("~/GitHub/Thesis_paper/Results/Epigenomic/Response_in_IDH1_localised_directly_affected.tsv", 
+                                                         sep = "\t" , header = T) %>%
+  .$x
+
+```
+
+# Loading Trancriptomics
+
+
+```{r}
+DEG_IDH_in_Responder <- read.table("~/GitHub/Thesis_paper/Results/Transcriptomique/Koichi/Tables/DEGS/IDH_in_Responder_DEG_tables.tsv", 
+                               sep = "\t", header = T) %>%
+  dplyr::filter(abs(log2FoldChange) > 1.5 & pvalue < 0.05) %>%
+  .$display_label
+
+DEG_IDH_in_Non_Responder <- read.table("~/GitHub/Thesis_paper/Results/Transcriptomique/Koichi/Tables/DEGS/IDH_in_Non_Responder_DEG_tables.tsv", 
+                                   sep = "\t", header = T) %>%
+  dplyr::filter(abs(log2FoldChange) > 1.5 & pvalue < 0.05) %>%
+  .$display_label
+
+DEG_Response_in_IDH1 <- read.table("~/GitHub/Thesis_paper/Results/Transcriptomique/Koichi/Tables/DEGS/Response_in_IDH1_DEG_tables.tsv", 
+                   sep = "\t", header = T) %>%
+  dplyr::filter(abs(log2FoldChange) > 1.5 & pvalue < 0.05) %>%
+  .$display_label
+
+DEG_Response_in_IDH2 <- read.table("~/GitHub/Thesis_paper/Results/Transcriptomique/Koichi/Tables/DEGS/Response_in_IDH2_DEG_tables.tsv", 
+                   sep = "\t", header = T) %>%
+  dplyr::filter(abs(log2FoldChange) > 1.5 & pvalue < 0.05) %>%
+  .$display_label
+```
+
+## TFs
+
+```{r}
+TF_IDH_in_Responder <- read.table("~/GitHub/Thesis_paper/Results/Transcriptomique/TFs/IDH_in_Responder_doro_Koichi_TF_activities.tsv",
+                                  sep = "\t", header = T) %>%
+  dplyr::filter(pval < 0.15) %>% .$TF
+TF_IDH_in_Non_Responder <- read.table("~/GitHub/Thesis_paper/Results/Transcriptomique/TFs/IDH_in_Non_Responder_Koichi_doro_TF_activities.tsv",
+                                      sep = "\t", header = T) %>%
+  dplyr::filter(pval < 0.15) %>% .$TF
+TF_Response_in_IDH1 <- read.table("~/GitHub/Thesis_paper/Results/Transcriptomique/TFs/Response_in_IDH1_Koichi_doro_TF_activities.tsv",
+                                  sep = "\t", header = T) %>%
+  dplyr::filter(pval < 0.15) %>% .$TF
+TF_Response_in_IDH2 <- read.table("~/GitHub/Thesis_paper/Results/Transcriptomique/TFs/Response_in_IDH2_Koichi_dorothea_TF_activities.tsv",
+                                  sep = "\t", header = T) %>%
+  dplyr::filter(pval < 0.15) %>% .$TF
+```
+
+## GRNs
+
+```{r}
+GRN_IDH_in_Responder <- read.table("~/GitHub/Thesis_paper/Results/Transcriptomique/IDH_in_Responder_Network.tsv", 
+                                   sep = "\t", header = T)
+GRN_IDH_in_Non_Responder <- read.table("~/GitHub/Thesis_paper/Results/Transcriptomique/IDH_in_Non_Responder_Network.tsv", 
+                                       sep = "\t", header = T)
+GRN_Response_in_IDH1 <- read.table("~/GitHub/Thesis_paper/Results/Transcriptomique/Response_in_IDH1_Network.tsv", 
+                                   sep = "\t", header = T)
+GRN_Response_in_IDH2 <- read.table("~/GitHub/Thesis_paper/Results/Transcriptomique/Response_in_IDH2_Network.tsv", 
+                                   sep = "\t", header = T)
+```
+
+# Loading Proteomics
+
+## DEP
+
+```{r}
+DEP_IDH1_vs_IDHwt <- read.table("~/GitHub/Thesis_paper/Results/Proteo/Diff_Prot_exp_IDH1_IDHwt.tsv", sep = "\t", header = T) %>%
+  dplyr::filter(abs(IDH1_vs_Group_control_diff) > 0.5 & IDH1_vs_Group_control_p.val < 0.05) %>% .$name %>% unique
+
+DEP_IDH2_vs_IDHwt <- read.table("~/GitHub/Thesis_paper/Results/Proteo/Diff_Prot_exp_IDH2_IDHwt.tsv", sep = "\t", header = T) %>%
+  dplyr::filter(abs(IDH2_vs_Group_control_diff) > 0.5 & IDH2_vs_Group_control_p.val < 0.05) %>% .$name %>% unique
+
+DEP_IDH2_vs_IDH1 <- read.table("~/GitHub/Thesis_paper/Results/Proteo/Diff_Prot_exp_IDH2_IDH1.tsv", sep = "\t", header = T) %>%
+  dplyr::filter(abs(IDH2_vs_IDH1_diff) > 0.5 & IDH2_vs_IDH1_p.val < 0.05) %>% .$name %>% unique
+```
+
+## fPPI
+
+```{r}
+fPPI <- read.table("~/Documents/List_genes_from_transcriptome/FIsInGene_020720_with_annotations.tsv", sep = "\t", header = T)
+```
+
+# Loading Metabolomics
+
+```{r}
+names_Metabolics_DG_list <- c("IDH_in_Responders_up", "IDH_in_Non_responders_up", "Response_in_IDH1_up", "Response_in_IDH2_up", "IDH_in_Responders_down" ,
+                           "IDH_in_Non_responders_down", "Response_in_IDH1_down", "Response_in_IDH2_down")
+
+Metabolics_DG_list <- lapply(names_Metabolics_DG_list, function(Comp){
+  read.table(paste0("~/GitHub/Thesis_paper/Results/Metabolism/DMA/Genes_", Comp, ".tsv"), sep = "\t", header = F) %>% .$V1 %>% .[-1]
+})
+names(Metabolics_DG_list) <- names_Metabolics_DG_list
+Metabolics_DG_list_shortened <- list(
+  "IDH_in_Responders" = unique(c(Metabolics_DG_list[["IDH_in_Responders_up"]],Metabolics_DG_list[["IDH_in_Responders_down"]])),
+  "IDH_in_Non_responders" = unique(c(Metabolics_DG_list[["IDH_in_Non_responders_up"]],Metabolics_DG_list[["IDH_in_Non_responders_down"]])), 
+  "Response_in_IDH1" = unique(c(Metabolics_DG_list[["Response_in_IDH1_up"]],Metabolics_DG_list[["Response_in_IDH1_down"]])), 
+  "Response_in_IDH2" = unique(c(Metabolics_DG_list[["Response_in_IDH2_up"]],Metabolics_DG_list[["Response_in_IDH2_down"]])))
+rm(Metabolics_DG_list)
+```
+
+# Intersection 1 & 2
+
+## Direct
+
+```{r}
+intersect(IDH_in_Responder_localised_affected$Direct, DEG_IDH_in_Responder)
+intersect(IDH_in_Non_Responder_localised_affected$Direct, DEG_IDH_in_Non_Responder)
+intersect(Response_in_IDH1_localised_affected$Direct, DEG_Response_in_IDH1)
+intersect(Response_in_IDH2_localised_affected$Direct, DEG_Response_in_IDH2)
+```
+
+## Indirect
+
+```{r}
+Indirect_DEG_Responder <- intersect(IDH_in_Responder_localised_affected$Indirect, DEG_IDH_in_Responder)
+Indirect_DEG_Responder
+Indirect_DEG_Non_Responder <- intersect(IDH_in_Non_Responder_localised_affected$Indirect, DEG_IDH_in_Non_Responder)
+Indirect_DEG_Non_Responder
+intersect(Response_in_IDH1_localised_affected$Indirect, DEG_Response_in_IDH1)
+intersect(Response_in_IDH2_localised_affected$Indirect, DEG_Response_in_IDH2)
+```
+
+## Indirect & TF
+
+```{r}
+GRN_IDH_in_Responder %>%
+  dplyr::filter(target %in% IDH_in_Responder_localised_affected$Indirect) %>% .$tf %>% unique %>%
+  intersect(TF_IDH_in_Responder)
+GRN_IDH_in_Non_Responder %>%
+  dplyr::filter(target %in% IDH_in_Non_Responder_localised_affected$Indirect) %>% .$tf %>% unique %>%
+  intersect(TF_IDH_in_Non_Responder)
+GRN_Response_in_IDH1 %>%
+  dplyr::filter(target %in% Response_in_IDH1_localised_affected$Indirect) %>% .$tf %>% unique %>%
+  intersect(TF_Response_in_IDH1)
+GRN_Response_in_IDH2 %>%
+  dplyr::filter(target %in% Response_in_IDH2_localised_affected$Indirect) %>% .$tf %>% unique %>%
+  intersect(TF_Response_in_IDH2)
+```
+
+## Direct & TF
+
+```{r}
+GRN_IDH_in_Responder %>%
+  dplyr::filter(target %in% IDH_in_Responder_localised_affected$Direct) %>% .$tf %>% unique %>%
+  intersect(TF_IDH_in_Responder)
+GRN_IDH_in_Non_Responder %>%
+  dplyr::filter(target %in% IDH_in_Non_Responder_localised_affected$Direct) %>% .$tf %>% unique %>%
+  intersect(TF_IDH_in_Non_Responder)
+GRN_Response_in_IDH1 %>%
+  dplyr::filter(target %in% Response_in_IDH1_localised_affected$Direct) %>% .$tf %>% unique %>%
+  intersect(TF_Response_in_IDH1)
+GRN_Response_in_IDH2 %>%
+  dplyr::filter(target %in% Response_in_IDH2_localised_affected$Direct) %>% .$tf %>% unique %>%
+  intersect(TF_Response_in_IDH2)
+```
+
+## TF --> indirect DEG
+
+```{r}
+GRN_IDH_in_Responder %>%
+  dplyr::filter(target %in% intersect(IDH_in_Responder_localised_affected$Indirect, DEG_IDH_in_Responder)) %>% .$tf %>% unique %>%
+  intersect(TF_IDH_in_Responder)
+GRN_IDH_in_Non_Responder %>%
+  dplyr::filter(target %in% intersect(IDH_in_Non_Responder_localised_affected$Indirect, DEG_IDH_in_Non_Responder)) %>% .$tf %>% unique %>%
+  intersect(TF_IDH_in_Non_Responder)
+GRN_Response_in_IDH1 %>%
+  dplyr::filter(target %in% intersect(Response_in_IDH1_localised_affected$Indirect, DEG_Response_in_IDH1)) %>% .$tf %>% unique %>%
+  intersect(TF_Response_in_IDH1)
+GRN_Response_in_IDH2 %>%
+  dplyr::filter(target %in% intersect(Response_in_IDH2_localised_affected$Indirect, DEG_Response_in_IDH2)) %>% .$tf %>% unique %>%
+  intersect(TF_Response_in_IDH2)
+```
+
+# Intersection 2 & 3
+
+## DEP & DEG
+
+```{r}
+intersect(DEG_IDH_in_Non_Responder, DEP_IDH2_vs_IDH1)
+intersect(DEG_IDH_in_Responder, DEP_IDH2_vs_IDH1)
+```
+
+## DEP & TF
+
+```{r}
+intersect(TF_IDH_in_Non_Responder, DEP_IDH2_vs_IDH1)
+intersect(TF_IDH_in_Responder, DEP_IDH2_vs_IDH1)
+```
+
+## DEP & connected to DEP DEG
+
+```{r}
+A <- fPPI %>% 
+  dplyr::filter(Gene1 %in% DEP_IDH2_vs_IDH1) %>% 
+  .$Gene2 %>% intersect(DEG_IDH_in_Non_Responder) 
+B <- fPPI %>% 
+  dplyr::filter(Gene2 %in% DEP_IDH2_vs_IDH1) %>% 
+  .$Gene1 %>% intersect(DEG_IDH_in_Non_Responder) 
+DEP__DEG_NR <- c(A, B) %>% unique
+DEP__DEG_NR
+
+C <- fPPI %>% 
+  dplyr::filter(Gene1 %in% DEP_IDH2_vs_IDH1) %>% 
+  .$Gene2 %>% intersect(DEG_IDH_in_Responder)
+D <- fPPI %>% 
+  dplyr::filter(Gene2 %in% DEP_IDH2_vs_IDH1) %>% 
+  .$Gene1 %>% intersect(DEG_IDH_in_Responder)
+DEP__DEG_R <- c(C, D) %>% unique
+DEP__DEG_R
+```
+
+## DEP connected to DEG throught fPPI
+
+```{r}
+A <- fPPI %>% 
+  dplyr::filter(Gene1 %in% DEG_IDH_in_Non_Responder) %>% 
+  .$Gene2 %>% intersect(DEP_IDH2_vs_IDH1) 
+B <- fPPI %>% 
+  dplyr::filter(Gene2 %in% DEG_IDH_in_Non_Responder) %>% 
+  .$Gene1 %>% intersect(DEP_IDH2_vs_IDH1)
+DEG__DEP_NR <- c(A, B) %>% unique
+
+
+C <- fPPI %>% 
+  dplyr::filter(Gene1 %in% DEG_IDH_in_Responder) %>% 
+  .$Gene2 %>% intersect(DEP_IDH2_vs_IDH1)
+D <- fPPI %>% 
+  dplyr::filter(Gene2 %in% DEG_IDH_in_Responder) %>% 
+  .$Gene1 %>% intersect(DEP_IDH2_vs_IDH1)
+DEG__DEP_R <- c(C, D) %>% unique
+```
+
+
+
+## DEP -- target of dTF
+
+```{r}
+TF__DEP_R <- GRN_IDH_in_Responder %>%
+  dplyr::filter(target %in% DEP_IDH2_vs_IDH1) %>% .$tf %>% unique %>%
+  intersect(TF_IDH_in_Responder)
+TF__DEP_R 
+TF__DEP_NR <- GRN_IDH_in_Non_Responder %>%
+  dplyr::filter(target %in% DEP_IDH2_vs_IDH1) %>% .$tf %>% unique %>%
+  intersect(TF_IDH_in_Non_Responder)
+TF__DEP_NR
+```
+
+## DEP -- target of dTF
+
+```{r}
+DEP__TF_R <- GRN_IDH_in_Responder %>%
+  dplyr::filter(tf %in% TF_IDH_in_Responder) %>% .$target %>% unique %>%
+  intersect(DEP_IDH2_vs_IDH1)
+DEP__TF_R
+DEP__TF_NR <- GRN_IDH_in_Non_Responder %>%
+  dplyr::filter(tf %in% TF_IDH_in_Non_Responder) %>% .$target %>% unique %>%
+  intersect(DEP_IDH2_vs_IDH1)
+DEP__TF_NR 
+```
+
+## DEP connected to a DEG -- Indirect Meth
+
+```{r}
+E <- fPPI %>% 
+  dplyr::filter(Gene1 %in% Indirect_DEG_Non_Responder) %>% 
+  .$Gene2 %>% intersect(DEP_IDH2_vs_IDH1) 
+G <- fPPI %>% 
+  dplyr::filter(Gene2 %in% Indirect_DEG_Non_Responder) %>% 
+  .$Gene1 %>% intersect(DEP_IDH2_vs_IDH1) 
+c(E, G) %>% unique
+```
+
+## DEG & Indirect connected to a DEP
+
+```{r}
+H <- fPPI %>% 
+  dplyr::filter(Gene1 %in% DEP_IDH2_vs_IDH1) %>% 
+  .$Gene2 %>% intersect(Indirect_DEG_Non_Responder) 
+I <- fPPI %>% 
+  dplyr::filter(Gene2 %in% DEP_IDH2_vs_IDH1) %>% 
+  .$Gene1 %>% intersect(Indirect_DEG_Non_Responder) 
+c(H, I)
+```
+
+
+
+
+
+
+
+
+
+# GO analysis
+
+```{r}
+Compare_Enrichments <- function(List_DEGs, only_up = F, only_down=F){
+  list_direct_ID <- lapply(names(List_DEGs), function(Comparison){
+    ids <- List_DEGs[[Comparison]] 
+    data.table(Entrez = ids, group = Comparison)
+  })
+  names(list_direct_ID) <- names(List_DEGs)
+  mydf <- data.table::rbindlist(list_direct_ID)
+  mydf$subgroup <- sapply(mydf$group, function(gp){
+    ifelse(stringr::str_detect(gp, pattern = "esponse"), "Response", "IDH")
+  })
+  go_cluster <- compareCluster(Entrez~group, data = mydf, fun = "enrichGO", OrgDb = org.Hs.eg.db, 
+                 keyType = "SYMBOL", pvalueCutoff = 0.1, pAdjustMethod = "none", qvalueCutoff = 1)
+  mydf_entrez <- merge(mydf, genes, by.x = "Entrez", by.y = "hgnc_symbol")
+  kegg_cluster <- compareCluster(entrezgene_id~group+subgroup, data = mydf_entrez, fun = "enrichKEGG", 
+                                 organism = "hsa", qvalueCutoff = 1,
+                                 keyType = 'ncbi-geneid', pvalueCutoff = 0.1, 
+                                 pAdjustMethod = "none", setReadable(OrgDb = org.Hs.eg.db)) 
+  # wp_cluster <- compareCluster(entrezgene_id~group, data = mydf_entrez, fun = "enrichWP", 
+                                 # organism = "Homo sapiens", qvalueCutoff = 1,
+                                 # pvalueCutoff = 0.1, 
+                                 # pAdjustMethod = "none") 
+  List("GO" = go_cluster,
+       "KEGG" = kegg_cluster)
+}
+
+Auto_set_readable <- function(Results_cluster_KEGG_WP){
+  setReadable(Results_cluster_KEGG_WP, OrgDb = org.Hs.eg.db, keyType = "ENTREZID")
+}
+```
+
+
+```{r}
+mart <- biomaRt::useMart(biomart = "ENSEMBL_MART_ENSEMBL",
+                         dataset = "hsapiens_gene_ensembl")
+
+genes <- getBM(filters = "hgnc_symbol",
+               attributes = c("ensembl_gene_id","entrezgene_id", "hgnc_symbol"),
+               values = unique(c(fPPI$Gene1, fPPI$Gene2)), 
+               mart = mart)
+```
+
+## DEP -- DEG PPI
+
+```{r}
+List_DEG_DEP <- list("IDH_in_Responder" = unique(c(DEG__DEP_R, DEP__DEG_R)),
+                    "IDH_in_Non_Responder" = unique(c(DEG__DEP_NR, DEP__DEG_NR)))
+
+intersect(List_DEG_DEP$IDH_in_Responder, List_DEG_DEP$IDH_in_Non_Responder)
+```
+
+
+```{r, eval=F}
+DEP__DEG_PPI_GO <- Compare_Enrichments(List_DEG_DEP)
+
+```
+
+
+```{r, eval=F}
+n <- 10
+p <- dotplot(DEP__DEG_PPI_GO$GO, showCategory = n) 
+height_param <- n*4*120 +200
+ggsave("~/GitHub/Thesis_paper/Results/Proteo/Figures/DEP__DEG_PPI_GO_plot.png", p, bg = "white", width = 5700, 
+       height = height_param, units = "px", limitsize = FALSE)
+
+pcnet <- cnetplot(DEP__DEG_PPI_GO$GO, showCategory = n) 
+height_param <- n*4*120 +200
+ggsave("~/GitHub/Thesis_paper/Results/Proteo/Figures/DEP__DEG_PPI_GO_cnetplot.png", pcnet, bg = "white", width = 5700, 
+       height = 5700, units = "px", limitsize = FALSE)
+```
+
+```{r, eval=F}
+n <- 10
+p <- dotplot(DEP__DEG_PPI_GO$KEGG, showCategory = n) 
+height_param <- n*4*120 +200
+ggsave("~/GitHub/Thesis_paper/Results/Proteo/Figures/DEP__DEG_PPI_KEGG_plot.png", p, bg = "white", width = 5700, 
+       height = height_param, units = "px", limitsize = FALSE)
+
+pcnet <- cnetplot(Auto_set_readable(DEP__DEG_PPI_GO$KEGG), showCategory = n) 
+height_param <- n*4*120 +200
+ggsave("~/GitHub/Thesis_paper/Results/Proteo/Figures/DEP__DEG_PPI_KEGG_cnetplot.png", pcnet, bg = "white", width = 5700, 
+       height = 5700, units = "px", limitsize = FALSE)
+```
+
+## TF & DEP
+
+```{r}
+List_TF_DEP <- list("IDH_in_Responder" = unique(c(DEP__TF_R, TF__DEP_R)),
+                    "IDH_in_Non_Responder" = unique(c(DEP__TF_NR, TF__DEP_NR)))
+
+intersect(List_TF_DEP$IDH_in_Responder, List_TF_DEP$IDH_in_Non_Responder)
+```
+
+
+```{r, eval=F}
+DEP__TF_GRN_GO <- Compare_Enrichments(List_TF_DEP)
+```
+
+```{r, eval=F}
+n <- 10
+p <- dotplot(DEP__TF_GRN_GO$GO, showCategory = n) 
+height_param <- n*4*120 +200
+ggsave("~/GitHub/Thesis_paper/Results/Proteo/Figures/DEP__TF_GRN_GO_plot.png", p, bg = "white", width = 5700, 
+       height = height_param, units = "px", limitsize = FALSE)
+
+pcnet <- cnetplot(DEP__TF_GRN_GO$GO, showCategory = n) 
+height_param <- n*4*120 +200
+ggsave("~/GitHub/Thesis_paper/Results/Proteo/Figures/DEP__TF_GRN_GO_cnetplot.png", pcnet, bg = "white", width = 5700, 
+       height = 5700, units = "px", limitsize = FALSE)
+```
+
+```{r, eval=F}
+n <- 10
+p <- dotplot(DEP__TF_GRN_GO$KEGG, showCategory = n) 
+height_param <- n*4*120 +200
+ggsave("~/GitHub/Thesis_paper/Results/Proteo/Figures/DEP__TF_GRN_KEGG_plot.png", p, bg = "white", width = 5700, 
+       height = height_param, units = "px", limitsize = FALSE)
+
+pcnet <- cnetplot(Auto_set_readable(DEP__TF_GRN_GO$KEGG), showCategory = n) 
+height_param <- n*4*120 +200
+ggsave("~/GitHub/Thesis_paper/Results/Proteo/Figures/DEP__TF_GRN_KEGG_cnetplot.png", pcnet, bg = "white", width = 5700, 
+       height = 5700, units = "px", limitsize = FALSE)
+```
+
+# Intersection 3 & 4 
+
+## DEP & DMA
+
+```{r}
+intersect(DEP_IDH2_vs_IDH1, Metabolics_DG_list_shortened$IDH_in_Responders)
+intersect(DEP_IDH2_vs_IDH1, Metabolics_DG_list_shortened$IDH_in_Non_responders)
+```
+
+## DMA connected to DEP
+
+```{r}
+A <- fPPI %>% 
+  dplyr::filter(Gene1 %in% DEP_IDH2_vs_IDH1) %>% 
+  .$Gene2 %>% intersect(Metabolics_DG_list_shortened$IDH_in_Responders) 
+B <- fPPI %>% 
+  dplyr::filter(Gene2 %in% DEP_IDH2_vs_IDH1) %>% 
+  .$Gene1 %>% intersect(Metabolics_DG_list_shortened$IDH_in_Responders) 
+DMA__DEP_R <- c(A, B) %>% unique
+DMA__DEP_R
+
+C <- fPPI %>% 
+  dplyr::filter(Gene1 %in% DEP_IDH2_vs_IDH1) %>% 
+  .$Gene2 %>% intersect(Metabolics_DG_list_shortened$IDH_in_Non_responders) 
+D <- fPPI %>% 
+  dplyr::filter(Gene2 %in% DEP_IDH2_vs_IDH1) %>% 
+  .$Gene1 %>% intersect(Metabolics_DG_list_shortened$IDH_in_Non_responders) 
+DMA__DEP_NR <- c(C, D) %>% unique
+DMA__DEP_NR
+```
+
+## DEP connected to DMA
+
+```{r}
+E <- fPPI %>% 
+  dplyr::filter(Gene1 %in% Metabolics_DG_list_shortened$IDH_in_Responders) %>% 
+  .$Gene2 %>% intersect(DEP_IDH2_vs_IDH1) 
+G <- fPPI %>% 
+  dplyr::filter(Gene2 %in% Metabolics_DG_list_shortened$IDH_in_Responders) %>% 
+  .$Gene1 %>% intersect(DEP_IDH2_vs_IDH1) 
+DEP__DMA_R <- c(E, G) %>% unique
+DEP__DMA_R
+
+H <- fPPI %>% 
+  dplyr::filter(Gene1 %in% Metabolics_DG_list_shortened$IDH_in_Non_responders) %>% 
+  .$Gene2 %>% intersect(DEP_IDH2_vs_IDH1) 
+I <- fPPI %>% 
+  dplyr::filter(Gene2 %in% Metabolics_DG_list_shortened$IDH_in_Non_responders) %>% 
+  .$Gene1 %>% intersect(DEP_IDH2_vs_IDH1) 
+DEP__DMA_NR <- c(H, I) %>% unique
+DEP__DMA_NR
+```
+
+
+# Intersection 2 & 4
+
+```{r}
+intersect(Metabolics_DG_list_shortened$IDH_in_Responders, DEG_IDH_in_Responder)
+intersect(Metabolics_DG_list_shortened$IDH_in_Non_responders, DEG_IDH_in_Responder)
+intersect(Metabolics_DG_list_shortened$Response_in_IDH1, DEG_Response_in_IDH1)
+intersect(Metabolics_DG_list_shortened$Response_in_IDH2, DEG_Response_in_IDH2)
+```
+
+
+

@@ -1,0 +1,184 @@
+---
+title: "Sampling Layer 1"
+subtitle: "Layer 1"
+author: Alexis Hucteau
+date: "`r Sys.Date()`"
+output:
+    html_document:
+      toc: yes
+      toc_float: yes
+      theme: united
+editor_options:
+  markdown:
+    wrap: sentence
+---
+
+# Libraries
+
+```{r, error=F, warning=F, echo=FALSE, include=F}
+rm(DmIALite, DOLite, DOLiteTerm, HsIALite, MmIALite, RnIALite)
+
+library(dplyr)
+library(parallel)
+library(ggplot2)
+
+cores2use <- detectCores()
+```
+
+```{r}
+Clinical_patient_data <- read.table("~/GitHub/Thesis_paper/Datasets/Clinical_Koichi_data_isoform.tsv", sep = "\t", header = T)
+Clinical_patient_data$Baseline_phenotype_2 <- sapply(Clinical_patient_data$Best_response, function(resp){
+  switch(resp,
+         "CR" = "Responder",
+         "CRp" = "Responder",
+         "CRi" = "Responder",
+         "MLFS" = "Overall_Responder",
+         "HI" = "Overall_Responder",
+         "PR" = "Overall_Responder",
+         "SD" = "Non_Responder",
+         "PD" = "Non_Responder",
+         "Not_assessed" = "Not_assessed",
+         "NA" = "Control")
+})
+BMIQ <- readRDS("/media/alexis/DATA/Koichi_methylation_dat/BMIQ_norm_Koichi_samples.Rdata")
+```
+
+```{r}
+AnnoBMIQ <- read.table("~/GitHub/Thesis_paper/Datasets/Annotation_EPIC_BMIQ.tsv", sep = "\t", header = T)
+```
+
+```{r}
+AnnoBMIQ <- cbind(AnnoBMIQ[, 1:3], AnnoBMIQ[, colnames(AnnoBMIQ) %in% Phenos$sample])
+
+Anno_info <- AnnoBMIQ[, 1:3]
+```
+
+## Prepare samples
+
+```{r}
+Sampling_layer <- lapply(1:20, function(sampling){
+  sample(4:60, size = 15, replace = F) %>% colnames(AnnoBMIQ)[.]
+})
+```
+
+```{r}
+Annotations_sampling <- lapply(1:20, function(samples){
+  cbind(Anno_info, AnnoBMIQ[, colnames(AnnoBMIQ) %in% Sampling_layer[[samples]]])
+})
+names(Annotations_samples) <- names(Phenos_list)
+```
+
+## Prepare Pchic
+
+```{r}
+prepare_pchic <- function(cell_lines = NULL, minimum_interaction = 5, pchic = NULL){
+  if (is.null(pchic)){
+    load("/media/alexis/DATA/pchic.RData")
+  }
+  if (is.null(cell_lines)){
+    cell_lines = c("Mon", "Mac0", "Mac1", "Mac2", "Neu", "MK", "EP", "Ery", "FoeT", "nCD4", "tCD4", "aCD4", "naCD4", "nCD8", "tCD8", "nB", "tB")
+  }
+  pchic <- data.frame(pchic[rowSums(pchic[,cell_lines] >= minimum_interaction) >= 1,c(1:3,5:8,10)]) %>% na.omit(.)
+  pchic$baitChr <- paste0("chr", pchic$baitChr)
+  pchic$oeChr <- paste0("chr", pchic$oeChr)
+  return(pchic)
+}
+```
+
+### Myeloid pchic
+
+```{r}
+Myelo_cell_lines <- c("Mon", "Mac1", "Mac0", "Mac2", "MK", "Ery", "EP")
+
+pchic <- prepare_pchic(cell_lines = Myelo_cell_lines)
+pchic_bed <- pchic
+colnames(pchic_bed) <- rep(c("chr", "start", "end", "Name"), 2)
+pchic_bed <- rbind(pchic_bed[,1:4], pchic_bed[,5:8]) %>%
+  unique
+rownames(pchic_bed) <- paste0(pchic_bed$chr, ":", pchic_bed$start, "-", pchic_bed$end)
+
+po <- chaser::make_chromnet(pchic[,c(1:3, 5:7)])
+```
+
+```{r}
+Pp_met <- mclapply(1:20, function(Pheno){
+  chaser::load_features(po,Annotations_sampling[[Pheno]],auxfun = 'mean', type='features_table',
+                                           featnames = colnames(Annotations_sampling[[Pheno]]), missingv=NA)
+}, mc.cores = cores2use)
+```
+
+```{r}
+Pp_met_network <- Pp_met[[1]]$edgesdf[, 7:8]
+
+Pp_met_features <- mclapply(1:20, function(Pheno){
+  Pp_met[[Pheno]][["features"]] %>% as.data.frame()
+}, mc.cores = cores2use)
+```
+
+```{r}
+Pp_met_features <- mclapply(1:20, function(Pheno){
+  tmp <- Pp_met_features[[Pheno]]
+  tmp$mean <- rowMeans(tmp) 
+  tmp
+}, mc.cores = cores2use)
+```
+
+# Calculate edges weight
+
+## Functions
+
+```{r}
+Return_mean_value <- function(Feature, Node){
+  if(Node %in% rownames(Feature)){
+    Feature[Node, "mean"] > 0.6
+  }else{
+    F
+  }
+}
+
+Calculate_edges_weight <- function(Network, Features){
+  mclapply(1:nrow(Network), function(node){
+    A <- Return_mean_value(Features, Network[node, "node_from"])
+    B <- Return_mean_value(Features, Network[node, "node_to"])
+    ifelse(A & B, 0, 1)
+  }, mc.cores = cores2use) %>% unlist
+}
+```
+
+## Calcul
+
+```{r}
+PP_Network <- lapply(1:20, function(Pheno){
+  net <- Pp_met_network
+  net$weight <- Calculate_edges_weight(net, select(Pp_met_features[[Pheno]], c("mean")))
+  net
+})
+names(PP_Network) <- names(Pp_met_features)
+```
+
+
+
+```{r}
+Filtered_network <- lapply(1:20, function(Pheno){
+  net <- dplyr::filter(PP_Network[[Pheno]], weight==0 | is.na(weight))
+  net$weight <- sapply(net$weight, function(w){
+    ifelse(is.na(w), 0.2, 0.5)
+  })
+  net_back <- net[,c(2,1,5)]
+  colnames(net_back) <- colnames(net)[c(2,1,5)]
+  rbind(net[,c(1,2,5)], net_back)
+})
+```
+
+```{r}
+lapply(1:20, function(Pheno){
+  Filtered_network[[Pheno]] %>%
+    write.table(paste0("~/GitHub/Thesis_paper/Results/Multi_layer_pheno_like/Sampling/Layer_1/Network_", Pheno, ".tsv"), 
+              sep = "\t", quote = F, row.names = F)
+  NULL
+})
+```
+
+```{r}
+save.image("/media/alexis/DATA/Session/R_session/Thesis_paper_Rsessions/Multi_layer_phenolike/Layer_1_sampling.RData")
+```

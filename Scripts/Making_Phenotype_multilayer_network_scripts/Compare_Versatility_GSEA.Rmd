@@ -1,0 +1,378 @@
+---
+title: "Compare Versatility GSEA"
+author: Alexis Hucteau
+date: "`r Sys.Date()`"
+output:
+    html_document:
+      toc: yes
+      toc_float: yes
+      theme: united
+editor_options:
+  markdown:
+    wrap: sentence
+---
+
+# Libraries
+
+```{r, error=F, warning=F, echo=FALSE, include=F}
+rm(DmIALite, DOLite, DOLiteTerm, HsIALite, MmIALite, RnIALite)
+  
+library(forcats)
+library(ggstance)
+library(ggrepel)
+library(GGally)
+library(dplyr)
+library(data.table)
+library(stringr)
+library(ggplot2)
+library(ggraph)
+library(RColorBrewer)
+library(viridis)
+library(parallel)
+library(ggpubr)
+library(ggvenn)
+
+cores2use <- detectCores() - 2
+
+"%ni%" <- Negate("%in%")
+```
+
+
+
+```{r}
+Enrichments_type <- c("Enrichments/", "Enrichments_top300/")
+
+GO_list <- c("KEGG", "WIKIpathway")
+```
+
+```{r}
+Find_genesets_function <- function(Files, Side){
+  sapply(Files, function(GO_file){
+    if(stringr::str_detect(GO_file, pattern = "DOWN")){
+      Side <- -1 * Side
+    }
+    readed_file <- tryCatch({read.table(GO_file, sep = "\t", header = T, quote = "")}, error = function(cond){return(NULL)})
+    if(is.null(readed_file)){
+      return(NULL)
+    }
+    if(nrow(readed_file) == 0){
+      return(NULL)
+    }
+    dplyr::filter(readed_file, (Side * NES) > 0) %>% .$Description
+  }) %>% unlist() %>% unique
+}
+
+Find_genesets_table_function <- function(Files, Side){
+  mclapply(Files, function(GO_file){
+    if(stringr::str_detect(GO_file, pattern = "DOWN")){
+      Side <- -1 * Side
+    }
+    readed_file <- tryCatch({read.table(GO_file, sep = "\t", header = T, quote = "")}, error = function(cond){return(NULL)})
+    if(is.null(readed_file)){
+      return(NULL)
+    }
+    if(nrow(readed_file) == 0){
+      return(NULL)
+    }
+    dplyr::filter(readed_file, (Side * NES) > 0) 
+  }, mc.cores = cores2use) %>% data.table::rbindlist() %>% unique
+}
+
+List_genesets_flow_function <- function(Comparison, Side){
+  lapply(GO_list, function(GO){
+    folder <- paste0("~/GitHub/Thesis_paper/Results/Multi_layer_pheno_like/New_regulon_40k/Flow_analysis_old/", Comparison, "/", GO, "/Tables/") 
+    files <- paste0(folder, list.files(folder)) 
+    Find_genesets_function(files, Side)
+  }) %>% unlist() %>% unique
+}
+
+List_genesets_versatility_function <- function(Comparison, Side, Enrichments_type_300_150 = Enrichments_type[1]){
+  lapply(GO_list, function(GO){
+    folder <- paste0("~/GitHub/Thesis_paper/Results/Multi_layer_pheno_like/New_regulon_40k/Versatility_analysis/", Enrichments_type_300_150, Comparison, "/", GO, "/") 
+    files <- paste0(folder, list.files(folder)) %>% .[stringr::str_detect(., pattern = "Table_")]
+    Find_genesets_function(files, Side)
+  }) %>% unlist() %>% unique
+}
+```
+
+```{r}
+Genesets <- list()
+
+Genesets[["Cluster_R_vs_Cluster_NR"]] <- List_genesets_versatility_function("Clusters", 1)
+Genesets[["Cluster_NR_vs_Cluster_R"]] <- List_genesets_versatility_function("Clusters", -1)
+
+Genesets[["mIDH1_vs_mIDH2"]] <- List_genesets_versatility_function("mIDH", 1)
+Genesets[["mIDH2_vs_mIDH1"]] <- List_genesets_versatility_function("mIDH", -1)
+
+Genesets[["Cluster_IDH2_R_vs_Cluster_IDH2_NR"]] <- List_genesets_versatility_function("IDH2s", 1)
+Genesets[["Cluster_IDH2_NR_vs_Cluster_IDH2_R"]] <- List_genesets_versatility_function("IDH2s", -1)
+
+Genesets[["IDH1_Cluster_R_vs_IDH2_Cluster_R"]] <- List_genesets_versatility_function("IDHs_Cluster_R", 1)
+Genesets[["IDH2_Cluster_R_vs_IDH1_Cluster_R"]] <- List_genesets_versatility_function("IDHs_Cluster_R", -1)
+
+Genesets[["Cluster_NR_vs_mIDH2"]] <- List_genesets_versatility_function("mIDH2_vs_Cluster_NR", 1)
+Genesets[["mIDH2_vs_Cluster_NR"]] <- List_genesets_versatility_function("mIDH2_vs_Cluster_NR", -1)
+
+Genesets[["mIDH1_vs_Cluster_NR"]] <- List_genesets_versatility_function("mIDH1_vs_Cluster_NR", 1)
+Genesets[["Cluster_NR_vs_mIDH1"]] <- List_genesets_versatility_function("mIDH1_vs_Cluster_NR", -1)
+```
+
+```{r}
+Specific_mIDH1 <- Genesets[["mIDH1_vs_mIDH2"]] %>% 
+  .[. %ni% c(Genesets[["Cluster_IDH2_R_vs_Cluster_IDH2_NR"]], Genesets[["Cluster_IDH2_NR_vs_Cluster_IDH2_R"]])]
+Specific_mIDH1
+```
+
+```{r}
+Specific_mIDH2 <- Genesets[["mIDH2_vs_mIDH1"]] %>% 
+  .[. %ni% c(Genesets[["Cluster_IDH2_R_vs_Cluster_IDH2_NR"]], Genesets[["Cluster_IDH2_NR_vs_Cluster_IDH2_R"]])]
+Specific_mIDH2
+```
+
+```{r}
+Specific_NR_IDH2 <- Genesets[["Cluster_IDH2_NR_vs_Cluster_IDH2_R"]] %>%
+  c(., Genesets[["Cluster_NR_vs_Cluster_R"]][Genesets[["Cluster_NR_vs_Cluster_R"]] %ni% c(Genesets[["mIDH1_vs_mIDH2"]], Genesets[["mIDH2_vs_mIDH1"]])]) %>% unique
+Specific_NR_IDH2
+```
+
+```{r}
+Specific_R_IDH2 <- Genesets[["Cluster_IDH2_R_vs_Cluster_IDH2_NR"]] %>%
+  c(., Genesets[["Cluster_R_vs_Cluster_NR"]]) %>% .[. %ni% c(Genesets[["mIDH1_vs_mIDH2"]], Genesets[["mIDH2_vs_mIDH1"]])] %>% unique
+Specific_R_IDH2
+```
+
+```{r}
+Common_IDH2_NR <- Genesets[["mIDH2_vs_mIDH1"]] %>% .[. %in% Genesets[["Cluster_NR_vs_Cluster_R"]]]
+Common_IDH2_NR
+```
+
+```{r}
+Common_IDH1_R <- Genesets[["mIDH1_vs_mIDH2"]] %>% .[. %in% Genesets[["Cluster_R_vs_Cluster_NR"]]]
+Common_IDH1_R
+```
+
+```{r}
+Genesets_300 <- list()
+
+Genesets_300[["Cluster_R_vs_Cluster_NR"]] <- List_genesets_versatility_function("Clusters", 1, Enrichments_type[2])
+Genesets_300[["Cluster_NR_vs_Cluster_R"]] <- List_genesets_versatility_function("Clusters", -1, Enrichments_type[2])
+
+Genesets_300[["mIDH1_vs_mIDH2"]] <- List_genesets_versatility_function("mIDH", 1)
+Genesets_300[["mIDH2_vs_mIDH1"]] <- List_genesets_versatility_function("mIDH", -1)
+
+Genesets_300[["Cluster_IDH2_R_vs_Cluster_IDH2_NR"]] <- List_genesets_versatility_function("IDH2s", 1, Enrichments_type[2])
+Genesets_300[["Cluster_IDH2_NR_vs_Cluster_IDH2_R"]] <- List_genesets_versatility_function("IDH2s", -1, Enrichments_type[2])
+
+Genesets_300[["IDH1_Cluster_R_vs_IDH2_Cluster_R"]] <- List_genesets_versatility_function("IDHs_Cluster_R", 1, Enrichments_type[2])
+Genesets_300[["IDH2_Cluster_R_vs_IDH1_Cluster_R"]] <- List_genesets_versatility_function("IDHs_Cluster_R", -1, Enrichments_type[2])
+
+Genesets_300[["Cluster_NR_vs_mIDH2"]] <- List_genesets_versatility_function("mIDH2_vs_Cluster_NR", 1, Enrichments_type[2])
+Genesets_300[["mIDH2_vs_Cluster_NR"]] <- List_genesets_versatility_function("mIDH2_vs_Cluster_NR", -1, Enrichments_type[2])
+
+Genesets_300[["mIDH1_vs_Cluster_NR"]] <- List_genesets_versatility_function("mIDH1_vs_Cluster_NR", 1, Enrichments_type[2])
+Genesets_300[["Cluster_NR_vs_mIDH1"]] <- List_genesets_versatility_function("mIDH1_vs_Cluster_NR", -1, Enrichments_type[2])
+```
+
+
+```{r}
+Specific_mIDH1_300 <- Genesets_300[["mIDH1_vs_mIDH2"]] %>% 
+  .[. %ni% c(Genesets_300[["Cluster_IDH2_R_vs_Cluster_IDH2_NR"]], Genesets_300[["Cluster_IDH2_NR_vs_Cluster_IDH2_R"]])]
+Specific_mIDH1_300
+```
+
+```{r}
+Specific_mIDH2_300 <- Genesets_300[["mIDH2_vs_mIDH1"]] %>% 
+  .[. %ni% c(Genesets_300[["Cluster_IDH2_R_vs_Cluster_IDH2_NR"]], Genesets_300[["Cluster_IDH2_NR_vs_Cluster_IDH2_R"]])]
+Specific_mIDH2_300
+```
+
+```{r}
+Specific_NR_IDH2_300 <- Genesets_300[["Cluster_IDH2_NR_vs_Cluster_IDH2_R"]] %>%
+  c(., Genesets_300[["Cluster_NR_vs_Cluster_R"]][Genesets_300[["Cluster_NR_vs_Cluster_R"]] %ni% c(Genesets_300[["mIDH1_vs_mIDH2"]], Genesets_300[["mIDH2_vs_mIDH1"]])]) %>% unique
+Specific_NR_IDH2_300
+```
+
+```{r}
+Specific_R_IDH2_300 <- Genesets_300[["Cluster_IDH2_R_vs_Cluster_IDH2_NR"]] %>%
+  c(., Genesets_300[["Cluster_R_vs_Cluster_NR"]]) %>% .[. %ni% c(Genesets_300[["mIDH1_vs_mIDH2"]], Genesets_300[["mIDH2_vs_mIDH1"]])] %>% unique
+Specific_R_IDH2_300
+```
+
+```{r}
+Common_IDH2_NR_300 <- Genesets_300[["mIDH2_vs_mIDH1"]] %>% .[. %in% Genesets_300[["Cluster_NR_vs_Cluster_R"]]]
+Common_IDH2_NR_300
+```
+
+```{r}
+Common_IDH1_R_300 <- Genesets_300[["mIDH1_vs_mIDH2"]] %>% .[. %in% Genesets_300[["Cluster_R_vs_Cluster_NR"]]]
+Common_IDH1_R_300
+```
+
+
+
+```{r}
+Comparisons_flow <- list.dirs("../../Results/Multi_layer_pheno_like/New_regulon_40k/Flow_analysis_old/", full.names = F, recursive = F) %>% 
+  .[stringr::str_detect(., pattern = "_25k")]
+
+Genesets_Flow <- lapply(Comparisons_flow, function(Comparison){
+  UP <- List_genesets_flow_function(Comparison, 1)
+  Down <- List_genesets_flow_function(Comparison, -1)
+  list("Up" = UP, "Down" = Down)
+})
+names(Genesets_Flow) <- Comparisons_flow
+```
+
+
+```{r}
+Specific_mIDH1_flow <- Genesets_Flow[["mIDH_25k"]]$Up %>% 
+  .[. %ni% c(Genesets_Flow[["mIDH2_R_vs_mIDH2_NR_25k"]]$Up, Genesets_Flow[["mIDH2_R_vs_mIDH2_NR_25k"]]$Down, Genesets_Flow[["mIDH_25k"]]$Down)]
+Specific_mIDH1_flow
+```
+
+```{r}
+Specific_mIDH2_flow <- Genesets_Flow[["mIDH_25k"]]$Down %>% 
+  .[. %ni% c(Genesets_Flow[["mIDH2_R_vs_mIDH2_NR_25k"]]$Up, Genesets_Flow[["mIDH2_R_vs_mIDH2_NR_25k"]]$Down, Genesets_Flow[["mIDH_25k"]]$Up)]
+Specific_mIDH2_flow
+```
+
+```{r}
+Specific_NR_flow <- Genesets_Flow[["Clusters_25k"]]$Down %>% 
+  .[. %ni% c(Genesets_Flow[["Clusters_25k"]]$Up, Genesets_Flow[["mIDH_25k"]]$Up, Genesets_Flow[["mIDH_25k"]]$Down)]
+Specific_NR_flow
+```
+
+```{r}
+Specific_R_flow <- Genesets_Flow[["Clusters_25k"]]$Up %>% 
+  .[. %ni% c(Genesets_Flow[["Clusters_25k"]]$Down, Genesets_Flow[["mIDH_25k"]]$Up, Genesets_Flow[["mIDH_25k"]]$Down)]
+Specific_R_flow
+```
+
+
+```{r}
+Common_IDH1_IDH2 <- intersect(Genesets_Flow[["mIDH_25k"]]$Up, Genesets_Flow[["mIDH_25k"]]$Down)
+Common_IDH1_IDH2
+```
+
+```{r}
+Common_NR_R <- intersect(Genesets_Flow[["Clusters_25k"]]$Up, Genesets_Flow[["Clusters_25k"]]$Down)
+Common_NR_R
+```
+
+```{r}
+Specific_NR_IDH2_flow <- Genesets_Flow[["mIDH2_R_vs_mIDH2_NR_25k"]]$Down %>% 
+  c(., Genesets_Flow[["Clusters_25k"]]$Down[Genesets_Flow[["Clusters_25k"]]$Down %ni% c(Genesets_Flow[["mIDH_25k"]]$Up, Genesets_Flow[["mIDH_25k"]]$Down)]) %>% unique
+Specific_NR_IDH2_flow
+```
+
+```{r}
+Specific_R_IDH2_flow <- Genesets_Flow[["mIDH2_R_vs_mIDH2_NR_25k"]]$Up %>% 
+  c(., Genesets_Flow[["Clusters_25k"]]$Up[Genesets_Flow[["Clusters_25k"]]$Up %ni% c(Genesets_Flow[["mIDH_25k"]]$Up, Genesets_Flow[["mIDH_25k"]]$Down)]) %>% unique
+Specific_R_IDH2_flow
+```
+
+```{r}
+Common_IDH2_NR_flow <- Genesets_Flow[["mIDH_25k"]]$Down %>% .[. %in% Genesets_Flow[["Clusters_25k"]]$Down]
+Common_IDH2_NR_flow
+```
+
+```{r}
+Common_IDH1_R_flow <- Genesets_Flow[["mIDH_25k"]]$Up %>% .[. %in% Genesets_Flow[["Clusters_25k"]]$Up]
+Common_IDH1_R_flow
+```
+
+```{r}
+Make_GO_list_from_specific_description <- function(Go_list, Comparison, Side, Enrichments_type_300_150 = Enrichments_type[1]){
+  res <- lapply(GO_list, function(GO){
+    folder <- paste0("~/GitHub/Thesis_paper/Results/Multi_layer_pheno_like/New_regulon_40k/Versatility_analysis/", Enrichments_type_300_150, Comparison, "/", GO, "/") 
+    files <- paste0(folder, list.files(folder)) %>% .[stringr::str_detect(., pattern = "Table_")]
+    Find_genesets_table_function(files, Side)
+  }) %>% data.table::rbindlist()
+  if(is.null(Go_list)){
+    res %>% .$core_enrichment %>% stringr::str_split(pattern = "\\/") %>% unlist %>% unique
+  }else{
+  dplyr::filter(res, Description %in% Go_list) %>% .$core_enrichment %>% stringr::str_split(pattern = "\\/") %>% unlist %>% unique
+  }
+}
+
+Make_GO_list_flow_from_specific_description <- function(Go_list, Comparison, Side){
+  res <- lapply(GO_list, function(GO){
+    folder <- paste0("~/GitHub/Thesis_paper/Results/Multi_layer_pheno_like/New_regulon_40k/Flow_analysis_old/", Comparison, "/", GO, "/Tables/") 
+    files <- paste0(folder, list.files(folder)) 
+    Find_genesets_table_function(files, Side)
+  }) %>% data.table::rbindlist()
+  if(is.null(Go_list)){
+    res %>% .$core_enrichment %>% stringr::str_split(pattern = "\\/") %>% unlist %>% unique
+  }else{
+  dplyr::filter(res, Description %in% Go_list) %>% .$core_enrichment %>% stringr::str_split(pattern = "\\/") %>% unlist %>% unique
+  }
+}
+```
+
+```{r}
+All_genes_mIDH1 <- Make_GO_list_from_specific_description(NULL, "mIDH", 1)
+All_genes_mIDH1_300 <- Make_GO_list_from_specific_description(NULL, "mIDH", 1, Enrichments_type[2])
+
+All_genes_mIDH1_300[stringr::str_detect(All_genes_mIDH1_300, pattern = "SLC25A1")]
+
+```
+
+```{r}
+All_genes_mIDH1_flow <- Make_GO_list_flow_from_specific_description(Specific_mIDH1_flow, "mIDH_25k", 1)
+All_genes_mIDH1_flow
+```
+
+
+```{r}
+All_genes_mIDH2 <- Make_GO_list_from_specific_description(NULL, "mIDH", -1)
+All_genes_mIDH2_300 <- Make_GO_list_from_specific_description(NULL, "mIDH", -1, Enrichments_type[2])
+
+All_genes_mIDH2_300[stringr::str_detect(All_genes_mIDH2_300, pattern = "SLC25A1")]
+```
+
+```{r}
+All_genes_mIDH2_flow <- Make_GO_list_flow_from_specific_description(Specific_mIDH2_flow, "mIDH_25k", -1)
+All_genes_mIDH2_flow
+```
+
+
+```{r}
+All_genes_mIDH2_NR <- Make_GO_list_from_specific_description(NULL, "IDH2s", -1)
+All_genes_mIDH2_NR_300 <- Make_GO_list_from_specific_description(NULL, "IDH2s", -1, Enrichments_type[2])
+
+All_genes_mIDH2_NR_300[stringr::str_detect(All_genes_mIDH2_NR_300, pattern = "SLC25A1")]
+```
+
+```{r}
+All_genes_mIDH2_NR_flow <- Make_GO_list_flow_from_specific_description(Specific_NR_IDH2_flow, "mIDH2_R_vs_mIDH2_NR_25k", -1)
+All_genes_mIDH2_NR_flow
+```
+
+
+
+
+```{r}
+All_genes_mIDH2_R <- Make_GO_list_from_specific_description(NULL, "IDH2s", 1) 
+All_genes_mIDH2_R_300 <- Make_GO_list_from_specific_description(NULL, "IDH2s", -1, Enrichments_type[2])
+
+All_genes_mIDH2_R_300[stringr::str_detect(All_genes_mIDH2_R_300, pattern = "SLC25A1")]
+```
+
+
+
+
+```{r}
+tmp <- list() %>%
+  lapply(function(Comp){
+  sapply(Comp, function(desc){
+    if(stringr::str_detect(desc, pattern = "SIRT")){
+      message(paste(Comp, desc))
+      return(desc)
+    }
+  }) %>% unique
+})
+```
+
+
+
+
+

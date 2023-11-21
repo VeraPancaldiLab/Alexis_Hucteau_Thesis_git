@@ -1,0 +1,1284 @@
+---
+title: "Epigenomic analysis"
+author: Alexis Hucteau
+date: "`r Sys.Date()`"
+output:
+    html_document:
+      toc: yes
+      toc_float: yes
+      theme: united
+editor_options:
+  markdown:
+    wrap: sentence
+---
+
+# Libraries
+
+
+```{r, error=F, warning=F, echo=FALSE, include=F}
+library(dplyr)
+library(matrixTests)
+library(factoextra)
+library(Hmisc)
+library(matrixStats)
+library(RColorBrewer)
+library(pheatmap)
+library(data.table)
+library(parallel)
+library(ggpubr)
+library("grid")
+library("gridExtra")
+library(ggplotify)
+library(ChAMP)
+library(EnhancedVolcano)
+library(limma)
+library(VennDiagram)
+library(biomaRt)
+library(org.Hs.eg.db)
+library(clusterProfiler)
+library(simplifyEnrichment)
+library(DOSE)
+library(missMethyl)
+
+cores2use <- detectCores() - 2
+
+
+source("~/Core_scripts/core_functions.R")
+```
+
+```{r, eval=F}
+Files_table <- read.table("/media/alexis/DATA/Thesis_paper_DATA/Koichi_DNAmethylomes/GSE153347_RAW/Phenotype_Feng_Meth.csv", sep = ",", header = T)
+
+list.files_meth <- list.files("/media/alexis/DATA/Thesis_paper_DATA/Koichi_DNAmethylomes/GSE153347_RAW/") %>% .[stringr::str_detect(., "dat")]
+list.files_meth
+
+# Files_table$filenames <- sapply(Files_table$Sample_name, function(sample){
+#   file <- list.files_meth[stringr::str_detect(list.files_meth, sample)] %>% .[1] %>% stringr::str_remove(., "_Grn.idat.gz")
+# })
+# Files_table$Basename <- Files_table$filenames
+# Files_table$Slide <- stringr::str_split_i(Files_table$filenames, "_", 1)
+# Files_table$Array <- sapply(1:nrow(Files_table), function(sample){
+#   To_remove <- Files_table[sample, "Slide"]
+#   print(To_remove)
+#   Files_table[sample, "filenames"] %>% stringr::str_remove(., pattern = To_remove) %>% stringr::str_remove("_")
+# })
+
+write.table(Files_table, "/media/alexis/DATA/Thesis_paper_DATA/Koichi_DNAmethylomes/GSE153347_RAW/Phenotype_Feng_Meth.csv", sep = ",", row.names = F)
+```
+
+
+```{r, eval=F}
+myImport <- champ.import("/media/alexis/DATA/Thesis_paper_DATA/Koichi_DNAmethylomes/GSE153347_RAW/", arraytype = "EPIC")
+myLoad <- champ.filter(beta = myImport$beta, pd = myImport$pd)
+```
+
+```{r, eval = F}
+champ.QC(myLoad$beta)
+```
+
+```{r, eval = F}
+BMIQ <- champ.norm(beta = myLoad$beta, arraytype="EPIC", cores = 14)
+colnames(BMIQ) <- myLoad$pd$Sample_name
+saveRDS(BMIQ, "/media/alexis/DATA/Thesis_paper_DATA/Koichi_DNAmethylomes/BMIQ.Rdata")
+```
+
+```{r, eval = F}
+champ.SVD(beta = BMIQ, pd = myLoad$pd)
+```
+
+
+
+```{r}
+BMIQ <- readRDS("/media/alexis/DATA/Thesis_paper_DATA/Koichi_DNAmethylomes/BMIQ.Rdata")
+
+Clinical_patient_data <- read.table("~/GitHub/Thesis_paper/Datasets/Clinical_Koichi_data_isoform_SRR_annotated.tsv", sep = "\t", header = T)
+
+Clinical_patient_data$Baseline_phenotype <- sapply(Clinical_patient_data$Best_response, function(resp){
+  switch(resp,
+         "CR" = "Responder",
+         "CRi" = "Responder",
+         "CRp" = "Responder",
+         "HI" = "Intermediate_Responder",
+         "MLFS" = "Intermediate_Responder",
+         "Not_assessed" = "Not_assessed",
+         "PD" = "Non_Responder",
+         "PR" = "Intermediate_Responder",
+         "SD" = "Non_Responder",
+         "NA" = "Control"
+         )
+})
+
+Relapse <- colnames(BMIQ) %>%
+  sapply(function(sample){
+    if(sample %in% Clinical_patient_data$Post_treatment_sample){
+      "Relapse"
+    }else if(sample %in% Clinical_patient_data$Baseline_Sample){
+      "Baseline"
+    }else{
+      "Control"
+    }
+  })
+
+BMIQ_Baseline <- BMIQ[,Relapse != "Relapse"] %>% as.data.frame
+
+Phenos <- lapply(colnames(BMIQ_Baseline), function(sample){
+  tmp <- dplyr::filter(Clinical_patient_data, Baseline_Sample == sample)
+  if(nrow(tmp) == 0){
+    res <- list("Sample_Name" = sample,
+       "Response" = "Control",
+       "Cluster" = "Control",
+       "IDH" = "IDHwt",
+       "IDH_1_2" = "IDHwt"
+       )
+    return(res)
+  }
+  list("Sample_Name" = tmp$Baseline_Sample,
+       "Response" = tmp$Baseline_phenotype,
+       "Cluster" = tmp$Cluster,
+       "IDH" = tmp$IDH_isoform,
+       "IDH_1_2" = tmp$IDH_isoform %>%
+         stringr::str_remove("_R172") %>%
+         stringr::str_remove("_R140")
+       )
+}) %>% data.table::rbindlist()
+rownames(Phenos) <- colnames(BMIQ_Baseline)
+
+Phenos_Relapse <- lapply(colnames(BMIQ), function(sample){
+  tmp <- dplyr::filter(Clinical_patient_data, Baseline_Sample == sample)
+  if(nrow(tmp) == 0){
+    tmp <- dplyr::filter(Clinical_patient_data, Post_treatment_sample == sample)
+    if(nrow(tmp) == 0){
+    res <- list("Sample_Name" = sample,
+       "Response" = "Control",
+       "Cluster" = "Control",
+       "IDH" = "IDHwt",
+       "IDH_1_2" = "IDHwt",
+       "Timing" = "Control"
+       )
+    return(res)
+    }else{
+      res <- list("Sample_Name" = sample,
+       "Response" = tmp$Baseline_phenotype,
+       "Cluster" = "Control",
+       "IDH" = tmp$IDH_isoform,
+       "IDH_1_2" = tmp$IDH_isoform %>%
+         stringr::str_remove("_R172") %>%
+         stringr::str_remove("_R140"),
+       "Timing" = "Relapse"
+       )
+      return(res)
+    }
+  }
+  list("Sample_Name" = tmp$Baseline_Sample,
+       "Response" = tmp$Baseline_phenotype,
+       "Cluster" = tmp$Cluster,
+       "IDH" = tmp$IDH_isoform,
+       "IDH_1_2" = tmp$IDH_isoform %>%
+         stringr::str_remove("_R172") %>%
+         stringr::str_remove("_R140"),
+       "Timing" = tmp$Baseline_phenotype
+       )
+}) %>% data.table::rbindlist()
+rownames(Phenos_Relapse) <- colnames(BMIQ)
+
+```
+
+## PCA
+
+```{r}
+Make_PCA_pheno <- function(data, pheno, title){
+  data <- data[!is.na(pheno)]
+  pheno <- pheno[!is.na(pheno)]
+  res.pca <- prcomp(t(data))
+  p <- fviz_pca_ind(res.pca, label="none", habillage=pheno, addEllipses=T, ellipse.level=0.95)
+  p <- p + ggtitle(paste("PCA DNA methylome ~ ", title))
+  p
+}
+```
+
+```{r}
+PCA_Response <- Make_PCA_pheno(BMIQ_Baseline, Phenos$Response, "Response")
+PCA_IDH <- Make_PCA_pheno(BMIQ_Baseline, Phenos$IDH_1_2, "IDH")
+PCA_Relapse <- Make_PCA_pheno(as.data.frame(BMIQ), Phenos_Relapse$Timing, "Relapse")
+```
+
+```{r}
+ggsave("~/GitHub/Thesis_paper/Results/Epigenomic/PCA_Response.png", PCA_Response, bg = "white", width = 3800, height = 2100, units = "px")
+ggsave("~/GitHub/Thesis_paper/Results/Epigenomic/PCA_IDH.png", PCA_IDH, bg = "white", width = 3800, height = 2100, units = "px")
+ggsave("~/GitHub/Thesis_paper/Results/Epigenomic/PCA_Relapse.png", PCA_Relapse, bg = "white", width = 3800, height = 2100, units = "px")
+```
+
+## Heatmap
+
+```{r}
+Make_heatmap <- function(DATA, Phenotype, method = "pearson",
+                         title, annotation_color, kmeans_k = NA, cuttree = NA, corr=T) {
+  if(corr){
+    corr <- rcorr(as.matrix(DATA), type = method)$r
+    colnames(corr) <- colnames(DATA)
+  }else{
+    corr <- DATA
+  }
+  title <- paste0(title, " ", method)
+  heatmap <- pheatmap(corr,
+                      color = colorRampPalette(brewer.pal(n = 9, name = "YlOrRd"))(100),
+                      annotation_col = Phenotype,
+                      annotation_colors = annotation_color,
+                      legend = TRUE, scale = "none",
+                      treeheight_row = 20,
+                      main = title,
+                      fontsize = 10,
+                      cutree_cols = cuttree
+  )
+  return(heatmap)
+}
+```
+
+```{r, eval = F}
+Annotation_color <-  list(
+    Response = c(Non_Responder = "red", Responder = "green", Intermediate_Responder = "orange", Not_assessed = "grey", Control = "black"),
+    #Cluster = c(Cluster_R = "green", Cluster_NR = "red", No_clustered = "grey", Control = "black"),
+    IDH = c(IDH1 = "blue", IDH2_R140 = "pink", IDH2_R172 = "yellow", IDH2 = "red", IDHwt = "black"))
+
+data <- BMIQ_Baseline
+Var_data <- rowVars(as.matrix(data))
+names(Var_data) <- rownames(data)
+pourcent_elem <- c(0.5, 1, 5, 10, 50, 100)
+method = c("pearson","spearman")
+res <- mclapply(method, function(meth){
+  plots_pearson <- mclapply(pourcent_elem, function(percent){
+    nb_elem <- percent*nrow(data)%/%100
+    Top_var <- Var_data[order(Var_data, decreasing = T)] %>% .[1:nb_elem]
+    Top_Var_data <- data %>% .[rownames(.) %in% names(Top_var),]
+    heat <- Make_heatmap(Top_Var_data, dplyr::select(Phenos, c("Response", "IDH_1_2")), title = paste0(percent, "% of element"),
+                         annotation_color = Annotation_color, method = meth)
+    # pca_p <- Make_PCA_pheno(Top_Var_data, Phenos$Cluster, "phenotypes")
+    list(heat)
+  }, mc.cores = cores2use)
+}, mc.cores = cores2use)
+
+lm <- rbind(c(1,2),
+         c(3, 5),
+         c(4, 5),
+         c(6, 7),
+         c(8, 10),
+         c(9, 10))
+gri <- grid.arrange(grobs = list(as.grob(res[[1]][[1]][[1]]), as.grob(res[[1]][[2]][[1]]),
+                          as.grob(res[[1]][[3]][[1]]), as.grob(res[[1]][[4]][[1]]),
+                          as.grob(res[[1]][[5]][[1]]),
+                          as.grob(res[[2]][[1]][[1]]), as.grob(res[[2]][[2]][[1]]),
+                          as.grob(res[[2]][[3]][[1]]), as.grob(res[[2]][[4]][[1]]),
+                          as.grob(res[[2]][[5]][[1]])),
+             layout_matrix = lm)
+ggsave(paste0("~/GitHub/Thesis_paper/Results/DNAmethylation/Heatmap_DNAmeth_2.png"), gri, bg = "white", width = 7600, height = 8400, units = "px")
+```
+
+# Champ analysis
+
+```{r, eval = F}
+champ.SVD(beta = as.matrix(BMIQ_Baseline), pd = as.data.frame(Phenos))
+```
+
+```{r}
+BMIQ_Relapse <- BMIQ[,(Phenos_Relapse$Timing == "Relapse" | Phenos_Relapse$Timing == "Responder" | Phenos_Relapse$Timing == "Control")]
+Phenos_Relapse_analysis <- Phenos_Relapse[(Phenos_Relapse$Timing == "Relapse" | Phenos_Relapse$Timing == "Responder" | Phenos_Relapse$Timing == "Control"),]
+
+BMIQ_Baseline_IDH1 <- BMIQ_Baseline[,(Phenos$IDH_1_2 == "IDH1" & Phenos$Response != "Not_assessed")]
+Phenos_IDH1 <- Phenos[(Phenos$IDH_1_2 == "IDH1" & Phenos$Response != "Not_assessed"),]
+
+BMIQ_Baseline_IDH2 <- BMIQ_Baseline[,(Phenos$IDH_1_2 == "IDH2" & Phenos$Response != "Not_assessed")]
+Phenos_IDH2 <- Phenos[(Phenos$IDH_1_2 == "IDH2" & Phenos$Response != "Not_assessed"),]
+
+BMIQ_Baseline_Responder <- BMIQ_Baseline[,Phenos$Response == "Responder"]
+Phenos_Baseline_Responder <- Phenos[Phenos$Response == "Responder",]
+
+BMIQ_Baseline_Non_Responder <- BMIQ_Baseline[,Phenos$Response == "Non_Responder"]
+Phenos_Baseline_Non_Responder <- Phenos[Phenos$Response == "Non_Responder",]
+```
+
+## DMP 
+
+```{r}
+DMP_IDHs <- Differential_analysis(Phenos$IDH_1_2, as.matrix(BMIQ_Baseline))
+DMP_Response <- Differential_analysis(Phenos$Response, as.matrix(BMIQ_Baseline))
+DMP_Response_IDH2 <- Differential_analysis(Phenos_IDH2$Response, as.matrix(BMIQ_Baseline_IDH2))
+DMP_Response_IDH1 <- Differential_analysis(Phenos_IDH1$Response, as.matrix(BMIQ_Baseline_IDH1))
+DMP_IDH_Responder <- Differential_analysis(Phenos_Baseline_Responder$IDH_1_2, as.matrix(BMIQ_Baseline_Responder))
+DMP_IDH_Non_Responder <- Differential_analysis(Phenos_Baseline_Non_Responder$IDH_1_2, as.matrix(BMIQ_Baseline_Non_Responder))
+
+DMP_Relapse <- Differential_analysis(Phenos_Relapse_analysis$Timing, as.matrix(BMIQ_Relapse))
+```
+
+# Volcano plots
+
+## IDH
+
+```{r}
+head(DMP_IDHs$`IDH1-IDH2`)
+volcano_IDH1_IDH2 <- EnhancedVolcano(toptable = DMP_IDHs$`IDH1-IDH2`, lab = rownames(DMP_IDHs$`IDH1-IDH2`),
+                x = "logFC", y = "P.Value",
+                FCcutoff = 0.1, pCutoff = 0.005, xlim = c(-0.5, 0.5), ylim = c(0, 10),
+                title = "IDH1 vs IDH2 methylation", subtitle = NA,
+                subtitleLabSize = 0)
+volcano_IDH1_IDH2
+# volcano_IDH1_IDHwt <- EnhancedVolcano(toptable = DMP_IDHs$`IDH1-IDHwt`, lab = rownames(DMP_IDHs$`IDH1-IDHwt`),
+#                 x = "logFC", y = "P.Value",
+#                 FCcutoff = 0.1, pCutoff = 0.005, xlim = c(-0.5, 0.5), ylim = c(0, 20),
+#                 title = "IDH1 vs IDHwt methylation", subtitle = NA,
+#                 subtitleLabSize = 0)
+# volcano_IDH1_IDHwt
+# volcano_IDH2_IDHwt <- EnhancedVolcano(toptable = DMP_IDHs$`IDH2-IDHwt`, lab = rownames(DMP_IDHs$`IDH2-IDHwt`),
+#                 x = "logFC", y = "P.Value",
+#                 FCcutoff = 0.1, pCutoff = 0.005, xlim = c(-0.5, 0.5), ylim = c(0, 20),
+#                 title = "IDH2 vs IDHwt methylation", subtitle = NA,
+#                 subtitleLabSize = 0)
+# volcano_IDH2_IDHwt
+```
+## Response
+
+```{r}
+# volcano_Control_Non_Responder <- EnhancedVolcano(toptable = DMP_Response$`Control-Non_Responder`, lab = rownames(DMP_Response$`Control-Non_Responder`),
+#                 x = "logFC", y = "P.Value",
+#                 FCcutoff = 0.1, pCutoff = 0.005, xlim = c(-0.5, 0.5), ylim = c(0, 15),
+#                 title = "Non_Responder vs Control methylation", subtitle = NA,
+#                 subtitleLabSize = 0)
+# volcano_Control_Non_Responder
+# volcano_Control_Responder <- EnhancedVolcano(toptable = DMP_Response$`Control-Responder`, lab = rownames(DMP_Response$`Control-Responder`),
+#                 x = "logFC", y = "P.Value",
+#                 FCcutoff = 0.1, pCutoff = 0.005, xlim = c(-0.5, 0.5), ylim = c(0, 15),
+#                 title = "Responder vs Control methylation", subtitle = NA,
+#                 subtitleLabSize = 0)
+# volcano_Control_Responder
+volcano_Response <- EnhancedVolcano(toptable = DMP_Response$`Non_Responder-Responder`, lab = rownames(DMP_Response$`Non_Responder-Responder`),
+                x = "logFC", y = "P.Value",
+                FCcutoff = 0.1, pCutoff = 0.005, xlim = c(-0.5, 0.5), ylim = c(0, 10),
+                title = "Non_Responder vs Responder methylation", subtitle = NA,
+                subtitleLabSize = 0)
+volcano_Response
+```
+
+## Relapse
+
+```{r}
+volcano_relapse <- EnhancedVolcano(toptable = DMP_Relapse$`Relapse-Responder`, lab = rownames(DMP_Relapse$`Relapse-Responder`),
+                x = "logFC", y = "P.Value",
+                FCcutoff = 0.1, pCutoff = 0.005, xlim = c(-0.5, 0.5), ylim = c(0, 15),
+                title = "Relapse vs Baseline methylation", subtitle = NA,
+                subtitleLabSize = 0)
+volcano_relapse
+
+# volcano_relapse_control <- EnhancedVolcano(toptable = DMP_Relapse$`Control-Relapse`, lab = rownames(DMP_Relapse$`Control-Relapse`),
+#                 x = "logFC", y = "P.Value",
+#                 FCcutoff = 0.1, pCutoff = 0.005, xlim = c(-0.5, 0.5), ylim = c(0, 15),
+#                 title = "Relapse vs Control methylation", subtitle = NA,
+#                 subtitleLabSize = 0)
+# volcano_relapse_control
+```
+## IDH2 Response
+
+```{r}
+volcano_IDH2_and_response <- EnhancedVolcano(toptable = DMP_Response_IDH2$`Non_Responder-Responder`, lab = rownames(DMP_Response_IDH2$`Non_Responder-Responder`),
+                x = "logFC", y = "P.Value",
+                FCcutoff = 0.1, pCutoff = 0.005, xlim = c(-0.5, 0.5), ylim = c(0, 5),
+                title = "Non Responder vs Responder in IDH2 methylation", subtitle = NA,
+                subtitleLabSize = 0)
+volcano_IDH2_and_response
+```
+
+## IDH in Responder
+
+```{r}
+volcano_IDH_in_responder <- EnhancedVolcano(toptable = DMP_IDH_Responder$`IDH1-IDH2`, lab = rownames(DMP_IDH_Responder$`IDH1-IDH2`),
+                x = "logFC", y = "P.Value",
+                FCcutoff = 0.1, pCutoff = 0.005, xlim = c(-0.5, 0.5), ylim = c(0, 6),
+                title = "IDH1 vs IDH2 in responder methylation", subtitle = NA,
+                subtitleLabSize = 0)
+volcano_IDH_in_responder
+```
+
+## IDH in Non Responder
+
+```{r}
+volcano_IDH_in_non_responder <- EnhancedVolcano(toptable = DMP_IDH_Non_Responder$`IDH1-IDH2`, lab = rownames(DMP_IDH_Non_Responder$`IDH1-IDH2`),
+                x = "logFC", y = "P.Value",
+                FCcutoff = 0.1, pCutoff = 0.005, xlim = c(-0.5, 0.5), ylim = c(0, 6),
+                title = "IDH1 vs IDH2 in Non Responder methylation", subtitle = NA,
+                subtitleLabSize = 0)
+volcano_IDH_in_non_responder
+```
+
+
+
+## Response in IDH1
+
+```{r}
+volcano_IDH1_and_response <- EnhancedVolcano(toptable = DMP_Response_IDH1$`Non_Responder-Responder`, lab = rownames(DMP_Response_IDH1$`Non_Responder-Responder`),
+                x = "logFC", y = "P.Value",
+                FCcutoff = 0.1, pCutoff = 0.005, xlim = c(-0.5, 0.5), ylim = c(0, 5),
+                title = "Non Responder vs Responder in IDH1 methylation", subtitle = NA,
+                subtitleLabSize = 0)
+volcano_IDH1_and_response
+```
+
+## Saving Volcanos
+
+```{r}
+ggsave("~/GitHub/Thesis_paper/Results/Epigenomic/Volcano_Response.png", volcano_Response, bg = "white", width = 3800, height = 2100, units = "px")
+ggsave("~/GitHub/Thesis_paper/Results/Epigenomic/Volcano_relapse.png", volcano_relapse, bg = "white", width = 3800, height = 2100, units = "px")
+ggsave("~/GitHub/Thesis_paper/Results/Epigenomic/Volcano_IDH1_IDH2.png", volcano_IDH1_IDH2, bg = "white", width = 3800, height = 2100, units = "px")
+ggsave("~/GitHub/Thesis_paper/Results/Epigenomic/Volcano_IDH2_and_response.png", volcano_IDH2_and_response, bg = "white", width = 3800, height = 2100, units = "px")
+ggsave("~/GitHub/Thesis_paper/Results/Epigenomic/Volcano_IDH_in_responder.png", volcano_IDH_in_responder, bg = "white", width = 3800, height = 2100, units = "px")
+ggsave("~/GitHub/Thesis_paper/Results/Epigenomic/Volcano_IDH_in_non_responder.png", volcano_IDH_in_non_responder, bg = "white", width = 3800, height = 2100, units = "px")
+ggsave("~/GitHub/Thesis_paper/Results/Epigenomic/Volcano_IDH1_and_response.png", volcano_IDH1_and_response, bg = "white", width = 3800, height = 2100, units = "px")
+```
+
+# GG VENN
+
+## IDH
+
+```{r, eval = F}
+DMPs_list <- list(IDH1 = dplyr::filter(DMP_IDHs$`IDH1-IDHwt`, abs(logFC) > 0.1 & P.Value < 0.05)$ID,
+                  IDH2 = dplyr::filter(DMP_IDHs$`IDH2-IDHwt`, abs(logFC) > 0.1 & P.Value < 0.05)$ID,
+                  IDHs = dplyr::filter(DMP_IDHs$`IDH1-IDH2`, abs(logFC) > 0.1 & P.Value < 0.05)$ID)
+
+IDH1_IDH2_DMP <- ggvenn::ggvenn(DMPs_list)
+ggsave("~/GitHub/Thesis_paper/Results/Epigenomic/Venn_DMP_IDH.png", IDH1_IDH2_DMP, bg = "white", width = 3800, height = 2100, units = "px")
+```
+
+## Response
+
+```{r, eval = F}
+DMPs_list_Response <- list(Responder = dplyr::filter(DMP_Response$`Control-Responder`, abs(logFC) > 0.1 & P.Value < 0.05)$ID,
+                  Non_Responder = dplyr::filter(DMP_Response$`Control-Non_Responder`, abs(logFC) > 0.1 & P.Value < 0.05)$ID,
+                  Response = dplyr::filter(DMP_Response$`Non_Responder-Responder`, abs(logFC) > 0.1 & P.Value < 0.05)$ID)
+
+Response_DMP <- ggvenn::ggvenn(DMPs_list_Response)
+ggsave("~/GitHub/Thesis_paper/Results/Epigenomic/Venn_DMP_Response.png", Response_DMP, bg = "white", width = 3800, height = 2100, units = "px")
+```
+
+## Relapse
+
+```{r, eval = F}
+DMPs_list_Relapse <- list(Baseline = dplyr::filter(DMP_Relapse$`Control-Responder`, abs(logFC) > 0.1 & P.Value < 0.05)$ID,
+                  Relapse = dplyr::filter(DMP_Relapse$`Control-Relapse`, abs(logFC) > 0.1 & P.Value < 0.05)$ID,
+                  Relapse_Response = dplyr::filter(DMP_Relapse$`Relapse-Responder`, abs(logFC) > 0.1 & P.Value < 0.05)$ID)
+
+Relapse_DMP <- ggvenn::ggvenn(DMPs_list_Relapse)
+ggsave("~/GitHub/Thesis_paper/Results/Epigenomic/Venn_DMP_Relapse.png", Relapse_DMP, bg = "white", width = 3800, height = 2100, units = "px")
+```
+
+
+
+# Enhancer part
+
+## Making 3D network
+
+```{r}
+prepare_pchic <- function(cell_lines = NULL, minimum_interaction = 5, pchic = NULL){
+  if (is.null(pchic)){
+    load("/media/alexis/DATA/pchic.RData")
+  }
+  if (is.null(cell_lines)){
+    cell_lines = c("Mon", "Mac0", "Mac1", "Mac2", "Neu", "MK", "EP", "Ery", "FoeT", "nCD4", "tCD4", "aCD4", "naCD4", "nCD8", "tCD8", "nB", "tB")
+  }
+  pchic <- data.frame(pchic[rowSums(pchic[,cell_lines] >= minimum_interaction) >= 1,c(1,2,3,6,7,8)]) %>% na.omit(.)
+  pchic$baitChr <- paste0("chr", pchic$baitChr)
+  pchic$oeChr <- paste0("chr", pchic$oeChr)
+  return(pchic)
+}
+```
+
+```{r}
+Myelo_cell_lines <- c("Mon", "Mac1", "Mac0", "Mac2", "MK", "Ery", "EP")
+
+pchic <- prepare_pchic(cell_lines = Myelo_cell_lines)
+ps <- chaser::make_chromnet(pchic)
+# baits <- chaser::export(ps, 'baits')
+# pchic_chaser <- chaser::subset_chromnet(ps, method = "nodes", nodes1 = baits)
+```
+
+
+
+```{r}
+Anno_EPIC <- read.table("/media/alexis/DATA/Illumina_manifest/infinium-methylationepic.tsv", sep = "\t", header = T)
+
+pvalue_function <- function(a){
+  if(length(a)>1){
+    poolr::fisher(na.omit(a))$p
+  }else{
+    a
+  }
+}
+```
+
+## Functions
+
+```{r}
+logFC_function <- function(a){
+  if(length(a)>1){
+    median(na.omit(a))
+  }else{
+    a
+  }
+}
+
+Localised_DMP <- function(DMPs, Annotation = Anno_EPIC){
+  dmp_annoted <- merge(DMPs, Anno_EPIC, by.x = "ID", by.y = "Name", all.x = T)
+  colnames(dmp_annoted) <- c("ID", "logFC", "AveExpr", "t", "P.Value", "adj.P.Val", "B", "start", "strand", "chrom")
+  dmp_annoted$end <- dmp_annoted$start +1
+  dmp_annoted$chrom <- paste0("chr", dmp_annoted$chrom)
+  dmp_annoted <- dmp_annoted[c("chrom", "start", "end", "logFC", "P.Value")]
+  dmp_annoted <- dmp_annoted[c("chrom", "start", "end", "logFC", "P.Value")]
+
+  logFCchaser <- chaser::load_features(ps, dmp_annoted[c("chrom", "start", "end", "logFC")], auxfun = "logFC_function", type = 'features_table', featnames = "logFC", missingv = 0)
+  PVALUE_chaser <- chaser::load_features(ps, dmp_annoted[c("chrom", "start", "end", "P.Value")], auxfun = "pvalue_function", type = 'features_table', featnames = "P.Value", missingv = 1)
+  logFCchaser$features<- data.frame("Fragment" = rownames(logFCchaser$features),
+                                    "logFC" = unname(logFCchaser$features),
+                                    "P.Value" = unname(PVALUE_chaser$features)
+  )
+  logFCchaser
+}
+```
+
+## Localised DMP
+
+```{r}
+Localised_DMPs <- list(
+  "IDH_in_Responder" = Localised_DMP(DMP_IDH_Responder$`IDH1-IDH2`),
+
+  "IDH_in_Non_Responder" = Localised_DMP(DMP_IDH_Non_Responder$`IDH1-IDH2`),
+
+  "Response_in_IDH2" = Localised_DMP(DMP_Response_IDH2$`Non_Responder-Responder`),
+
+  "Response_in_IDH1" = Localised_DMP(DMP_Response_IDH1$`Non_Responder-Responder`)
+)
+```
+
+
+```{r}
+pchic$NodeIn <- paste0(pchic$baitChr, ":", pchic$baitStart, "-", pchic$baitEnd)
+pchic$NodeOut <- paste0(pchic$oeChr, ":", pchic$oeStart, "-", pchic$oeEnd)
+```
+
+```{r}
+load("/media/alexis/DATA/pchic.RData")
+pchic$NodeIn <- paste0("chr", pchic$baitChr, ":", pchic$baitStart, "-", pchic$baitEnd)
+pchic$NodeOut <- paste0("chr", pchic$oeChr, ":", pchic$oeStart, "-", pchic$oeEnd)
+
+pchic <- data.frame(pchic[rowSums(pchic[,Myelo_cell_lines] >= 5) >= 1,c(31, 5, 10, 32)]) %>% na.omit(.)
+pchic$oeName_changed <- sapply(1:nrow(pchic), function(interaction){
+  if(pchic[interaction, "oeName"] == "."){
+    pchic[interaction, "NodeOut"]
+  }else{
+    pchic[interaction, "oeName"]
+  }
+})
+pchic_anno <- pchic[c(1:2)] %>% unique()
+
+# pchic %>% 
+  # write.table("~/GitHub/Thesis_paper/Results/Epigenomic/pchic_network.tsv", sep = "\t", row.names = F, quote = F)
+```
+
+## Saving features
+
+```{r}
+Features <- lapply(names(Localised_DMPs), function(comp){
+  feats <- Localised_DMPs[[comp]]$features %>%
+    merge(pchic_anno, by.x = "Fragment", by.y = "NodeIn", all.x = T, all.y = T) 
+  feats$chrom <- feats$Fragment %>% 
+    stringr::str_split(pattern = ":") %>% lapply(function(frag){frag[[1]]}) %>% as.character()
+  feats %>%
+    write.table(paste0("~/GitHub/Thesis_paper/Results/Epigenomic/", comp, "_Koichis_pchic_features.tsv"), 
+                sep = "\t", row.names = F, quote = F)
+  feats
+})
+names(Features) <- names(Localised_DMPs)
+```
+
+## Finding direct indirect affected genes 
+
+### Function
+
+```{r}
+List_gene_affected_directly_or_indirectly_by_methylation <- function(features, neg = F){
+  if(neg){
+    fragments_DMP <- dplyr::filter(features, P.Value < 0.01 & logFC > 0.1) %>% .$Fragment %>% unique
+  }else{
+    fragments_DMP <- dplyr::filter(features, P.Value < 0.01 & logFC < -0.1) %>% .$Fragment %>% unique
+  }
+  direct_genes <- dplyr::filter(pchic, NodeIn %in% fragments_DMP) %>% .$baitName %>% stringr::str_split(";") %>% unlist() %>% unique
+  indirect_genes <- dplyr::filter(pchic, NodeOut %in% fragments_DMP) %>% .$baitName %>% unlist() %>%  stringr::str_split(";") %>% unlist() %>% unique
+  list("Direct" = direct_genes,
+       "Indirect" = indirect_genes)
+}
+```
+
+### Analysis
+
+```{r}
+Direct_indirect_methylation_up <- lapply(names(Features), function(comp){
+  res <- List_gene_affected_directly_or_indirectly_by_methylation(Features[[comp]])
+  res$Direct %>%
+    write.table(paste0("~/GitHub/Thesis_paper/Results/Epigenomic/", comp, "_Koichi_localised_directly_affected.tsv"), 
+              sep = "\t" , col.names = NA)
+  res$Indirect %>%
+    write.table(paste0("~/GitHub/Thesis_paper/Results/Epigenomic/", comp, "_Koichi_localised_indirectly_affected.tsv"), 
+              sep = "\t" , col.names = NA)
+  res
+})
+names(Direct_indirect_methylation_up) <- c("IDH1_in_Responder", "IDH1_in_Non_responder", "Non_responder_in_IDH2", "Non_responder_in_IDH1")
+
+Direct_indirect_methylation_down <- lapply(names(Features), function(comp){
+  res <- List_gene_affected_directly_or_indirectly_by_methylation(Features[[comp]], neg = T)
+  res$Direct %>%
+    write.table(paste0("~/GitHub/Thesis_paper/Results/Epigenomic/", comp, "_neg_Koichi_localised_directly_affected.tsv"), 
+              sep = "\t" , col.names = NA)
+  res$Indirect %>%
+    write.table(paste0("~/GitHub/Thesis_paper/Results/Epigenomic/", comp, "_neg_Koichi_localised_indirectly_affected.tsv"), 
+              sep = "\t" , col.names = NA)
+  res
+})
+names(Direct_indirect_methylation_down) <- c("IDH2_in_Responder", "IDH2_in_Non_responder", "Responder_in_IDH2", "Responder_in_IDH1")
+Direct_indirect_methylation <- c(Direct_indirect_methylation_up, Direct_indirect_methylation_down)
+rm(Direct_indirect_methylation_up, Direct_indirect_methylation_down)
+```
+
+### Intersections
+
+```{r, eval = F}
+Commonly_affected_directly_IDH1_IDH2_2_IDHwt <- intersect(IDH1_IDHwt_affected$Direct, IDH2_IDHwt_affected$Direct)
+
+Commonly_affected_indirectly_IDH1_IDH2_2_IDHwt <- intersect(IDH1_IDHwt_affected$Indirect, 
+                                                            IDH2_IDHwt_affected$Indirect)
+
+Specific_2_IDH1_directly <- IDH1_IDHwt_affected$Direct %>% 
+  .[. %ni% IDH2_IDHwt_affected$Direct]
+
+
+Specific_2_IDH1_indirectly <- IDH1_IDHwt_affected$Indirect %>% 
+  .[. %ni% IDH2_IDHwt_affected$Indirect]
+
+
+Specific_2_IDH2_directly <- IDH2_IDHwt_affected$Direct %>% 
+  .[. %ni% IDH1_IDHwt_affected$Direct]
+
+
+Specific_2_IDH2_indirectly <- IDH2_IDHwt_affected$Indirect %>% 
+  .[. %ni% IDH1_IDHwt_affected$Indirect]
+
+```
+
+### GG Venn
+
+#### Direct
+
+```{r, eval = F}
+List_genes_affected_directly <- list("mIDH1" = IDH1_IDHwt_affected$Direct,
+                                     "mIDH2" = IDH2_IDHwt_affected$Direct,
+                                     "R" = Responder_Control_affected$Direct,
+                                     "NR" = Non_Responder_Control_affected$Direct)
+
+ggvenn::ggvenn(List_genes_affected_directly)
+
+List_cpgs_affected <- list()
+List_cpgs_affected[["mIDH1"]] <- DMP_IDHs$`IDH1-IDHwt` %>% dplyr::filter(logFC > 0.1 & P.Value < 0.05) %>% .$ID
+List_cpgs_affected[["mIDH2"]] <- DMP_IDHs$`IDH2-IDHwt` %>% dplyr::filter(logFC > 0.1 & P.Value < 0.05) %>% .$ID
+List_cpgs_affected[["R"]] <- DMP_Response$`Control-Responder` %>% dplyr::filter(logFC < -0.1 & P.Value < 0.05) %>% .$ID
+List_cpgs_affected[["NR"]] <- DMP_Response$`Control-Non_Responder` %>% dplyr::filter(logFC < -0.1 & P.Value < 0.05) %>% .$ID
+
+ggvenn::ggvenn(List_cpgs_affected)
+```
+
+#### Indirect
+
+```{r, eval = F}
+List_genes_affected_indirectly <- list("IDH1" = IDH1_IDHwt_affected$Indirect,
+                                     "IDH2" = IDH2_IDHwt_affected$Indirect,
+                                     "R" = Responder_Control_affected$Indirect,
+                                     "NR" = Non_Responder_Control_affected$Indirect)
+
+ggvenn::ggvenn(List_genes_affected_indirectly)
+```
+
+```{r, eval = F}
+Specific_2_R_directly <- Responder_Control_affected$Direct %>% 
+  .[. %ni% Non_Responder_Control_affected$Direct]
+
+Specific_2_R_indirectly <- Responder_Control_affected$Indirect %>% 
+  .[. %ni% Non_Responder_Control_affected$Indirect]
+```
+
+```{r, eval = F}
+Specific_2_NR_directly <- Non_Responder_Control_affected$Direct %>% 
+  .[. %ni% Responder_Control_affected$Direct]
+
+Specific_2_NR_indirectly <- Non_Responder_Control_affected$Indirect %>% 
+  .[. %ni% Responder_Control_affected$Indirect]
+
+```
+
+```{r, eval = F}
+Specific_2_IDH2_and_NR_directly <- intersect(Specific_2_NR_directly, Specific_2_IDH2_directly)
+
+Specific_2_IDH2_and_NR_indirectly <- intersect(Specific_2_NR_indirectly, Specific_2_IDH2_indirectly)
+```
+
+```{r, eval = F}
+Test_fisher_direct <- data.frame("IDH1" = c(228, 234), "IDH2" = c(276, 233))
+fisher.test(Test_fisher_direct)
+
+
+Test_fisher_indirect <- data.frame("IDH1" = c(758, 725), "IDH2" = c(852, 676))
+fisher.test(Test_fisher_indirect)
+
+```
+
+```{r, eval = F}
+Test_fisher_cpgs <- data.frame("IDH1" = c(16188, 14643), "IDH2" = c(17687, 17944))
+rownames(Test_fisher_cpgs) <- c("R", "NR")
+Test_fisher_cpgs
+chisq.test(Test_fisher_cpgs)
+```
+
+# GO gene direct & indirect
+
+## Functions
+
+```{r}
+GO_KEGG_WP_MKEGG <- function(List_direct, List_indirect){
+  list_enrichments <- list()
+  list_enrichments[["GO_direct"]] <- enrichGO(List_direct, OrgDb = org.Hs.eg.db, universe = GO_direct_universe, keyType = "SYMBOL", pvalueCutoff = 0.2) 
+  list_enrichments[["GO_indirect"]] <- enrichGO(List_indirect, OrgDb = org.Hs.eg.db, universe = GO_direct_universe, keyType = "SYMBOL", pvalueCutoff = 0.2)
+  
+  entrez_id_direct <- dplyr::filter(genes, hgnc_symbol %in% List_direct) %>%
+    .$entrezgene_id %>% unique
+  entrez_id_indirect <- dplyr::filter(genes, hgnc_symbol %in% List_indirect) %>%
+    .$entrezgene_id %>% unique
+  universe_entrez <- dplyr::filter(genes, hgnc_symbol %in% GO_direct_universe) %>%
+    .$entrezgene_id %>% as.character %>% unique 
+  
+  list_enrichments[["KEGG_direct"]] <- enrichKEGG(entrez_id_direct, organism = "hsa", 
+                                                  keyType = 'ncbi-geneid', pvalueCutoff = 1, 
+                                                  pAdjustMethod = "none", universe = universe_entrez) 
+  list_enrichments[["KEGG_indirect"]] <- enrichKEGG(entrez_id_indirect, organism = "hsa", 
+                                                    keyType = 'ncbi-geneid', pvalueCutoff = 1, 
+                                                    pAdjustMethod = "none", universe = universe_entrez)
+  
+  res <- lapply(names(list_enrichments), function(onto){
+    list_enrichments[[onto]]@result$qvalue <- list_enrichments[[onto]]@result$pvalue
+    list_enrichments[[onto]]@result$p.adjust <- list_enrichments[[onto]]@result$pvalue
+    list_enrichments[[onto]]
+  })
+  
+  names(res) <- names(list_enrichments)
+  
+  return(res)
+}
+
+Make_enrich_plot <- function(enrichment, path){
+  n_enrich <- nrow(dplyr::filter(enrichment@result, pvalue < 0.1))
+  if(n_enrich == 0){
+    return(NULL)
+  }
+  if(enrichment@keytype !=  "SYMBOL"){
+    enrichment <- enrichment %>%
+      setReadable(OrgDb = org.Hs.eg.db, keyType = "ENTREZID")
+  }
+  height_plot <- 200 + (n_enrich *120)
+  p <- dotplot(enrichment, showCategory = n_enrich)
+  cplot <- cnetplot(enrichment, showCategory = n_enrich)
+  ggsave(paste0(path, "_dotplot.png"), p, bg = "white", width = 3800, height = height_plot, units = "px", limitsize = FALSE)
+  ggsave(paste0(path, "_cnetplot.png"), cplot, bg = "white", width = 3800, height = 3800, units = "px", limitsize = FALSE)
+  p
+  cplot
+  list(p, cplot)
+}
+```
+
+## Annotations Entrez
+
+```{r}
+mart <- biomaRt::useMart(biomart = "ENSEMBL_MART_ENSEMBL",
+                         dataset = "hsapiens_gene_ensembl")
+
+baitnames <- pchic$baitName %>% stringr::str_split(pattern = ";") %>% unlist %>% unique
+
+genes <- getBM(filters = "hgnc_symbol",
+               attributes = c("ensembl_gene_id","entrezgene_id", "hgnc_symbol"),
+               values = baitnames,
+               mart = mart)
+
+GO_direct_universe <- Response_localised_features$baitName %>% stringr::str_split(pattern = ";") %>% unlist %>% unique
+```
+
+## Response in IDH1
+
+```{r}
+Enrichements_Responder_in_IDH1 <- GO_KEGG_WP_MKEGG(Response_in_IDH1_localised_affected$Direct, Response_in_IDH1_localised_affected$Indirect)
+lapply(names(Enrichements_Responder_in_IDH1), function(enrichment){
+  Make_enrich_plot(Enrichements_Responder_in_IDH1[[enrichment]], paste0("~/GitHub/Thesis_paper/Results/Epigenomic/Responder_in_IDH1_", enrichment))
+})
+```
+
+## Response in IDH2
+
+```{r}
+Enrichements_Responder_in_IDH2 <- GO_KEGG_WP_MKEGG(Response_in_IDH2_localised_affected$Direct, Response_in_IDH2_localised_affected$Indirect)
+lapply(names(Enrichements_Responder_in_IDH2), function(enrichment){
+  Make_enrich_plot(Enrichements_Responder_in_IDH2[[enrichment]], paste0("~/GitHub/Thesis_paper/Results/Epigenomic/Responder_in_IDH2_", enrichment))
+})
+```
+
+## IDH in Responder
+
+```{r}
+Enrichements_IDH_in_Responder <- GO_KEGG_WP_MKEGG(IDH_in_Responder_localised_affected$Direct, IDH_in_Responder_localised_affected$Indirect)
+lapply(names(Enrichements_IDH_in_Responder), function(enrichment){
+  Make_enrich_plot(Enrichements_IDH_in_Responder[[enrichment]], paste0("~/GitHub/Thesis_paper/Results/Epigenomic/IDH_in_Responder_", enrichment))
+})
+```
+
+## IDH in Non Responder
+
+```{r}
+Enrichements_IDH_in_Non_Responder <- GO_KEGG_WP_MKEGG(IDH_in_Non_Responder_localised_affected$Direct, IDH_in_Non_Responder_localised_affected$Indirect)
+lapply(names(Enrichements_IDH_in_Non_Responder), function(enrichment){
+  Make_enrich_plot(Enrichements_IDH_in_Non_Responder[[enrichment]], paste0("~/GitHub/Thesis_paper/Results/Epigenomic/IDH_in_Non_Responder_", enrichment))
+})
+```
+
+## Enrichments
+
+```{r}
+mclapply(names(Direct_indirect_methylation), function(comp){
+  res <- GO_KEGG_WP_MKEGG(Direct_indirect_methylation[[comp]]$Direct, Direct_indirect_methylation[[comp]]$Indirect)
+  mclapply(names(res), function(enrichment){
+    Make_enrich_plot(res[[enrichment]], paste0("~/GitHub/Thesis_paper/Results/Epigenomic/", comp, "_", enrichment))
+  }, mc.cores = 2)
+}, mc.cores = 4)
+```
+
+
+# Compare Results
+
+## Function
+
+```{r}
+Compare_Enrichments <- function(List_DEGs, indir = T){
+  if(indir == F){
+    list_direct_ID <- lapply(names(List_DEGs), function(Comparison){
+      direct <- List_DEGs[[Comparison]]
+      data.table(Entrez = direct, group = Comparison)
+    })
+  }else{
+    list_direct_ID <- lapply(names(List_DEGs), function(Comparison){
+      direct <- List_DEGs[[Comparison]]$Direct 
+      indirect <- List_DEGs[[Comparison]]$Indirect 
+      ids <- c(direct, indirect) %>% unique
+      data.table(Entrez = ids, group = Comparison)
+    })
+  }
+  names(list_direct_ID) <- names(List_DEGs)
+  mydf <- data.table::rbindlist(list_direct_ID)
+  go_cluster <- compareCluster(Entrez~group, data = mydf, fun = "enrichGO", OrgDb = org.Hs.eg.db, 
+                 keyType = "SYMBOL", pvalueCutoff = 0.1, pAdjustMethod = "none", qvalueCutoff = 1)
+  mydf_entrez <- merge(mydf, genes, by.x = "Entrez", by.y = "hgnc_symbol")
+  kegg_cluster <- compareCluster(entrezgene_id~group, data = mydf_entrez, fun = "enrichKEGG", 
+                                 organism = "hsa", qvalueCutoff = 1,
+                                 keyType = 'ncbi-geneid', pvalueCutoff = 0.1, 
+                                 pAdjustMethod = "none") 
+  List("GO" = go_cluster,
+       "KEGG" = kegg_cluster)
+}
+
+GO_KEGG_WP_MKEGG <- function(List_direct, List_indirect){
+  list_enrichments <- list()
+  list_enrichments[["GO_direct"]] <- enrichGO(List_direct, OrgDb = org.Hs.eg.db, universe = GO_direct_universe, keyType = "SYMBOL", pvalueCutoff = 0.2) 
+  list_enrichments[["GO_indirect"]] <- enrichGO(List_indirect, OrgDb = org.Hs.eg.db, universe = GO_direct_universe, keyType = "SYMBOL", pvalueCutoff = 0.2)
+  
+  entrez_id_direct <- dplyr::filter(genes, hgnc_symbol %in% List_direct) %>%
+    .$entrezgene_id %>% unique
+  entrez_id_indirect <- dplyr::filter(genes, hgnc_symbol %in% List_indirect) %>%
+    .$entrezgene_id %>% unique
+  universe_entrez <- dplyr::filter(genes, hgnc_symbol %in% GO_direct_universe) %>%
+    .$entrezgene_id %>% as.character %>% unique 
+  
+  list_enrichments[["KEGG_direct"]] <- enrichKEGG(entrez_id_direct, organism = "hsa", 
+                                                  keyType = 'ncbi-geneid', pvalueCutoff = 1, 
+                                                  pAdjustMethod = "none", universe = universe_entrez) 
+  list_enrichments[["KEGG_indirect"]] <- enrichKEGG(entrez_id_indirect, organism = "hsa", 
+                                                    keyType = 'ncbi-geneid', pvalueCutoff = 1, 
+                                                    pAdjustMethod = "none", universe = universe_entrez)
+  
+  res <- lapply(names(list_enrichments), function(onto){
+    list_enrichments[[onto]]@result$qvalue <- list_enrichments[[onto]]@result$pvalue
+    list_enrichments[[onto]]@result$p.adjust <- list_enrichments[[onto]]@result$pvalue
+    list_enrichments[[onto]]
+  })
+  
+  names(res) <- names(list_enrichments)
+  
+  return(res)
+}
+```
+
+## Comparing results 
+
+```{r}
+List_IDs <- list("Response_in_IDH1" = Response_in_IDH1_localised_affected, 
+                 "Response_in_IDH2" = Response_in_IDH2_localised_affected, 
+                 "IDH_in_Responder" = IDH_in_Responder_localised_affected,
+                 "IDH_in_Non_responder" = IDH_in_Non_Responder_localised_affected
+                 )
+
+List_IDs_direct <- list("Response_in_IDH1" = Response_in_IDH1_localised_affected$Direct, 
+                 "Response_in_IDH2" = Response_in_IDH2_localised_affected$Direct, 
+                 "IDH_in_Responder" = IDH_in_Responder_localised_affected$Direct,
+                 "IDH_in_Non_responder" = IDH_in_Non_Responder_localised_affected$Direct)
+
+List_IDs_indirect <- list("Response_in_IDH1" = Response_in_IDH1_localised_affected$Indirect, 
+                 "Response_in_IDH2" = Response_in_IDH2_localised_affected$Indirect, 
+                 "IDH_in_Responder" = IDH_in_Responder_localised_affected$Indirect,
+                 "IDH_in_Non_responder" = IDH_in_Non_Responder_localised_affected$Indirect)
+
+New_list_IDs_indirect_IDHs <- lapply(names(Direct_indirect_methylation)[c(1,2,5,6)], function(comp){
+  Direct_indirect_methylation[[comp]]$Indirect
+})
+names(New_list_IDs_indirect_IDHs) <- names(Direct_indirect_methylation)[c(1,2,5,6)]
+
+New_list_IDs_indirect_Response <- lapply(names(Direct_indirect_methylation)[c(3,4,7,8)], function(comp){
+  Direct_indirect_methylation[[comp]]$Indirect
+})
+names(New_list_IDs_indirect_Response) <- names(Direct_indirect_methylation)[c(3,4,7,8)]
+```
+
+
+```{r}
+Cluster_comparison <- Compare_Enrichments(List_IDs)
+
+Cluster_direct_Comparisons <- Compare_Enrichments(List_IDs_direct, F)
+
+Cluster_indirect_Comparisons <- Compare_Enrichments(List_IDs_indirect, F)
+
+IDH_cluster_comp <- Compare_Enrichments(New_list_IDs_indirect_IDHs, indir = F)
+
+Response_cluster_comp <- Compare_Enrichments(New_list_IDs_indirect_Response, indir = F)
+```
+
+```{r}
+lapply(names(IDH_cluster_comp), function(ont){
+  n <- 10
+  p <- dotplot(IDH_cluster_comp[[ont]], showCategory = n, font.size = 15) 
+  height_param <- n*6*120 +200
+  ggsave(paste0("~/GitHub/Thesis_paper/Results/Epigenomic/GO/IDH_cluster_comp_", ont, ".png"), p, bg = "white", width = 5700, 
+         height = height_param, units = "px", limitsize = FALSE)
+})
+
+lapply(names(Response_cluster_comp), function(ont){
+  n <- 10
+  p <- dotplot(Response_cluster_comp[[ont]], showCategory = n, font.size = 15) 
+  height_param <- n*6*120 +200
+  ggsave(paste0("~/GitHub/Thesis_paper/Results/Epigenomic/GO/Response_cluster_comp_", ont, ".png"), p, bg = "white", width = 5700, 
+         height = height_param, units = "px", limitsize = FALSE)
+})
+```
+
+
+
+```{r}
+n <- 10
+p <- dotplot(Cluster_direct_Comparisons$GO, showCategory = n, font.size = 15) 
+height_param <- n*6*120 +200
+ggsave("~/GitHub/Thesis_paper/Results/Epigenomic/GO/Cluster_direct_GO_plot.png", p, bg = "white", width = 5700, 
+       height = height_param, units = "px", limitsize = FALSE)
+
+Cluster_direct_Comparisons$GO
+
+pcnet <- cnetplot(Cluster_direct_Comparisons$GO, showCategory = n, cex_label_gene = 2, cex_label_category = 2) 
+height_param <- n*4*120 +200
+ggsave("~/GitHub/Thesis_paper/Results/Epigenomic/GO/Cluster_direct_GO_cnetplot.png", pcnet, bg = "white", width = 5700, 
+       height = 5700, units = "px", limitsize = FALSE)
+```
+
+```{r}
+n <- 10
+p <- dotplot(Cluster_indirect_Comparisons$GO, showCategory = n, font.size = 15) 
+height_param <- n*6*120 +200
+ggsave("~/GitHub/Thesis_paper/Results/Epigenomic/GO/Cluster_indirect_GO_plot.png", p, bg = "white", width = 5700, 
+       height = height_param, units = "px", limitsize = FALSE)
+
+pcnet <- cnetplot(Cluster_indirect_Comparisons$GO, showCategory = n, cex_label_gene = 2, cex_label_category = 2) 
+height_param <- n*4*120 +200
+ggsave("~/GitHub/Thesis_paper/Results/Epigenomic/GO/Cluster_indirect_GO_cnetplot.png", pcnet, bg = "white", width = 5700, 
+       height = 5700, units = "px", limitsize = FALSE)
+```
+
+```{r}
+n <- 10
+p <- dotplot(Cluster_comparison$GO, showCategory = n) 
+height_param <- n*6*120 +200
+ggsave("~/GitHub/Thesis_paper/Results/Epigenomic/Cluster_GO_plot.png", p, bg = "white", width = 5700, 
+       height = height_param, units = "px", limitsize = FALSE)
+
+pcnet <- cnetplot(Cluster_comparison$GO, showCategory = n) 
+height_param <- n*4*120 +200
+ggsave("~/GitHub/Thesis_paper/Results/Epigenomic/Cluster_GO_cnetplot.png", pcnet, bg = "white", width = 5700, 
+       height = 5700, units = "px", limitsize = FALSE)
+```
+
+
+```{r, eval = F}
+p <- dotplot(Cluster_comparison$KEGG, showCategory = n) 
+height_param <- n*4*120 +200
+ggsave("~/GitHub/Thesis_paper/Results/Epigenomic/Cluster_KEGG_plot.png", p, bg = "white", width = 5700, 
+       height = height_param, units = "px", limitsize = FALSE)
+
+p <- dotplot(Cluster_comparison$WP, showCategory = n) 
+height_param <- n*4*120 +200
+ggsave("~/GitHub/Thesis_paper/Results/Epigenomic/Cluster_WP_plot.png", p, bg = "white", width = 5700, 
+       height = height_param, units = "px", limitsize = FALSE)
+
+p <- dotplot(Cluster_direct_Comparisons$KEGG, showCategory = n) 
+height_param <- n*4*120 +200
+ggsave("~/GitHub/Thesis_paper/Results/Epigenomic/Cluster_direct_KEGG_plot.png", p, bg = "white", width = 5700, 
+       height = height_param, units = "px", limitsize = FALSE)
+
+p <- dotplot(Cluster_direct_Comparisons$WP, showCategory = n) 
+height_param <- n*4*120 +200
+ggsave("~/GitHub/Thesis_paper/Results/Epigenomic/Cluster_direct_WP_plot.png", p, bg = "white", width = 5700, 
+       height = height_param, units = "px", limitsize = FALSE)
+
+p <- dotplot(Cluster_indirect_Comparisons$KEGG, showCategory = n) 
+height_param <- n*4*120 +200
+ggsave("~/GitHub/Thesis_paper/Results/Epigenomic/Cluster_indirect_KEGG_plot.png", p, bg = "white", width = 5700, 
+       height = height_param, units = "px", limitsize = FALSE)
+
+p <- dotplot(Cluster_indirect_Comparisons$WP, showCategory = n) 
+height_param <- n*4*120 +200
+ggsave("~/GitHub/Thesis_paper/Results/Epigenomic/Cluster_indirect_WP_plot.png", p, bg = "white", width = 5700, 
+       height = height_param, units = "px", limitsize = FALSE)
+```
+
+```{r}
+p <- cnetplot(Cluster_comparison$KEGG, showCategory = n) 
+height_param <- n*4*120 +200
+ggsave("~/GitHub/Thesis_paper/Results/Epigenomic/Cluster_KEGG_cnetplot.png", p, bg = "white", width = 5700, 
+       height = 5700, units = "px", limitsize = FALSE)
+
+p <- cnetplot(Cluster_comparison$WP, showCategory = n) 
+height_param <- n*4*120 +200
+ggsave("~/GitHub/Thesis_paper/Results/Epigenomic/Cluster_WP_cnetplot.png", p, bg = "white", width = 5700, 
+       height = 5700, units = "px", limitsize = FALSE)
+
+p <- cnetplot(Cluster_direct_Comparisons$KEGG, showCategory = n) 
+height_param <- n*4*120 +200
+ggsave("~/GitHub/Thesis_paper/Results/Epigenomic/Cluster_direct_KEGG_cnetplot.png", p, bg = "white", width = 5700, 
+       height = 5700, units = "px", limitsize = FALSE)
+
+p <- cnetplot(Cluster_direct_Comparisons$WP, showCategory = n) 
+height_param <- n*4*120 +200
+ggsave("~/GitHub/Thesis_paper/Results/Epigenomic/Cluster_direct_WP_cnetplot.png", p, bg = "white", width = 5700, 
+       height = 5700, units = "px", limitsize = FALSE)
+
+p <- cnetplot(Cluster_indirect_Comparisons$KEGG, showCategory = n) 
+height_param <- n*4*120 +200
+ggsave("~/GitHub/Thesis_paper/Results/Epigenomic/Cluster_indirect_KEGG_cnetplot.png", p, bg = "white", width = 5700, 
+       height = 5700, units = "px", limitsize = FALSE)
+
+p <- cnetplot(Cluster_indirect_Comparisons$WP, showCategory = n) 
+height_param <- n*4*120 +200
+ggsave("~/GitHub/Thesis_paper/Results/Epigenomic/Cluster_indirect_WP_cnetplot.png", p, bg = "white", width = 5700, 
+       height = 5700, units = "px", limitsize = FALSE)
+```
+
+
+# Similarity analysis
+
+## Function
+
+```{r}
+Simplify_GO_results <- function(Enrichment, path){
+  direct_id <- dplyr::filter(Enrichment[["GO_direct"]]@result, pvalue < 0.1) %>% .$ID
+  indirect_id <- direct_id <- dplyr::filter(Enrichment[["GO_indirect"]]@result, pvalue < 0.1) %>% .$ID
+  ids <- unique(direct_id, indirect_id)
+  sim <- GO_similarity(ids)
+  png(filename = paste0(path, "_Simplot.png"), width = 3800, height = 3800, units = "px")
+  simplifyGO(sim, exclude_words = "binding")
+  dev.off()
+}
+```
+
+
+## Similarity results
+
+```{r}
+List_enrichments <- list("Response_in_IDH1" = Enrichements_Responder_in_IDH1,
+                         "Response_in_IDH2" = Enrichements_Responder_in_IDH2,
+                         "IDH_in_Responder" = Enrichements_IDH_in_Responder,
+                         "IDH_in_Non_Responder" = Enrichements_IDH_in_Non_Responder)
+
+
+Simplified_enrichments <- mclapply(names(List_enrichments), function(enrichment){
+  Simplify_GO_results(List_enrichments[[enrichment]], paste0("~/GitHub/Thesis_paper/Results/Epigenomic/Simplify/", enrichment))
+}, mc.cores = cores2use)
+names(Simplified_enrichments) <- names(List_enrichments)
+
+# Simplified_enrichments[["Response_in_IDH1"]] <- Simplify_GO_results(List_enrichments[["Response_in_IDH1"]], "~/GitHub/Thesis_paper/Results/Epigenomic/Simplify/Response_in_IDH1")
+```
+
+# Network analysis
+
+## Functions
+
+```{r}
+From_DMP_to_neighborhood_network <- function(DMPs, Network, neg = F){
+  if(neg){
+    sig_DMP <- dplyr::filter(DMPs, logFC < -0.03 & P.Value < 0.05) %>% .$Fragment
+  }else{
+    sig_DMP <- dplyr::filter(DMPs, logFC > 0.03 & P.Value < 0.05) %>% .$Fragment
+  }
+  dplyr::filter(pchic, NodeIn %in% sig_DMP | NodeOut %in% sig_DMP)
+}
+
+Mergeing_networks <- function(Network_A, Network_B, Main_Network, Network_C = NULL, Network_D=NULL){
+  nodes_network_A <- paste(Network_A$NodeIn, Network_A$NodeOut, sep = "_") %>% unique
+  print(length(nodes_network_A))
+  nodes_network_B <- paste(Network_B$NodeIn, Network_B$NodeOut, sep = "_") %>% unique
+  print(length(nodes_network_B))
+  if(!is.null(Network_C)){
+    nodes_network_C <- paste(Network_C$NodeIn, Network_C$NodeOut, sep = "_") %>% unique
+    print(length(nodes_network_C))
+    nodes_network_B <- intersect(nodes_network_B, nodes_network_C)
+    print(length(nodes_network_B))
+  }
+  if(!is.null(Network_D)){
+    nodes_network_D <- paste(Network_D$NodeIn, Network_D$NodeOut, sep = "_") %>% unique
+    print(length(nodes_network_D))
+    nodes_network_B <- intersect(nodes_network_B, nodes_network_D)
+    print(length(nodes_network_B))
+  }
+  common_nodes <- intersect(nodes_network_A, nodes_network_B)
+  print(length(common_nodes))
+  Main_Network$edge <- paste(Main_Network$NodeIn, Main_Network$NodeOut, sep = "_")
+  
+  dplyr::filter(Main_Network, edge %in% common_nodes)
+}
+```
+
+## Making networks
+
+```{r, eval = F}
+IDH1_network <- From_DMP_to_neighborhood_network(IDH1_IDHwt_features, pchic)
+IDH2_network <- From_DMP_to_neighborhood_network(IDH2_IDHwt_features, pchic)
+NR_network <- From_DMP_to_neighborhood_network(Non_Responder_Control_features, pchic)
+R_network <- From_DMP_to_neighborhood_network(Responder_Control_features, pchic)
+Relapse_network <- From_DMP_to_neighborhood_network(Relapse_control_localised_features, pchic)
+
+
+IDH1_network %>% write.table(paste0("~/GitHub/Thesis_paper/Results/Epigenomic/Networks/IDH1_network.tsv"), sep = "\t", 
+                             col.names = NA, quote = F)
+IDH2_network %>% write.table(paste0("~/GitHub/Thesis_paper/Results/Epigenomic/Networks/IDH2_network.tsv"), sep = "\t", 
+                             col.names = NA, quote = F)
+NR_network %>% write.table(paste0("~/GitHub/Thesis_paper/Results/Epigenomic/Networks/NR_network.tsv"), sep = "\t", 
+                           col.names = NA, quote = F)
+R_network %>% write.table(paste0("~/GitHub/Thesis_paper/Results/Epigenomic/Networks/R_network.tsv"), sep = "\t", 
+                          col.names = NA, quote = F)
+Relapse_network%>% write.table(paste0("~/GitHub/Thesis_paper/Results/Epigenomic/Networks/REL_network.tsv"), sep = "\t", 
+                          col.names = NA, quote = F)
+
+```
+
+## Mergeing network
+
+```{r, eval = F}
+Merged_network <- Mergeing_networks(IDH1_network, IDH2_network, NR_network, R_network, pchic)
+
+Merged_network %>% write.table(paste0("~/GitHub/Thesis_paper/Results/Epigenomic/Merged_network.tsv"), sep = "\t", col.names = NA, quote = F)
+```
+
+## Intesection network
+
+```{r, eval = F}
+Common_IDH <- Mergeing_networks(IDH1_network, IDH2_network, pchic)
+Common_IDH %>% write.table(paste0("~/GitHub/Thesis_paper/Results/Epigenomic/Common_IDH.tsv"), sep = "\t", col.names = NA, quote = F)
+
+Common_Response <- Mergeing_networks(NR_network, R_network, pchic)
+Common_Response %>% write.table(paste0("~/GitHub/Thesis_paper/Results/Epigenomic/Common_Response.tsv"), sep = "\t", col.names = NA, quote = F)
+
+```
+
+## Diff networks
+
+```{r}
+IDH1_IDH2_network <- From_DMP_to_neighborhood_network(IDH1_IDH2_features, pchic)
+
+NR_R_network <-From_DMP_to_neighborhood_network(Response_localised_features, pchic)
+REL_Baseline_network <- From_DMP_to_neighborhood_network(Relapse_baseline_localised_features, pchic)
+IDH_in_Responder_network <- From_DMP_to_neighborhood_network(IDH_in_Responder_localised_features, pchic)
+IDH_in_Non_Responder_network <- From_DMP_to_neighborhood_network(IDH_in_Non_Responder_localised_features, pchic)
+Response_in_IDH2_network <- From_DMP_to_neighborhood_network(Response_in_IDH2_localised_features, pchic)
+Response_in_IDH1_network <- From_DMP_to_neighborhood_network(Response_in_IDH1_localised_features, pchic)
+```
+
+## Saving networks
+
+```{r}
+IDH1_IDH2_network %>% write.table(paste0("~/GitHub/Thesis_paper/Results/Epigenomic/IDH1_IDH2_network.tsv"), sep = "\t", col.names = NA, quote = F)
+NR_R_network %>% write.table(paste0("~/GitHub/Thesis_paper/Results/Epigenomic/NR_R_network.tsv"), sep = "\t", col.names = NA, quote = F)
+REL_Baseline_network %>% write.table(paste0("~/GitHub/Thesis_paper/Results/Epigenomic/REL_Baseline_network.tsv"), sep = "\t", col.names = NA, quote = F)
+IDH_in_Responder_network %>% write.table(paste0("~/GitHub/Thesis_paper/Results/Epigenomic/IDH_in_Responder_network.tsv"), sep = "\t", col.names = NA, quote = F)
+IDH_in_Non_Responder_network %>% write.table(paste0("~/GitHub/Thesis_paper/Results/Epigenomic/IDH_in_Non_Responder_network.tsv"), sep = "\t", col.names = NA, quote = F)
+Response_in_IDH2_network %>% write.table(paste0("~/GitHub/Thesis_paper/Results/Epigenomic/Response_in_IDH2_network.tsv"), sep = "\t", col.names = NA, quote = F)
+Response_in_IDH1_network %>% write.table(paste0("~/GitHub/Thesis_paper/Results/Epigenomic/Response_in_IDH1_network.tsv"), sep = "\t", col.names = NA, quote = F)
+```
+
+# Specific networks 
+
+```{r}
+Make_specific_network_from_GO <- function(GO, GO_res, Comp_network){
+  go_line <- dplyr::filter(GO_res, ID == GO) %>% .$geneID %>% stringr::str_split(pattern = "/") %>% unlist %>% unique
+  specific_in_edge <- sapply(1:nrow(Comp_network), function(edge){
+    genes_node <- Comp_network[edge, 2] %>% stringr::str_split(pattern = ";") %>% unlist %>% unique
+    inter <- intersect(go_line, genes_node)
+    ifelse(length(inter) > 0, T, F)
+  })
+  in_edges <- Comp_network[specific_in_edge,]
+  specific_nodes <- in_edges[,"NodeIn"] %>% unique()
+  out_edges <- dplyr::filter(Comp_network, NodeOut %in% specific_nodes)
+  print(go_line)
+  rbind(in_edges, out_edges) %>% unique
+  
+}
+```
+
+```{r}
+Nuclear_receptor_activity_network <- Make_specific_network_from_GO("GO:0004879", Cluster_comparison@listData[["GO"]]@compareClusterResult, Response_in_IDH1_network) 
+head(Nuclear_receptor_activity_network)
+
+Protein_kinase_network <- Make_specific_network_from_GO("GO:0106310", Cluster_comparison@listData[["GO"]]@compareClusterResult, IDH_in_Non_Responder_network) 
+head(Protein_kinase_network)
+
+Sodium_channel_regulator_activity_network <- Make_specific_network_from_GO("GO:0017080", Cluster_comparison@listData[["GO"]]@compareClusterResult, IDH_in_Responder_network) 
+head(Sodium_channel_regulator_activity_network)
+
+H4K5_acetyltransferase_activity_network <- Make_specific_network_from_GO("GO:0043995", Cluster_comparison@listData[["GO"]]@compareClusterResult, Response_in_IDH2_network) 
+head(H4K5_acetyltransferase_activity_network)
+```
+
+## Saving networks
+
+```{r}
+Nuclear_receptor_activity_network %>%
+  write.table("~/GitHub/Thesis_paper/Results/Epigenomic/Nuclear_receptor_activity_network.tsv", 
+              sep = "\t", quote = F, col.names = NA)
+Protein_kinase_network %>%
+  write.table("~/GitHub/Thesis_paper/Results/Epigenomic/Protein_kinase_network.tsv", 
+              sep = "\t", quote = F, col.names = NA)
+Sodium_channel_regulator_activity_network %>%
+  write.table("~/GitHub/Thesis_paper/Results/Epigenomic/Sodium_channel_regulator_activity_network.tsv", 
+              sep = "\t", quote = F, col.names = NA)
+H4K5_acetyltransferase_activity_network %>%
+  write.table("~/GitHub/Thesis_paper/Results/Epigenomic/H4K5_acetyltransferase_activity_network.tsv", 
+              sep = "\t", quote = F, col.names = NA)
+```
+

@@ -1,0 +1,98 @@
+---
+title: "Analyse single layers"
+author: Alexis Hucteau
+date: "`r Sys.Date()`"
+output:
+    html_document:
+      toc: yes
+      toc_float: yes
+      theme: united
+editor_options:
+  markdown:
+    wrap: sentence
+---
+
+# Libraries
+
+```{r, error=F, warning=F, echo=FALSE, include=F}
+rm(DmIALite, DOLite, DOLiteTerm, HsIALite, MmIALite, RnIALite)
+  
+library(biomaRt)
+library(DOSE)
+library(ReactomePA)
+library(pathview)
+library(forcats)
+library(ggstance)
+library(enrichplot)
+library(ggrepel)
+library(GGally)
+library(dplyr)
+library(RCy3)
+library(igraph)
+library(data.table)
+library(stringr)
+library(clusterProfiler)
+library(ggplot2)
+library(muxViz)
+library(grid)
+library(ggraph)
+library(RColorBrewer)
+library(viridis)
+library(parallel)
+library(ggpubr)
+library(corrplot)
+library(org.Hs.eg.db)
+
+cores2use <- detectCores() - 2
+
+Main_folder <- "~/GitHub/Thesis_paper/Results/Multi_layer_pheno_like/Scaled_intra_links_v2"
+
+"%ni%" <- Negate("%in%")
+```
+
+# Read Multilayer
+
+```{r}
+Multi_layer <- lapply(list.dirs(Main_folder, full.names = F, recursive = F), function(Class){
+  read.table(paste0(Main_folder, "/", Class, "/", Class, "_multilayer_infomap.tsv"),
+                      sep = "\t", header = T)
+})
+names(Multi_layer) <- list.dirs(Main_folder, full.names = F, recursive = F)
+```
+
+# Aggregated network
+
+```{r}
+Aggregated_network <- lapply(names(Multi_layer), function(Class){
+  Multi_layer[[Class]][,c(2,4,5)]
+})
+names(Aggregated_network) <- names(Multi_layer)
+```
+
+# Multi network
+
+```{r}
+Multi_network <- lapply(names(Multi_layer), function(Class){
+  res <- Multi_layer[[Class]]
+  res$from <- paste(res$layer_from, res$from, sep = "_")
+  res$to <- paste(res$layer_to, res$to, sep = "_")
+  res[,c(2,4,5)]
+})
+names(Multi_network) <- names(Multi_layer)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
