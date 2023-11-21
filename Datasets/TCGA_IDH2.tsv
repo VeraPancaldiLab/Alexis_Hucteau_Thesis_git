@@ -1,0 +1,8 @@
+Case ID	Project	Primary Site	Gender	Files	Seq	Exp	SNV	CNV	Meth	Clinical	Bio	# Mutations	# Genes	Slides
+TCGA-AB-2805	TCGA-LAML	Hematopoietic and reticuloendothelial systems	Male	48	6	4	14	6	6	2	6	40	41	0
+TCGA-AB-2959	TCGA-LAML	Hematopoietic and reticuloendothelial systems	Male	48	6	4	14	6	6	2	6	21	23	0
+TCGA-AB-2898	TCGA-LAML	Hematopoietic and reticuloendothelial systems	Female	48	6	4	14	6	6	2	6	19	19	0
+TCGA-AB-2877	TCGA-LAML	Hematopoietic and reticuloendothelial systems	Female	48	6	4	14	6	6	2	6	14	15	0
+TCGA-AB-2949	TCGA-LAML	Hematopoietic and reticuloendothelial systems	Male	48	6	4	14	6	6	2	6	13	14	0
+TCGA-AB-2821	TCGA-LAML	Hematopoietic and reticuloendothelial systems	Male	48	6	4	14	6	6	2	6	14	14	0
+TCGA-AB-2936	TCGA-LAML	Hematopoietic and reticuloendothelial systems	Female	48	6	4	14	6	6	2	6	10	10	0
