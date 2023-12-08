@@ -1,0 +1,48 @@
+---
+title: "fPPI_mIDH"
+author: Alexis Hucteau
+date: "`r Sys.Date()`"
+output:
+    html_document:
+      toc: yes
+      toc_float: yes
+      theme: united
+editor_options:
+  markdown:
+    wrap: sentence
+---
+
+```{r}
+rm(list = ls())
+```
+
+
+```{r}
+library(dplyr)
+library(RCy3)
+library(igraph)
+library(data.table)
+library(stringr)
+
+"%ni%" <- Negate("%in%")
+```
+
+```{r}
+Diff_Prot_exp <- read.csv("../Results/Proteo/Diff_Prot_exp_IDH1_IDH2.tsv", sep = "\t", check.names = F)
+Diff_Prot_exp_filtered_mIDH1_vs_mIDH2_05pval <- dplyr::filter(Diff_Prot_exp, IDH2_vs_IDH1_p.val < 0.05) 
+
+PPI_base <- read.csv("~/Documents/List_genes_from_transcriptome/FIsInGene_020720_with_annotations.tsv", sep = "\t")
+
+colnames(PPI_base) <- c("source", "target", "Annotation", "Direction", "Score")
+
+PPI_filtered_005 <- dplyr::filter(PPI_base, source %in% Diff_Prot_exp_filtered_mIDH1_vs_mIDH2_05pval$name & target %in% Diff_Prot_exp_filtered_mIDH1_vs_mIDH2_05pval$name)
+
+PPI_filtered_005_enhanced <- dplyr::filter(PPI_base, source %in% Diff_Prot_exp_filtered_mIDH1_vs_mIDH2_05pval$name | target %in% Diff_Prot_exp_filtered_mIDH1_vs_mIDH2_05pval$name)
+```
+
+```{r}
+write.table(PPI_filtered_005, "../Results/Proteo/fPPI_filtered_005_network.tsv", sep = "\t", row.names = F, quote = F)
+write.table(PPI_filtered_005_enhanced, "../Results/Proteo/PPI_filtered_005_enhanced.tsv", sep = "\t", row.names = F, quote = F)
+
+```
+

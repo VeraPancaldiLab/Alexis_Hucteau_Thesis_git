@@ -1,0 +1,175 @@
+---
+title: "Koichi_DNA_methylation_analysis"
+author: Alexis Hucteau
+date: "`r Sys.Date()`"
+output:
+    html_document:
+      toc: yes
+      toc_float: yes
+      theme: united
+editor_options:
+  markdown:
+    wrap: sentence
+---
+
+```{r}
+rm(list = ls())
+```
+
+
+```{r}
+suppressPackageStartupMessages({
+  library(dplyr)
+  library(stringr)
+  library(gridExtra)
+  library(grid)
+  library(ggplot2)
+  library(GenomicRanges)
+  library(RColorBrewer)
+  library(ChAMP)
+  library(rpart)
+  library(rpart.plot)
+  library(dplyr)
+  library(enrichplot)
+  library(clusterProfiler)
+})
+
+source("~/Core_scripts/core_functions.R")
+source("~/GitHub/Multiplex_DNAmet_PPI_Chrom_Coexp/Make_koichi_factor.R")
+```
+
+```{r}
+Clinical_patient_data <- read.table("../Datasets/Clinical_Koichi_data.tsv", sep = "\t", header = T) 
+Clinical_patient_data_clustered <- dplyr::filter(Clinical_patient_data, Cluster != "No_clustered")
+Clinical_patient_data_clustered$RUNX1 <- ifelse(stringr::str_detect(Clinical_patient_data_clustered$mutations, "RUNX1"), T, F)
+Clinical_patient_data_clustered$RAS <- ifelse(stringr::str_detect(Clinical_patient_data_clustered$mutations, "RAS"), T, F)
+Clinical_patient_data_clustered$Cluster <- (Clinical_patient_data_clustered$Cluster == "Cluster_NR")*1
+Clinical_patient_data_clustered$CEBPA <- ifelse(stringr::str_detect(Clinical_patient_data_clustered$mutations, "CEBPA"), T, F)
+Clinical_patient_data_clustered$DNMT3A <- ifelse(stringr::str_detect(Clinical_patient_data_clustered$mutations, "DNMT3A"), T, F)
+Clinical_patient_data_clustered$FLT3 <- ifelse(stringr::str_detect(Clinical_patient_data_clustered$mutations, "FLT3"), T, F)
+Clinical_patient_data_clustered$WT1 <- ifelse(stringr::str_detect(Clinical_patient_data_clustered$mutations, "WT1"), T, F)
+Clinical_patient_data_clustered$TET2 <- ifelse(stringr::str_detect(Clinical_patient_data_clustered$mutations, "TET2"), T, F)
+
+
+Clinical_patient_data_clustered$clean_response <- sapply(Clinical_patient_data_clustered$Best_response, function(response){
+  if(response %in% c("SD", "PD")){
+    1
+  }else{
+    0
+  }
+})
+Clinical_patient_data_clustered$clean_response_2 <- sapply(Clinical_patient_data_clustered$Best_response, function(response){
+  if(response %in% c("SD", "PD")){
+    "NR"
+  }else{
+    "R"
+  }
+})
+Clinical_patient_data_clustered$Cluster_2 <- ifelse(Clinical_patient_data_clustered$Cluster == 1, "Cluster_NR", "Cluster_R")
+Clinical_patient_data_clustered_No_dIDHm <- Clinical_patient_data_clustered[Clinical_patient_data_clustered$IDH_isoform != "IDH1_IDH2",]
+ana1 <- glm(Cluster ~ 1 + CEBPA + RUNX1 + RAS + IDH_isoform + DNMT3A + FLT3 + WT1 + TET2, family = "binomial", data = Clinical_patient_data_clustered_No_dIDHm)
+summary(ana1)
+
+ana2 <- glm(clean_response ~ 1 + Cluster_2 + CEBPA + RUNX1 + RAS + IDH_isoform + DNMT3A + FLT3 + WT1 + TET2, family = "binomial", data = Clinical_patient_data_clustered_No_dIDHm)
+summary(ana2)
+ana3 <- rpart(clean_response_2 ~ 1 + Cluster_2 + RUNX1 + RAS + IDH_isoform + CEBPA + DNMT3A + FLT3 + WT1 + TET2, method = "class", data = Clinical_patient_data_clustered_No_dIDHm, control = rpart.control(minsplit = 5, cp = 0.05))
+png("../Results/decision_good_tree.png")
+prp(ana3)
+dev.off()
+prp(ana3)
+ana4 <- rpart(Cluster ~ 1 + CEBPA + RUNX1 + RAS + IDH_isoform + DNMT3A + FLT3 + WT1 + TET2, method = "class", data = Clinical_patient_data_clustered_No_dIDHm, control = rpart.control(minsplit = 5, cp = 0.05))
+prp(ana4)
+```
+
+
+```{r}
+BMIQ <- readRDS("/media/alexis/DATA/Koichi_methylation_dat/BMIQ_norm_Koichi_samples.Rdata")
+B_REL_factor <- colnames(BMIQ) %>% sapply(function(sample){
+  sample %in% Clinical_patient_data$Baseline_Sample
+})
+BMIQ <- BMIQ[,B_REL_factor]
+Cluster_Dcpgs <- read.table("../Results/DNAmethylation/Dcpgs_ClusterNR_R.tsv", sep = "\t", header = T)
+Pheno_Cluster <- sapply(colnames(BMIQ), function(samples){
+  Clinical_patient_data_clustered %>% dplyr::filter(Baseline_Sample == samples) %>% .$Cluster == 1
+}) %>% ifelse(., "Cluster_1", "Cluster_2")
+```
+
+```{r}
+DMP_Cluster <- champ.DMP(BMIQ, pheno = Pheno_Cluster, arraytype = "EPIC")
+write.table(DMP_Cluster$FALSE_to_TRUE, "../Results/DNAmethylation/DMP_Cluster_NR_R.tsv", sep = "\t", row.names = T, col.names = NA)
+DMR_Cluster <- champ.DMR(as.matrix(BMIQ), pheno = Pheno_Cluster, arraytype = "EPIC", cores = 10)
+write.table(DMR_Cluster$BumphunterDMR, "../Results/DNAmethylation/DMR_Cluster_NR_R.tsv", sep = "\t", row.names = T, col.names = NA)
+
+GSEA_Clusters <- ChAMP::champ.GSEA(beta = BMIQ, DMP = DMP_Cluster$FALSE_to_TRUE, DMR = DMR_Cluster, cores = 10, pheno = Pheno_Cluster, arraytype = "EPIC")
+GSEA_Clusters$DMP %>% write.table("../Results/DNAmethylation/GSEA_DMP_Clusters.tsv", sep = "\t", row.names = F, quote = F)
+GSEA_Clusters$DMR %>% write.table("../Results/DNAmethylation/GSEA_DMR_Clusters.tsv", sep = "\t", row.names = F, quote = F)
+```
+
+```{r}
+head(GSEA_Clusters$DMP)
+head(GSEA_Clusters$DMR)
+
+```
+
+```{r}
+Gene_DMP <- DMP_Cluster$FALSE_to_TRUE %>%
+  dplyr::filter(logFC > 0.15 & P.Value < 0.05) %>%
+  .$gene %>% unlist %>% unique
+Gene_DMR <- GSEA_Clusters[["DMR"]][["Genes"]] %>% lapply(function(list_gene){
+  stringr::str_split(list_gene, pattern = " ")
+  }) %>% unlist %>% c %>%unique
+```
+
+```{r}
+Enrich_merge_TF_UP <- enrichGO(Gene_DMP, OrgDb = "org.Hs.eg.db", keyType = "SYMBOL", ont = "ALL", pAdjustMethod = "none")
+
+```
+
+```{r}
+From_GO_to_network <- function(GO_data){
+  formatted_genelists <- lapply(1:nrow(GO_data), function(gene_set){
+    GO_data[gene_set,]$Genes %>%
+      stringr::str_split(pattern = " ") %>%
+      unlist %>%
+      as.vector %>%
+      unique
+  })
+  lapply(1:(nrow(GO_data)-1), function(gene_set){
+    B_start <- gene_set + 1
+    lapply(B_start:nrow(GO_data), function(gene_set_B){
+      noverlap <- intersect(formatted_genelists[[gene_set]], formatted_genelists[[gene_set_B]]) %>%
+        length
+      data.frame("A" = GO_data[gene_set, 1], "B" = GO_data[gene_set_B, 1], "nOverlap" = noverlap)
+    }) %>%
+      data.table::rbindlist()
+
+    }) %>%
+    data.table::rbindlist()
+}
+```
+
+
+```{r}
+Network <- From_GO_to_network(GSEA_Clusters$DMP)
+
+Network <- dplyr::filter(Network, nOverlap > 0)
+Network_50 <- dplyr::filter(Network, nOverlap > 50)
+
+Network$nOverlap %>% boxplot()
+
+Network_50 %>%
+  write.table("../Results/DNAmethylation/Enrichments/Clustering_analysis/GSEA_network.tsv", sep = "\t", quote = F, row.names = F)
+```
+
+```{r}
+Network_DMR <- From_GO_to_network(GSEA_Clusters$DMR)
+system("say network DMR finished")
+Network_DMR <- dplyr::filter(Network_DMR, nOverlap > 0)
+Network_DMR_10 <- dplyr::filter(Network_DMR, nOverlap > 10)
+
+Network_DMR$nOverlap %>% boxplot()
+
+Network_DMR_10 %>%
+  write.table("../Results/DNAmethylation/Enrichments/Clustering_analysis/GSEA_DMR_network_10.tsv", sep = "\t", quote = F, row.names = F)
+```
+

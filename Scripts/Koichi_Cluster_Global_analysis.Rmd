@@ -1,0 +1,127 @@
+---
+title: "Koichi_Cluster_Global_analysis"
+author: Alexis Hucteau
+date: "`r Sys.Date()`"
+output:
+    html_document:
+      toc: yes
+      toc_float: yes
+      theme: united
+editor_options:
+  markdown:
+    wrap: sentence
+---
+
+```{r}
+rm(list = ls())
+```
+
+```{r}
+suppressPackageStartupMessages({
+  library(igraph)
+  library(stringr)
+  library(data.table)
+  library(dplyr)
+  library(matrixStats)
+  library(ggplot2)
+  library(clusterProfiler)
+  library(DOSE)
+  library(enrichplot)
+  library(ggvenn)
+  library(ComplexHeatmap)
+})
+```
+
+```{r}
+dCpG_Cluster_chromatine_network <- read.table("../Results/Chromatine_part/Promoter_named_pchic_dCPGs_Clusters.tsv", sep = "\t", header = T)
+GRN_network <- read.table("../Results/Network_analysis/Network_Cluster_Cytoscape_GRN.tsv", sep = ",", header = T) %>% .[,c("source", "target")]
+dCpG_Cluster_Chromatine_features <- read.table("../Results/Chromatine_part/Features_fragment_methylation_clusters.tsv", sep = "\t", header = T)
+GRN_features <- read.table("../Results/Network_analysis/Nodes_Cluster_Cytoscape_GRN.tsv", sep = "\t", header = T)
+Annotations_PPI_cleaned <- read.table("../Results/fPPI/Annotations_cleaned.tsv", sep = "\t", header = T)
+Metabo_network <- read.table("../Results/Metabolism/Metabolic_network_clean_filtered_Clusters.tsv", sep = "\t", header = T)$A %>% unique()
+Metabo_converter <- read.table("../Results/Metabolism/Gene_reactions_network.tsv", sep = "\t", header = T)
+```
+
+```{r}
+Genes_in_Chromatine <- c(dCpG_Cluster_chromatine_network$source, dCpG_Cluster_chromatine_network$target) %>% .[stringr::str_detect(., "[:alpha:]")] %>% unique
+Genes_in_Chromatine_dCpGs <- dCpG_Cluster_Chromatine_features %>% dplyr::filter(P.Value < 0.05 & logFC > 0.3) %>% .$name %>% .[stringr::str_detect(., "[:alpha:]")] %>% unique
+Genes_in_GRN <-  c(GRN_network$source, GRN_network$target) %>% unique
+Genes_DEG <- GRN_features %>% dplyr::filter((P.Value < 0.05 & logFC > 1.5) | pval < 0.1) %>% .$id %>% unique
+Genes_in_fPPI <- c(Annotations_PPI_cleaned$Gene1, Annotations_PPI_cleaned$Gene2) %>% unique
+Genes_in_Metabo <- Metabo_network %>% sapply(function(reaction){
+  Metabo_converter[Metabo_converter$A == reaction, "B"]
+}) %>% unlist() %>% unique()
+```
+
+```{r}
+Do_overlaps_upsets <- function(List_of_samples, title){
+  comb_mat <- ComplexHeatmap::make_comb_mat(List_of_samples)
+  comb_mat <- comb_mat[colSums(comb_mat) >1]
+  cs <- comb_size(comb_mat)
+  ht <- ComplexHeatmap::UpSet(comb_mat, row_title = title, top_annotation = HeatmapAnnotation(
+        "Intersections" = anno_barplot(cs, 
+            ylim = c(0, max(cs)*1.1),
+            border = FALSE, 
+            gp = gpar(fill = "black"), 
+            height = unit(4, "cm")
+        ), 
+        annotation_name_side = "left", 
+        annotation_name_rot = 90))
+  ht = draw(ht)
+  od = column_order(ht)
+  decorate_annotation("Intersections", {
+      grid.text(cs[od], x = seq_along(cs), y = unit(cs[od], "native") + unit(2, "pt"), 
+          default.units = "native", just = c("left", "bottom"), 
+          gp = gpar(fontsize = 12, col = "#404040"), rot = 45)
+  })
+}
+```
+
+```{r}
+a <- Do_overlaps_upsets(list(Promoters_Dmet = Genes_in_Chromatine_dCpGs, DEG_TF = Genes_DEG, Metabolism = Genes_in_Metabo), "Upset_Cluster")
+b <- Do_overlaps_upsets(list(Dmet = Genes_in_Chromatine, GRN = Genes_in_GRN, Metabolism = Genes_in_Metabo), "Upset_Cluster")
+
+png("../Results/Overlaps_Clusters/Overlaps_Close_nodes_upsetplots.png")
+Do_overlaps_upsets(list(Promoters_Dmet = Genes_in_Chromatine_dCpGs, DEG_TF = Genes_DEG, Metabolism = Genes_in_Metabo), "Upset_Cluster")
+dev.off()
+
+png("../Results/Overlaps_Clusters/Overlaps_Neighbor_nodes_upsetplots.png")
+Do_overlaps_upsets(list(Dmet = Genes_in_Chromatine, GRN = Genes_in_GRN, Metabolism = Genes_in_Metabo), "Upset_Cluster")
+dev.off()
+```
+
+
+```{r}
+Genes_venndiag <- list(Pchic = Genes_in_Chromatine_dCpGs, DEG = Genes_DEG, Metabolic = Genes_in_Metabo)
+
+png("../Results/Network_analysis/Venn_dCpGs_DEG_dReaction.png")
+ggvenn(
+  Genes_venndiag, 
+  stroke_size = 0.5, set_name_size = 4
+  )
+dev.off()
+ggvenn(
+  Genes_venndiag, 
+  stroke_size = 0.5, set_name_size = 4
+  )
+intersect(Genes_in_Chromatine_dCpGs, Genes_DEG)
+intersect(Genes_DEG, Genes_in_Metabo)
+intersect(Genes_in_Chromatine_dCpGs, Genes_in_Metabo)
+```
+
+```{r}
+Genes_venndiag <- list(Pchic = Genes_in_Chromatine, GRN = Genes_in_GRN, fPPI = Genes_in_fPPI, Metabolic = Genes_in_Metabo)
+
+png("../Results/Network_analysis/Venn_networks.png")
+ggvenn(
+  Genes_venndiag, 
+  stroke_size = 0.5, set_name_size = 4
+  )
+dev.off()
+ggvenn(
+  Genes_venndiag, 
+  stroke_size = 0.5, set_name_size = 4
+  )
+intersect(intersect(Genes_in_Chromatine, Genes_in_GRN), Genes_in_Metabo)
+```
+

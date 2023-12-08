@@ -1,0 +1,39 @@
+---
+title: "RCysTarget"
+author: Alexis Hucteau
+date: "`r Sys.Date()`"
+output:
+    html_document:
+      toc: yes
+      toc_float: yes
+      theme: united
+editor_options:
+  markdown:
+    wrap: sentence
+---
+
+```{r}
+rm(list = ls())
+```
+
+```{r}
+library(dplyr)
+library(stringr)
+library(gridExtra)
+library(grid)
+library(ggplot2)
+library(GenomicRanges)
+library(RColorBrewer)
+library(RcisTarget)
+```
+
+```{r}
+data(motifAnnotations_hgnc)
+DEGs <- read.table("../Results/DGEA/Cluster_DEG_analysis.tsv", sep = "\t", header = T, row.names = 1) %>% dplyr::filter(logFC > 1.5 & P.Value < 0.05) %>% .$ID %>% unique # %>% write.table("../Results/DGEA/DEGs_Clusters.tsv", sep = "\t", row.names = F)
+motifRankings <- importRankings("/media/alexis/DATA/RcisTarget/hg19-tss-centered-10kb-7species.mc9nr.genes_vs_motifs.rankings.feather")
+```
+
+```{r}
+cisTarget(DEGs)
+```
+

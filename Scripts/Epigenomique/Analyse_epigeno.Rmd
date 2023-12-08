@@ -544,6 +544,10 @@ Localised_DMP <- function(DMPs, Annotation = Anno_EPIC){
 
 ```{r}
 Localised_DMPs <- list(
+  "IDH" = Localised_DMP(DMP_IDHs$`IDH1-IDH2`),
+  
+  "Response" = Localised_DMP(DMP_Response$`Non_Responder-Responder`),
+  
   "IDH_in_Responder" = Localised_DMP(DMP_IDH_Responder$`IDH1-IDH2`),
 
   "IDH_in_Non_Responder" = Localised_DMP(DMP_IDH_Non_Responder$`IDH1-IDH2`),
@@ -626,7 +630,7 @@ Direct_indirect_methylation_up <- lapply(names(Features), function(comp){
               sep = "\t" , col.names = NA)
   res
 })
-names(Direct_indirect_methylation_up) <- c("IDH1_in_Responder", "IDH1_in_Non_responder", "Non_responder_in_IDH2", "Non_responder_in_IDH1")
+names(Direct_indirect_methylation_up) <- c("IDH1", "Non_responder", "IDH1_in_Responder", "IDH1_in_Non_responder", "Non_responder_in_IDH2", "Non_responder_in_IDH1")
 
 Direct_indirect_methylation_down <- lapply(names(Features), function(comp){
   res <- List_gene_affected_directly_or_indirectly_by_methylation(Features[[comp]], neg = T)
@@ -638,7 +642,7 @@ Direct_indirect_methylation_down <- lapply(names(Features), function(comp){
               sep = "\t" , col.names = NA)
   res
 })
-names(Direct_indirect_methylation_down) <- c("IDH2_in_Responder", "IDH2_in_Non_responder", "Responder_in_IDH2", "Responder_in_IDH1")
+names(Direct_indirect_methylation_down) <- c("IDH2", "Responder", "IDH2_in_Responder", "IDH2_in_Non_responder", "Responder_in_IDH2", "Responder_in_IDH1")
 Direct_indirect_methylation <- c(Direct_indirect_methylation_up, Direct_indirect_methylation_down)
 rm(Direct_indirect_methylation_up, Direct_indirect_methylation_down)
 ```
@@ -810,6 +814,19 @@ genes <- getBM(filters = "hgnc_symbol",
 
 GO_direct_universe <- Response_localised_features$baitName %>% stringr::str_split(pattern = ";") %>% unlist %>% unique
 ```
+
+## IDH
+
+```{r}
+Enrichements_Responder <- GO_KEGG_WP_MKEGG(Response_in_IDH1_localised_affected$Direct, Response_in_IDH1_localised_affected$Indirect)
+lapply(names(Enrichements_Responder_in_IDH1), function(enrichment){
+  Make_enrich_plot(Enrichements_Responder_in_IDH1[[enrichment]], paste0("~/GitHub/Thesis_paper/Results/Epigenomic/Responder_in_IDH1_", enrichment))
+})
+```
+
+
+
+
 
 ## Response in IDH1
 

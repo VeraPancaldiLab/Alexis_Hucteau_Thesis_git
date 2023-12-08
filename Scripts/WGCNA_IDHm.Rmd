@@ -1,0 +1,147 @@
+---
+title: "WGCNA_IDHm"
+author: Alexis Hucteau
+date: "`r Sys.Date()`"
+output:
+    html_document:
+      toc: yes
+      toc_float: yes
+      theme: united
+editor_options:
+  markdown:
+    wrap: sentence
+---
+
+```{r}
+rm(list = ls())
+suppressPackageStartupMessages({
+  library(dplyr)
+  library(RCy3)
+  library(igraph)
+  library(data.table)
+  library(Hmisc)
+  library(WGCNA)
+  library(DESeq2)
+})
+
+"%ni%" <- Negate("%in%")
+source("~/GitHub/Multiplex_DNAmet_PPI_Chrom_Coexp/Make_koichi_factor.R")
+enableWGCNAThreads()
+```
+
+```{r}
+RNAseq_Koichi <- read.csv("~/GitHub/Koichi_gene_expression_analyses_git/Koichi_gene_expression_analyses/DATA/RNAseq_parsed.csv", row.names = 1, header = T, check.names = F)
+Clinical_patient_data <- read.table("../Datasets/Clinical_Koichi_data.tsv", sep = "\t", header = T)
+Phenotype_IDH_Koichi <- sapply(colnames(RNAseq_Koichi), function(sample){
+  if(sample %in% Clinical_patient_data$Relapse_RNAseq_data){
+    "Relapse"
+  }else{
+    Clinical_patient_data %>% dplyr::filter(Baseline_RNAseq_data == sample) %>% .$IDH_isoform
+  }
+})
+
+RNAseq_Koichi_Baseline <- RNAseq_Koichi[Phenotype_IDH_Koichi != "Relapse"]
+Phenotype_IDH_Koichi <- Phenotype_IDH_Koichi[Phenotype_IDH_Koichi != "Relapse"]
+```
+
+```{r}
+RNAseqBEATAML <- read.table("/media/alexis/DATA/Thesis_paper_DATA/Voom_BEATAML.tsv", sep = "\t", header = T)
+Pheno_BEATAML <- sapply(colnames(RNAseqBEATAML), function(samples){
+  IDH1 <- stringr::str_detect(samples, pattern = "mIDH1")
+  IDH2 <- stringr::str_detect(samples, pattern = "mIDH2")
+  ifelse(IDH1, "mIDH1", ifelse(IDH2, "mIDH2", "wtIDH"))
+})
+RNAseqBEATAML <- RNAseqBEATAML[Pheno_BEATAML != "wtIDH"]
+Pheno_BEATAML_IDH <- Pheno_BEATAML[Pheno_BEATAML != "wtIDH"]
+```
+
+```{r}
+RNAseq_TCGA <- read.table("/media/alexis/DATA/Thesis_paper_DATA/Voom_TCGA.tsv", sep = "\t", header = T)
+Pheno_TCGA <- sapply(colnames(RNAseq_TCGA), function(samples){
+  IDH1 <- stringr::str_detect(samples, pattern = "mIDH1")
+  IDH2 <- stringr::str_detect(samples, pattern = "mIDH2")
+  ifelse(IDH1, "mIDH1", ifelse(IDH2, "mIDH2", "wtIDH"))
+})
+
+RNAseq_TCGA <- RNAseq_TCGA[Pheno_TCGA != "wtIDH"]
+Pheno_TCGA_IDH <- Pheno_TCGA[Pheno_TCGA != "wtIDH"]
+```
+
+```{r}
+RNAseq_TUH <- read.table("../Datasets/RNASEQ_FULL_TABLE_SARRY.tsv", sep = "\t", header = T, row.names = 1) 
+colnames(RNAseq_TUH) <- sapply(colnames(RNAseq_TUH), function(samples){
+  stringr::str_split(samples, pattern = "_") %>% .[[1]] %>% .[1]
+})
+Pheno_TUH <- read.table("../Datasets/TUH_IDH_pheno.tsv", sep = "\t", header = F, col.names = c("id", "IDH", "Diff"))
+Pheno_All_patients <- sapply(colnames(RNAseq_TUH), function(samples){
+  if(samples %in% Pheno_TUH$id){
+    dplyr::filter(Pheno_TUH, id == samples) %>% .$IDH
+  }else{
+    "wtIDH"
+  }
+})
+RNAseq_TUH_mIDH <- RNAseq_TUH[Pheno_All_patients != "wtIDH"]
+RNAseq_TUH_mIDH <- RNAseq_TUH_mIDH[,1:7]
+Pheno_TUH_RNAseq <- dplyr::filter(Pheno_TUH, id %in% colnames(RNAseq_TUH_mIDH))
+rownames(Pheno_TUH_RNAseq) <- Pheno_TUH_RNAseq$id
+Pheno_TUH_RNAseq <- Pheno_TUH_RNAseq[colnames(RNAseq_TUH_mIDH),]
+```
+
+```{r}
+Do_WGCN_for_pheno <- function(RNAseq, Pheno){
+  lapply(Pheno, function(pheno){
+    rnaseq <- RNAseq[Pheno == pheno,] %>% t
+    sampletree <- hclust(dist(rnaseq), method = "average")
+    powers = c(c(1:10), seq(from = 12, to=20, by=2))
+    sft = pickSoftThreshold(rnaseq, powerVector = powers, verbose = 5)
+    pow <- 1:nrow(sft[["fitIndices"]]) %>% sapply(function(test){
+      tmp <- sft[["fitIndices"]][test+1,3]-sft[["fitIndices"]][test,3]
+      if(tmp > 0 & !is.na(tmp)){
+        test-1
+      }else{
+        100
+      }
+    }) %>% min
+    net = blockwiseModules(rnaseq, power = pow,
+      TOMType = "unsigned", minModuleSize = 30,
+      reassignThreshold = 0, mergeCutHeight = 0.25,
+      numericLabels = TRUE, pamRespectsDendro = FALSE,
+      saveTOMs = TRUE,
+      saveTOMFileBase = "NR_TOM",
+      verbose = 3)
+  })
+}
+```
+
+```{r}
+WGCNA_test <- Do_WGCN_for_pheno(RNAseq_TUH, Pheno_TUH_RNAseq$IDH)
+```
+
+```{r}
+rnaseq <- RNAseq_TUH_mIDH[Pheno_TUH_RNAseq$IDH == "IDH2",] %>% t
+sampletree <- hclust(dist(rnaseq), method = "average")
+powers = c(c(1:10), seq(from = 12, to=20, by=2))
+sft = pickSoftThreshold(rnaseq, powerVector = powers, verbose = 5)
+pow <- 1:nrow(sft[["fitIndices"]]) %>% sapply(function(test){
+  tmp <- sft[["fitIndices"]][test+1,3]-sft[["fitIndices"]][test,3]
+  if(tmp > 0 & !is.na(tmp)){
+    test-1
+  }else{
+    100
+  }
+}) %>% min
+net = blockwiseModules(rnaseq, power = pow,
+  TOMType = "unsigned", minModuleSize = 30,
+  reassignThreshold = 0, mergeCutHeight = 0.25,
+  numericLabels = TRUE, pamRespectsDendro = FALSE,
+  saveTOMs = TRUE,
+  saveTOMFileBase = "NR_TOM",
+  verbose = 3)
+```
+
+
+
+
+
+
+

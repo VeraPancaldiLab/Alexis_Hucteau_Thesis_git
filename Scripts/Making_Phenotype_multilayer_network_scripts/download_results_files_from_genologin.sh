@@ -12,6 +12,6 @@ do
   then
     echo $class
     echo ahucteau@genologin.toulouse.inra.fr:work/Multilayer/Final_Multilayers/$class/$class\_multilayer_infomap.tree
-    sshpass -p "135264/kayht/2024" scp ahucteau@genologin.toulouse.inra.fr:work/Final_Multilayers/$class/$class\_multilayer_infomap.tree ~/GitHub/Thesis_paper/Results/Multi_layer_pheno_like/Final_mutlilayer/$class/
+    sshpass -p PASSWORD scp ahucteau@genologin.toulouse.inra.fr:work/Final_Multilayers/$class/$class\_multilayer_infomap.tree ~/GitHub/Thesis_paper/Results/Multi_layer_pheno_like/Final_mutlilayer/$class/
   fi
 done

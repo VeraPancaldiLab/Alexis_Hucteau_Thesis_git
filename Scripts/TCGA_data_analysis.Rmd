@@ -1,0 +1,240 @@
+---
+title: "TCGA data analysis"
+author: Alexis Hucteau
+date: "`r Sys.Date()`"
+output:
+    html_document:
+      toc: yes
+      toc_float: yes
+      theme: united
+editor_options:
+  markdown:
+    wrap: sentence
+---
+
+```{r, error=FALSE}
+rm(list = ls())
+
+suppressPackageStartupMessages({
+  library(FactoMineR)
+  library(igraph)
+  library(limma)
+  library(viper)
+  library(stringr)
+  library(data.table)
+  library(dplyr)
+  library(RCy3)
+  library(factoextra)
+  library(pheatmap)
+  library(Hmisc)
+  library(matrixStats)
+  library(RColorBrewer)
+})
+
+"%ni%" <- Negate("%in%")
+wd <- "~/GitHub/Thesis_paper/"
+source("~/Core_scripts/msviper_functions.R")
+```
+
+```{r}
+load("/media/alexis/DATA/TCGA-LAML/DATA_RNAseqTCGA_wtIDH_data.rda")
+DATA_RNAseqTCGA_wtIDH_data <- data
+load("/media/alexis/DATA/TCGA-LAML/DATA_RNAseqTCGA_mIDH1_data.rda")
+DATA_RNAseqTCGA_mIDH1_data <- data
+load("/media/alexis/DATA/TCGA-LAML/DATA_RNAseqTCGA_mIDH2_data.rda")
+DATA_RNAseqTCGA_mIDH2_data <- data
+rm(data)
+```
+
+```{r}
+RNAseqTCGA_IDHwt <- DATA_RNAseqTCGA_wtIDH_data@assays@data@listData[["tpm_unstrand"]]
+RNAseqTCGA_mIDH1 <- DATA_RNAseqTCGA_mIDH1_data@assays@data@listData[["tpm_unstrand"]]
+RNAseqTCGA_mIDH2 <- DATA_RNAseqTCGA_mIDH2_data@assays@data@listData[["tpm_unstrand"]]
+
+RNAseqTCGA <- cbind(RNAseqTCGA_IDHwt, RNAseqTCGA_mIDH1)
+RNAseqTCGA <- cbind(RNAseqTCGA, RNAseqTCGA_mIDH2)
+colnames(RNAseqTCGA) <- c(rep("IDHwt", ncol(RNAseqTCGA_IDHwt)), rep("mIDH1", ncol(RNAseqTCGA_mIDH1)), rep("mIDH2", ncol(RNAseqTCGA_mIDH2)))
+colnames(RNAseqTCGA) <- sapply(1:ncol(RNAseqTCGA), function(sample){
+  paste(colnames(RNAseqTCGA)[sample], sample, sep = "_")
+})
+RNAseqTCGA <- as.data.frame(RNAseqTCGA)
+RNAseqTCGA$Gene <- DATA_RNAseqTCGA_wtIDH_data@rowRanges@elementMetadata@listData[["gene_name"]] %>% c
+RNAseqTCGA <- RNAseqTCGA %>%
+  split(., .$Gene) %>%
+  lapply(., function(x){
+    l <- length(x[1,]) - 1
+    cnames <- colnames(x)[c(1:l)]
+    df <- x[,c(1:l)] %>%
+      as.matrix(.) %>%
+      colMaxs(.) %>% 
+      data.frame(.) %>%
+      t(.) %>%
+      data.frame(.)
+    colnames(df) <- cnames
+    df
+  }) %>%
+  rbindlist(.) %>% 
+  data.frame(., check.names = F)
+
+rownames(RNAseqTCGA) <- unique(DATA_RNAseqTCGA_wtIDH_data@rowRanges@elementMetadata@listData[["gene_name"]])
+Pheno_TCGA <-  c(rep("IDHwt", ncol(RNAseqTCGA_IDHwt)), rep("mIDH1", ncol(RNAseqTCGA_mIDH1)), rep("mIDH2", ncol(RNAseqTCGA_mIDH2)))
+write.table(RNAseqTCGA, "../Datasets/RNAseqTCGA.tsv", sep = "\t", dec = ".") 
+```
+
+```{r}
+Voom_TCGA <- voom(RNAseqTCGA)$E
+write.table(Voom_TCGA, "../Datasets/Voom_TCGA.tsv", sep = "\t", dec = ".") 
+```
+
+
+```{r}
+Voom_TCGA <- read.table("/media/alexis/DATA/Thesis_paper_DATA/Voom_TCGA.tsv", sep = "\t", header = T)
+
+Pheno_TCGA <-  sapply(colnames(Voom_TCGA), function(sample){
+  stringr::str_split(sample, pattern = "_") %>% .[[1]] %>% .[1]
+})
+
+res.pca <- prcomp(t(Voom_TCGA))
+p <- fviz_pca_ind(res.pca, label="all", habillage=Pheno_TCGA,
+                               addEllipses=T, ellipse.level=0.95)
+p <- p + ggtitle("PCA gene expression")
+p
+png("../Results/DGEA/PCA_TCGA_data.png")
+p
+dev.off()
+```
+
+```{r}
+Make_heatmap <- function(DATA, Phenotype, method = "pearson", title, annotation_color, kmeans_k = NA, cuttree = NA, corr=T, TF=F) {
+  annotation_for_heatmap <- data.frame(Phenotype = Phenotype$Phenotype)
+  rownames(annotation_for_heatmap) <- colnames(DATA)
+  if(corr){
+    corr <- rcorr(as.matrix(DATA), type = method)$r
+    colnames(corr) <- colnames(DATA)
+    if(TF){
+      color= rev(colorRampPalette(brewer.pal(n = 9, name = "RdBu"))(100))
+    }else{
+      color = colorRampPalette(brewer.pal(n = 9, name = "YlOrRd"))(100)
+    }
+  }else{
+    corr=DATA
+    color= rev(colorRampPalette(brewer.pal(n = 9, name = "RdBu"))(100))
+  }
+  
+  title <- paste0(title, " ", method)
+  heatmap <- pheatmap(corr, 
+                      color = color,
+                      annotation_col = annotation_for_heatmap,
+                      annotation_colors = annotation_color,
+                      legend = TRUE,
+                      treeheight_row = 20,
+                      main = title, 
+                      fontsize = 10,
+                      cutree_cols = cuttree
+  )
+  return(heatmap)
+}
+```
+
+```{r}
+Var_gene <- rowVars(as.matrix(Voom_TCGA))
+names(Var_gene) <- rownames(Voom_TCGA)
+```
+
+
+```{r}
+nb_genes <- 50
+method <- "pearson"
+Top_var_genes <- Var_gene[order(Var_gene, decreasing = T)] %>% .[1:nb_genes]
+Top_Var_RNAseq <- Voom_TCGA %>% .[rownames(.) %in% names(Top_var_genes),] 
+ann_color_RNA <- list(
+    Phenotype = c(IDHwt = "blue", mIDH1 = "red", mIDH2 = "orange"))
+
+pheno_heatmap <- data.frame("IDHwt" = Pheno_TCGA == "IDHwt", "mIDH1" = Pheno_TCGA == "mIDH1", "mIDH2" = Pheno_TCGA == "mIDH2")
+pheno_heatmap$Phenotype <- Pheno_TCGA
+heat <- Make_heatmap(Top_Var_RNAseq, Phenotype = pheno_heatmap, title = paste0("Patient correlation of Top ", nb_genes, " variable Gene expression"), annotation_color = ann_color_RNA, method = method)
+
+png(paste0("../Results/DGEA/Heatmap_GE_top_", nb_genes,"_corr_", method, "_TCGA_data.png"))
+heat
+dev.off()
+
+res.pca <- prcomp(t(Top_Var_RNAseq))
+p <- fviz_pca_ind(res.pca, label="all", habillage=Pheno_TCGA,
+                               addEllipses=T, ellipse.level=0.95)
+p <- p + ggtitle(paste0("PCA top ", nb_genes, " genes"))
+p
+png(paste0("../Results/DGEA/PCA_GE_top_", nb_genes,"_TCGA_data.png"))
+p
+dev.off()
+if(nb_genes < 100){
+  heat2 <- Make_heatmap(Top_Var_RNAseq, Phenotype = pheno_heatmap, title = paste0("Patient correlation of Top ", nb_genes, " variable Gene expression"), annotation_color = ann_color_RNA, method = "", corr = F)
+  png(paste0("../Results/DGEA/Heatmap_GE_top_", nb_genes,"_TCGA_data.png"))
+  heat2
+  dev.off()
+}
+```
+
+TF activity
+
+```{r}
+TCGA_ARACNe_network <- read.table("../Results/DGEA/Networks/network.txt", sep = "\t", header = T)
+colnames(TCGA_ARACNe_network)[1:2] <- c("tf", "target")
+
+ref_wtIDH <- Pheno_TCGA == "IDHwt"
+ref_mIDH <- stringr::str_detect(Pheno_TCGA, pattern = "mIDH")
+
+IDH_TCGA_msvip <- run_msviper(Voom_TCGA, TCGA_ARACNe_network, use_aracne = T, ref_wtIDH, ref_mIDH, "wtIDH", "mIDH", minsize = 4, ges.filter = T)
+IDH_TCGA_TF_actitity <- viper(Voom_TCGA, dorothea2viper_regulons(IDH_TCGA_msvip$regulons))
+```
+
+Heatmap
+
+```{r}
+Var_TF <- rowVars(as.matrix(IDH_TCGA_TF_actitity))
+names(Var_TF) <- rownames(IDH_TCGA_TF_actitity)
+```
+
+
+```{r}
+nb_TF <- 10
+method <- "pearson"
+Top_var_TF <- Var_TF[order(Var_TF, decreasing = T)] %>% .[1:nb_TF]
+Top_Var_TF <- IDH_TCGA_TF_actitity %>% .[rownames(.) %in% names(Top_var_TF),] 
+heat <- Make_heatmap(Top_Var_TF, Phenotype = pheno_heatmap, title = paste0("Patient correlation of Top ", nb_TF, " variable TF"), annotation_color = ann_color_RNA, method = method,TF=T)
+
+png(paste0("../Results/DGEA/Heatmap_TF_top_", nb_TF,"_corr_", method, "_TCGA_data.png"))
+heat
+dev.off()
+
+res.pca <- Top_Var_TF %>% as.data.frame %>% t() %>% prcomp
+
+p <- fviz_pca_ind(res.pca, label="all", habillage=pheno_heatmap,
+                               addEllipses=T, ellipse.level=0.95)
+p <- p + ggtitle(paste0("PCA top ", nb_TF, " TF"))
+p
+png(paste0("../Results/DGEA/PCA_GE_top_", nb_TF,"_TF_TCGA_data.png"))
+p
+dev.off()
+heat2 <- Make_heatmap(Top_Var_TF, Phenotype = pheno_heatmap, title = paste0("Patient correlation of Top ", nb_TF, " variable TF"), annotation_color = ann_color_RNA, method = "", corr=F)
+
+png(paste0("../Results/DGEA/Heatmap_TF_top_", nb_TF,"_TCGA_data.png"))
+heat2
+dev.off()
+```
+
+
+```{r}
+res.pca <- IDH_TCGA_TF_actitity %>% as.data.frame %>% prcomp
+
+p <- fviz_pca_ind(res.pca, label="all",
+                               addEllipses=F, ellipse.level=0.95)
+p <- p + ggtitle("PCA TF activity")
+p
+png("../Results/DGEA/Heatmap_PCA_TF_TCGA_data.png")
+p
+dev.off()
+```
+
+
+
+

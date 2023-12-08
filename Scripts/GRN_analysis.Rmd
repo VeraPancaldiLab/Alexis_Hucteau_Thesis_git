@@ -1,0 +1,55 @@
+---
+title: "Koichi_Cluster_GRN_analysis"
+author: Alexis Hucteau
+date: "`r Sys.Date()`"
+output:
+    html_document:
+      toc: yes
+      toc_float: yes
+      theme: united
+editor_options:
+  markdown:
+    wrap: sentence
+---
+
+```{r}
+rm(list = ls())
+```
+
+```{r}
+suppressPackageStartupMessages({
+  library(igraph)
+  library(stringr)
+  library(data.table)
+  library(dplyr)
+  library(RCy3)
+  library(matrixStats)
+  library(RColorBrewer)
+  library(ggplot2)
+})
+
+"%ni%" <- Negate("%in%")
+source("~/Core_scripts/msviper_functions.R")
+source("~/Core_scripts/core_functions.R")
+source("~/GitHub/Multiplex_DNAmet_PPI_Chrom_Coexp/Make_koichi_factor.R")
+source("Make_GRN_networks.R")
+
+Cluster_TF_activity_msviper <- read.table("../Results/DGEA/TF_Diff_activity_Clusters.tsv", sep = "\t", header = T)
+RNAseq <- read.table("../Datasets/RNAseq_Baseline.tsv", sep = "\t", header = T, check.names = F)
+Cluster_TF_activity_msviper_network <- read.table("../Results/DGEA/Cluster_GRN.tsv", sep = "\t", header = T)
+Cluster_DEG <- read.table("../Results/DGEA/Cluster_DEG_analysis.tsv", sep = "\t", header = T, row.names = 1)
+
+Cluster_msvip <- list()
+Cluster_msvip[["mrs_table"]] <- Cluster_TF_activity_msviper
+Cluster_msvip[["regulons"]] <- Cluster_TF_activity_msviper_network
+```
+
+
+
+```{r}
+Cluster_net_analysis <- From_network_to_TF_activity(Cluster_msvip, Cluster_DEG, output_folder = "../Results/Network_analysis/", filtered = T, title = "Cluster_Response")
+Cluster_made <- Make_Cytoscape_network(net = Cluster_net_analysis$net, feat = Cluster_net_analysis$features, title = "GRN", collection = "Cluster_analysis")
+Cluster_made$net %>% write.table("../Results/Network_analysis/Network_Cluster_Cytoscape_GRN.tsv", sep = "\t", row.names = F)
+Cluster_made$nodes %>% write.table("../Results/Network_analysis/Nodes_Cluster_Cytoscape_GRN.tsv", sep = "\t", row.names = F)
+```
+

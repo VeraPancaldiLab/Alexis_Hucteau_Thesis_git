@@ -42,6 +42,7 @@ library(ggpubr)
 library(corrplot)
 library(org.Hs.eg.db)
 library(simplifyEnrichment)
+library(enrichR)
 
 cores2use <- detectCores() - 2
 
@@ -55,7 +56,7 @@ Main_folder <- "~/GitHub/Thesis_paper/Results/Multi_layer_pheno_like/Final_mutli
 ## Listing phenotypes
 
 ```{r}
-Classes <- list.dirs(Main_folder, full.names = F, recursive = F) %>% .[!stringr::str_detect(., "Comparison") & !stringr::str_detect(., "Results") & stringr::str_detect(., "_")]
+Classes <- list.dirs(Main_folder, full.names = F, recursive = F) %>% .[!stringr::str_detect(., "Comparison") & !stringr::str_detect(., "Results")]
 Classes
 ```
 
@@ -76,8 +77,8 @@ names(Flow_data) <- Classes
 
 ```{r}
 Comparisons <- list(
-  # "Response" = c("NR", "R"),
-  # "mIDH" = c("mIDH2", "mIDH1"),
+  "Response" = c("NR", "R"),
+  "mIDH" = c("mIDH2", "mIDH1"),
   "Response_in_IDH2" = c("mIDH2_NR", "mIDH2_R"),
   "Response_in_IDH1" = c("mIDH1_NR", "mIDH1_R"),
   "IDH_in_Responder" = c("mIDH2_R", "mIDH1_R"),
@@ -160,17 +161,17 @@ Plot_best_flows <- function(Flow_1, Flow_2){
     a*flows[node,"flow_class_1"] - flows[node,"flow_class_2"] + c
   })
   
-  df <- data.frame(x = (flows$flow_class_1), y = (flows$flow_class_2))
-  d <- MASS::kde2d(df$x, df$y)
-  dens <- data.frame(expand.grid(x = d$x, y = d$y), z = as.vector(d$z))
-  plot_final <- ggplot() +
-    geom_contour_filled(data = dens, aes(x=x, y=y, z =z, alpha = after_stat(level))) +
-    theme(legend.position = "none") + xlab(Flow_1) + ylab(Flow_2)                     
-  ggsave(paste0("~/GitHub/Thesis_paper/Results/Multi_layer_pheno_like/Layer_Figures/Multilayer/", Flow_2, "_", Flow_1, "_Cross_weight.png"), plot_final, height = 2100, width = 2100, units = "px")
-  plot_final
+  # df <- data.frame(x = (flows$flow_class_1), y = (flows$flow_class_2))
+  # d <- MASS::kde2d(df$x, df$y)
+  # dens <- data.frame(expand.grid(x = d$x, y = d$y), z = as.vector(d$z))
+  # plot_final <- ggplot() +
+  #   geom_contour_filled(data = dens, aes(x=x, y=y, z =z, alpha = after_stat(level))) +
+  #   theme(legend.position = "none") + xlab(Flow_1) + ylab(Flow_2)                     
+  # ggsave(paste0("~/GitHub/Thesis_paper/Results/Multi_layer_pheno_like/Layer_Figures/Multilayer/", Flow_2, "_", Flow_1, "_Cross_weight.png"), plot_final, height = 2100, width = 2100, units = "px")
+  # plot_final
 
   colnames(flows) <- c("name", Flow_1, Flow_2, "distance")
-  return(list(Flow_data = flows, Plot = plot_final))
+  return(list(Flow_data = flows, Plot = NA))
 }
 
 Distance_plot <- function(Flows, Class_1, distance_thresold){
@@ -197,9 +198,9 @@ names(Scaled_Flow_data) <- names(Flow_data)
 ## Plots Creation
 
 ```{r}
-Flow_analysis <- mclapply(names(Comparisons), function(Comparison){
+Flow_analysis <- lapply(names(Comparisons), function(Comparison){
   Plot_best_flows(Comparisons[[Comparison]][1], Comparisons[[Comparison]][2])
-}, mc.cores = 2)
+})
 names(Flow_analysis) <- names(Comparisons)
 ```
 
@@ -273,7 +274,7 @@ lapply(names(Flow_analysis), function(Comp){
 ## Saving flow analysis
 
 ```{r}
-Results_flow_analysis <- "../../Results/Multi_layer_pheno_like/Final_mutlilayer_results/"
+Results_flow_analysis <- "~/GitHub/Thesis_paper/Results/Multi_layer_pheno_like/Final_mutlilayer_results/"
 dir.create(Results_flow_analysis, showWarnings = F)
 
 tmp <- lapply(names(Flow_analysis), function(Comparison){
@@ -284,6 +285,14 @@ tmp <- lapply(names(Flow_analysis), function(Comparison){
     write.table(flow_data_path, sep = "\t")
 })
 ```
+
+```{r}
+Flow_analysis <- lapply(names(Comparisons), function(comp){
+  read.table(paste0(Results_flow_analysis, comp, "_Comparison/", comp, "_flow_data_2.tsv"), sep = "\t", header = T)
+})
+names(Flow_analysis)<-names(Comparisons)
+```
+
 
 ```{r}
 # Flow_analysis_2 <- lapply(names(Comparisons), function(comp){
@@ -299,7 +308,7 @@ tmp <- lapply(names(Flow_analysis), function(Comparison){
 
 ```{r}
 mart <- biomaRt::useMart(biomart = "ENSEMBL_MART_ENSEMBL",
-                         dataset = "hsapiens_gene_ensembl")
+                         dataset = "hsapiens_gene_ensembl", host = "https://www.ensembl.org")
 
 list_genes <- lapply(names(Flow_data), function(flow_data){
   dplyr::filter(Flow_data[[flow_data]], !stringr::str_detect(name, "chr") & 
@@ -319,6 +328,7 @@ universe_entrez <- genes$entrezgene_id %>% unique
 
 ## Functions enrichment analysis
 
+
 ```{r}
 Compare_Enrichments <- function(Comparison_flow, missing = T, only_up = F, only_down = F){
   list_DFG <- lapply(names(Comparison_flow), function(comp){
@@ -326,15 +336,24 @@ Compare_Enrichments <- function(Comparison_flow, missing = T, only_up = F, only_
     df <- dplyr::filter(df, !stringr::str_detect(name, "chr") & 
                           !stringr::str_detect(name, "MAR0") & 
                           !stringr::str_detect(name, "MAR1") & 
-                          !stringr::str_detect(name, "MIR"))
+                          !stringr::str_detect(name, "MIR") & name %in% genes$hgnc_symbol)
   
     df$missing_values <- (df[2] == 0 | df[3] == 0)
-    df$high_distance <- abs(df$distance) > 0.05
+    Mean_distance_up <- mean(df$distance[df$distance > 0])
+    q1_up <- quantile(df$distance[df$distance > 0])[2]
+    q3_up <- quantile(df$distance[df$distance > 0])[4]
+    high_distance_up <- q3_up + 1.5*(q3_up-q1_up) 
+    
+    Mean_distance_down <- mean(df$distance[df$distance < 0])
+    q1_down <- quantile(df$distance[df$distance < 0])[4]
+    q3_down <- quantile(df$distance[df$distance < 0])[2]
+    high_distance_down <-  + q3_down - 1.5*(q1_down-q3_down)
+    
     if(!missing){
       df <- dplyr::filter(df, missing_values == T)
     }
-    up <- dplyr::filter(df, distance > 0.05) %>% .$name
-    down <- dplyr::filter(df, distance < -0.05) %>% .$name
+    up <- dplyr::filter(df, distance > high_distance_up) %>% .$name
+    down <- dplyr::filter(df, distance < high_distance_down) %>% .$name
     if(only_up){
       down <- up
     }else if(only_down){
@@ -349,7 +368,7 @@ Compare_Enrichments <- function(Comparison_flow, missing = T, only_up = F, only_
   mydf <- data.table::rbindlist(list_DFG)
   
   
-  go_cluster <- compareCluster(Entrez~group, data = mydf, fun = "enrichGO", OrgDb = org.Hs.eg.db, 
+  go_cluster <- compareCluster(Entrez~group, data = mydf, fun = "enrichGO", ont = "BP", OrgDb = org.Hs.eg.db, 
                  keyType = "SYMBOL", pvalueCutoff = 0.1, pAdjustMethod = "none", qvalueCutoff = 1, universe = universe_hgnc)
   mydf_entrez <- merge(mydf, genes, by.x = "Entrez", by.y = "hgnc_symbol")
   kegg_cluster <- compareCluster(entrezgene_id~group, data = mydf_entrez, fun = "enrichKEGG", 
@@ -367,6 +386,8 @@ Auto_set_readable <- function(Results_cluster_KEGG_WP){
 }
 
 Cluster_enrichment_GO_up <- Compare_Enrichments(Flow_analysis, only_up = T, missing = T)
+
+Cluster_enrichment_GO_down <- Compare_Enrichments(Flow_analysis, only_up = F, only_down = T, missing = T)
 
 n <- 10
 p <- dotplot(Cluster_enrichment_GO_up$GO, showCategory = n) 
@@ -388,6 +409,169 @@ ggsave("~/GitHub/Thesis_paper/Results/Multi_layer_pheno_like/Final_mutlilayer_re
 pcnet <- cnetplot(Auto_set_readable(Cluster_enrichment_GO_up$KEGG), showCategory = n) 
 ggsave("~/GitHub/Thesis_paper/Results/Multi_layer_pheno_like/Final_mutlilayer_results/Cluster_direct_KEGG_up_cnetplot.png", pcnet, bg = "white", width = 5700, height = 5700, units = "px", limitsize = FALSE)
 ```
+
+```{r}
+Make_list_ID <- function(Flow_comparison, pos = T, missing = T){
+  df <- Flow_comparison[order(abs(Flow_comparison$distance), decreasing = T),]
+  df <- dplyr::filter(df, name %in% genes$hgnc_symbol)
+  
+  df$missing_values <- (df[2] == 0 | df[3] == 0)
+  if(!missing){
+    df <- dplyr::filter(df, missing_values == F)
+  }
+  if(pos){
+    Mean_distance <- mean(df$distance[df$distance > 0])
+    q1 <- quantile(df$distance[df$distance > 0])[2]
+    q3 <- quantile(df$distance[df$distance > 0])[4]
+    high_distance <- q3 + 1.5*(q3-q1)
+    ids <- dplyr::filter(df, distance > high_distance) %>% .$name
+  }else{
+    Mean_distance <- mean(df$distance[df$distance < 0])
+    q1 <- quantile(df$distance[df$distance < 0])[4]
+    q3 <- quantile(df$distance[df$distance < 0])[2]
+    high_distance <-  q3 - 1.5*(q1-q3)
+    ids <- dplyr::filter(df, distance < high_distance) %>% .$name
+  }
+  ids
+}
+```
+
+```{r}
+List_id_IDHs <- list(
+  "IDH1 in Responder" = Make_list_ID(Flow_analysis$IDH_in_Responder, pos = F),
+  "IDH1 in Non Responder" = Make_list_ID(Flow_analysis$IDH_in_Non_Responders, pos = F),
+  "IDH2 in Responder" = Make_list_ID(Flow_analysis$IDH_in_Responder, pos = T),
+  "IDH2 in Non Responder" = Make_list_ID(Flow_analysis$IDH_in_Non_Responders, pos = T)
+)
+List_id_Response <- list(
+  "Responder in IDH1" = Make_list_ID(Flow_analysis$Response_in_IDH1, pos = F),
+  "Responder in IDH2" = Make_list_ID(Flow_analysis$Response_in_IDH2, pos = F),
+  "Non Responder in IDH1" = Make_list_ID(Flow_analysis$Response_in_IDH1, pos = T),
+  "Non Responder in IDH2" = Make_list_ID(Flow_analysis$Response_in_IDH2, pos = T)
+)
+
+List_id_IDH_only <- list(
+  "IDH1" = Make_list_ID(Flow_analysis$mIDH, pos = F),
+  "IDH2" = Make_list_ID(Flow_analysis$mIDH, pos = T)
+)
+
+List_id_Response_only <-list(
+  "Responder" = Make_list_ID(Flow_analysis$Response, pos = F),
+  "Non Responder" = Make_list_ID(Flow_analysis$Response, pos = T)
+)
+
+df_IDH <- names(List_id_IDHs) %>% lapply(function(ids){
+  data.table(Entrez = List_id_IDHs[[ids]], group = ids)
+}) %>% data.table::rbindlist()
+
+df_Response <- names(List_id_Response) %>% lapply(function(ids){
+  data.table(Entrez = List_id_Response[[ids]], group = ids)
+}) %>% data.table::rbindlist()
+
+df_IDH_only <- names(List_id_IDH_only) %>% lapply(function(ids){
+  data.table(Entrez = List_id_IDH_only[[ids]], group = ids)
+}) %>% data.table::rbindlist()
+
+df_Response_only <- names(List_id_Response_only) %>% lapply(function(ids){
+  data.table(Entrez = List_id_Response_only[[ids]], group = ids)
+}) %>% data.table::rbindlist()
+
+Compare_IDH <- compareCluster(Entrez~group, data = df_IDH, fun = "enrichGO", ont = "BP", OrgDb = org.Hs.eg.db, 
+               keyType = "SYMBOL", pvalueCutoff = 0.1, pAdjustMethod = "none", 
+               qvalueCutoff = 1, universe = universe_hgnc)
+
+Compare_Response <- compareCluster(Entrez~group, data = df_Response, fun = "enrichGO", ont = "BP", OrgDb = org.Hs.eg.db, 
+               keyType = "SYMBOL", pvalueCutoff = 0.1, pAdjustMethod = "none", 
+               qvalueCutoff = 1, universe = universe_hgnc)
+
+# Compare_IDH_only <- compareCluster(Entrez~group, data = df_IDH_only, fun = "enrichGO", ont = "BP", OrgDb = org.Hs.eg.db, 
+#                keyType = "SYMBOL", pvalueCutoff = 0.1, pAdjustMethod = "none", 
+#                qvalueCutoff = 1, universe = universe_hgnc)
+# 
+# Compare_Response_only <- compareCluster(Entrez~group, data = df_Response_only, fun = "enrichGO", ont = "BP", OrgDb = org.Hs.eg.db, 
+#                keyType = "SYMBOL", pvalueCutoff = 0.1, pAdjustMethod = "none", 
+#                qvalueCutoff = 1, universe = universe_hgnc)
+
+```
+
+```{r}
+TOP_100_Response_only <- Flow_analysis[["Response"]] %>% .[order(.$distance, decreasing = F),] %>% dplyr::filter(name %in% genes$hgnc_symbol) %>% .$name %>% .[1:100]
+TOP_100_Response_only
+
+TOP_100_Non_Response_only <- Flow_analysis[["Response"]] %>% .[order(.$distance, decreasing = T),] %>% dplyr::filter(name %in% genes$hgnc_symbol) %>% .$name %>% .[1:100]
+TOP_100_Non_Response_only
+
+TOP_100_IDH1_only <- Flow_analysis[["mIDH"]] %>% .[order(.$distance, decreasing = F),] %>% dplyr::filter(name %in% genes$hgnc_symbol) %>% .$name %>% .[1:100]
+TOP_100_IDH1_only
+
+TOP_100_IDH2_only <- Flow_analysis[["mIDH"]] %>% .[order(.$distance, decreasing = T),] %>% dplyr::filter(name %in% genes$hgnc_symbol) %>% .$name %>% .[1:100]
+TOP_100_IDH2_only
+```
+
+
+
+```{r}
+n <- 10
+p <- dotplot(Compare_IDH, showCategory = n) 
+n_comp <- 4
+height_param <- n*n_comp*120 +200
+width_param <- n_comp*900 + 300
+ggsave("~/GitHub/Thesis_paper/Results/Multi_layer_pheno_like/Final_mutlilayer_results/Cluster_IDH_plot.png", 
+       p, bg = "white", width = width_param, 
+       height = height_param, units = "px", limitsize = FALSE)
+
+pcnet <- cnetplot(Compare_IDH, showCategory = n, cex_label_gene = 2, cex_label_category = 2.5) 
+ggsave("~/GitHub/Thesis_paper/Results/Multi_layer_pheno_like/Final_mutlilayer_results/Cluster_IDH_cnetplot.png", pcnet, bg = "white", width = 5700, height = 5700, units = "px", limitsize = FALSE)
+```
+
+
+```{r}
+n <- 10
+p <- dotplot(Compare_Response, showCategory = n) 
+n_comp <- 4
+height_param <- n*n_comp*120 +200
+width_param <- n_comp*900 + 300
+ggsave("~/GitHub/Thesis_paper/Results/Multi_layer_pheno_like/Final_mutlilayer_results/Cluster_Response_plot.png", 
+       p, bg = "white", width = width_param, 
+       height = height_param, units = "px", limitsize = FALSE)
+
+pcnet <- cnetplot(Compare_Response, showCategory = n, cex_label_gene = 2, cex_label_category = 2.5) 
+ggsave("~/GitHub/Thesis_paper/Results/Multi_layer_pheno_like/Final_mutlilayer_results/Cluster_Response_cnetplot.png", pcnet, bg = "white", width = 5700, height = 5700, units = "px", limitsize = FALSE)
+```
+
+
+```{r}
+n <- 30
+p <- dotplot(Compare_IDH_only, showCategory = n) 
+n_comp <- 2
+height_param <- n*n_comp*120 +200
+width_param <- n_comp*900 + 300
+ggsave("~/GitHub/Thesis_paper/Results/Multi_layer_pheno_like/Final_mutlilayer_results/Compare_IDH_only_plot.png", 
+       p, bg = "white", width = width_param, 
+       height = height_param, units = "px", limitsize = FALSE)
+
+pcnet <- cnetplot(Compare_IDH_only, showCategory = n, cex_label_gene = 2, cex_label_category = 2) 
+ggsave("~/GitHub/Thesis_paper/Results/Multi_layer_pheno_like/Final_mutlilayer_results/Compare_IDH_only_cnetplot.png", pcnet, bg = "white", width = 5700, height = 5700, units = "px",  limitsize = FALSE)
+```
+
+
+```{r}
+n <- 30
+n_comp <- 2
+p <- dotplot(Compare_Response_only, showCategory = n) 
+height_param <- n*n_comp*120 +200
+width_param <- n_comp*900 + 300
+ggsave("~/GitHub/Thesis_paper/Results/Multi_layer_pheno_like/Final_mutlilayer_results/Cluster_Response_only_plot.png", 
+       p, bg = "white", width = width_param, 
+       height = height_param, units = "px", limitsize = FALSE)
+
+pcnet <- cnetplot(Compare_Response_only, showCategory = n, cex_label_gene = 2, cex_label_category = 2.5) 
+ggsave("~/GitHub/Thesis_paper/Results/Multi_layer_pheno_like/Final_mutlilayer_results/Cluster_Response_only_cnetplot.png", pcnet, bg = "white",  width = 5700, height = 5700, units = "px",  limitsize = FALSE)
+```
+
+
+
+
 
 
 
@@ -446,15 +630,13 @@ Do_enrichment_analysis <- function(Genes_ENTREZ, Title){
       re <- gseGO(genes_ENTREZ, 
             OrgDb        = org.Hs.eg.db, 
             keyType = "ENTREZID",
-            ont          = "all",
+            ont          = "BP",
             minGSSize    = 1,
             maxGSSize    = 1000,
             pvalueCutoff = 0.1,
             verbose      = T, 
             pAdjustMethod = "none") %>%
         setReadable(OrgDb = org.Hs.eg.db, keyType = "ENTREZID")
-      re@result$qvalue <- re@result$pvalue
-      re@result$P.adjust <- re@result$pvalue
       re
       },
     error = function(cond) {
@@ -473,8 +655,6 @@ Do_enrichment_analysis <- function(Genes_ENTREZ, Title){
                     verbose = F, organism = 'hsa', 
                     keyType = 'ncbi-geneid') %>%
         setReadable(OrgDb = org.Hs.eg.db, keyType = "ENTREZID")
-      re@result$qvalue <- re@result$pvalue
-      re@result$P.adjust <- re@result$pvalue
       re
     }, 
     error = function(cond) {
@@ -495,47 +675,40 @@ Do_enrichment_analysis <- function(Genes_ENTREZ, Title){
 }
 
 Do_gene_ontology_Kegg_analysis <- function(Flow_data, Distance_threshold, Title){
-  genes_up <- Flow_data %>% dplyr::filter(distance > Distance_threshold & !stringr::str_detect(name, "chr") & !stringr::str_detect(name, "MAR0") & !stringr::str_detect(name, "MAR1") & !stringr::str_detect(name, "MIR")) %>% unique
-  genes_down <- Flow_data %>% dplyr::filter(distance < -Distance_threshold & !stringr::str_detect(name, "chr") & !stringr::str_detect(name, "MAR0") & !stringr::str_detect(name, "MAR1") & !stringr::str_detect(name, "MIR")) %>% unique
+  # genes_up <- Flow_data %>% dplyr::filter(distance > Distance_threshold & !stringr::str_detect(name, "chr") & !stringr::str_detect(name, "MAR0") & !stringr::str_detect(name, "MAR1") & !stringr::str_detect(name, "MIR")) %>% unique
+  # genes_down <- Flow_data %>% dplyr::filter(distance < -Distance_threshold & !stringr::str_detect(name, "chr") & !stringr::str_detect(name, "MAR0") & !stringr::str_detect(name, "MAR1") & !stringr::str_detect(name, "MIR")) %>% unique
   
-  both_side <- genes_down <- Flow_data %>% dplyr::filter(!stringr::str_detect(name, "chr") & !stringr::str_detect(name, "MAR0") & !stringr::str_detect(name, "MAR1") & !stringr::str_detect(name, "MIR")) %>% unique
+  both_side <- genes_down <- Flow_data %>% dplyr::filter(name %in% genes$hgnc_symbol) %>% unique
   
-  genes_up_ensembl <- Make_genes_ensembl(genes_up)
-  genes_down_ensembl <- Make_genes_ensembl(genes_down)
+  # genes_up_ensembl <- Make_genes_ensembl(genes_up)
+  # genes_down_ensembl <- Make_genes_ensembl(genes_down)
   genes_both_ensembl <- Make_genes_ensembl(both_side)
   
-  genes_up_ensembl_c <- genes_up_ensembl$distance_abs
-  names(genes_up_ensembl_c) <- genes_up_ensembl$entrezgene_id
-  
-  genes_down_ensembl_c <- genes_down_ensembl$distance_abs
-  names(genes_down_ensembl_c) <- genes_down_ensembl$entrezgene_id
-  
-  genes_ensembl_c <- genes_down_ensembl$distance
-  names(genes_ensembl_c) <- genes_down_ensembl$entrezgene_id
-  
-  genes_ensembl_c <- c(genes_up_ensembl_c, genes_ensembl_c)
+  # genes_up_ensembl_c <- genes_up_ensembl$distance_abs
+  # names(genes_up_ensembl_c) <- genes_up_ensembl$entrezgene_id
+  # 
+  # genes_down_ensembl_c <- genes_down_ensembl$distance_abs
+  # names(genes_down_ensembl_c) <- genes_down_ensembl$entrezgene_id
+  # 
+  # genes_ensembl_c <- genes_down_ensembl$distance
+  # names(genes_ensembl_c) <- genes_down_ensembl$entrezgene_id
+  # 
+  # genes_ensembl_c <- c(genes_up_ensembl_c, genes_ensembl_c)
 
   genes_ensembl_both_c <- genes_both_ensembl$distance
   names(genes_ensembl_both_c) <- genes_both_ensembl$entrezgene_id
 
   # enrichments_up <- Do_enrichment_analysis(genes_up_ensembl_c, paste(Title, "up"))
   # enrichments_down <- Do_enrichment_analysis(genes_down_ensembl_c, paste(Title, "down"))
-  enrichments_both_side <- Do_enrichment_analysis(genes_ensembl_both_c, paste(Title, "Both side"))
-
-  list("Enrichments"= list("Both_side" = enrichments_both_side),
-     "genelists" = list("Ensembl_UP" = genes_up_ensembl_c,
-                        "Ensembl_Down" = genes_down_ensembl_c,
-                        "Ensemble" = genes_ensembl_c,
-                        "Both" = genes_ensembl_both_c,
-                        "UP" = genes_up$name,
-                        "Down" = genes_down$name))
+  enrichments_both_side <- Do_enrichment_analysis(genes_ensembl_both_c, paste(Title, "GSEA"))
+  enrichments_both_side
 }
 ```
 
 
 ```{r}
 DO_all_enrichments <- function(Res_Data, Flow_threshold, Title){
-  genes_flow_data <- Flow_data %>% dplyr::filter(!stringr::str_detect(name, "chr") & !stringr::str_detect(name, "MAR0") & !stringr::str_detect(name, "MAR1") & !stringr::str_detect(name, "MIR")) %>% unique
+  genes_flow_data <- Flow_data %>% dplyr::filter(name %in% genes$hgnc_symbol) %>% unique
   
   genes_diff <- list("UP" = dplyr::filter(genes_flow_data, distance > Distance_threshold),
                 "DOWN" = dplyr::filter(genes_flow_data, distance > Distance_threshold),
@@ -555,7 +728,7 @@ DO_all_enrichments <- function(Res_Data, Flow_threshold, Title){
 
 ```{r, echo=F}
 GO_Analysis <- lapply(names(Flow_analysis), function(Class){
-  Do_gene_ontology_Kegg_analysis(Flow_analysis[[Class]][["Flow_data"]], 0.005, Class)
+  Do_gene_ontology_Kegg_analysis(Flow_analysis[[Class]], 0.005, Class)
 })
 names(GO_Analysis) <- names(Flow_analysis)
 ```
@@ -563,7 +736,7 @@ names(GO_Analysis) <- names(Flow_analysis)
 ## Saving GOs
 
 ```{r}
-GO_Analysis %>% saveRDS(file = "../../Results/Multi_layer_pheno_like/Final_mutlilayer_results/GO_analysis.rds")
+GO_Analysis %>% saveRDS(file = "../../Results/Multi_layer_pheno_like/Final_mutlilayer_results/GO_analysis_06_12.rds")
 ```
 
 ## Loading GOs
@@ -616,20 +789,18 @@ p_IDH2s
 
 ```{r}
 Cnetplot <- mclapply(names(GO_Analysis), function(Comparisons){
-  pcnet <- lapply(names(GO_Analysis[[Comparisons]][["Enrichments"]]), function(Sign){
-    lapply(names(GO_Analysis[[Comparisons]][["Enrichments"]][[Sign]]), function(Ontology){
-      if(!is.null(GO_Analysis[[Comparisons]][["Enrichments"]][[Sign]][[Ontology]][["Cnetplot"]])){
-        cnet <- GO_Analysis[[Comparisons]][["Enrichments"]][[Sign]][[Ontology]][["Cnetplot"]]
-        barplot <- GO_Analysis[[Comparisons]][["Enrichments"]][[Sign]][[Ontology]][["Enrichment_barplot"]]
-        dotplot <- GO_Analysis[[Comparisons]][["Enrichments"]][[Sign]][[Ontology]][["Enrichment_dotplot"]]
-        ggsave(paste0("../../Results/Multi_layer_pheno_like/Scaled_intra_links_v2/", 
-                      Comparisons, "_Comparison/", Comparisons, "_", Sign, "_", Ontology, "_cnetplot.png"), 
-               cnet, bg = "white")
-        ggsave(paste0("../../Results/Multi_layer_pheno_like/Scaled_intra_links_v2/", 
-                      Comparisons, "_Comparison/", Comparisons, "_", Sign, "_", Ontology, "_dotplot.png"), 
-               dotplot, bg = "white", height = 3000, units = "px")
-      }
-    })
+  pcnet <- lapply(names(GO_Analysis[[Comparisons]]), function(Ontology){
+    if(!is.null(GO_Analysis[[Comparisons]][[Ontology]][["Cnetplot"]])){
+      # cnet <- GO_Analysis[[Comparisons]][[Ontology]][["Cnetplot"]]
+      # barplot <- GO_Analysis[[Comparisons]][[Ontology]][["Enrichment_barplot"]]
+      dotplot <- GO_Analysis[[Comparisons]][[Ontology]][["Enrichment_dotplot"]]
+      # ggsave(paste0("~/GitHub/Thesis_paper/Results/Multi_layer_pheno_like/Final_mutlilayer_results/", 
+      #               Comparisons, "_Comparison/", Comparisons, "_", Ontology, "_cnetplot.png"), 
+      #        cnet, bg = "white", width = 5700, height = 5700, units = "px",  limitsize = FALSE)
+      ggsave(paste0("~/GitHub/Thesis_paper/Results/Multi_layer_pheno_like/Final_mutlilayer_results/",
+                    Comparisons, "_Comparison/", Comparisons, "_", Ontology, "_dotplot.png"), 
+             dotplot, bg = "white", height = 4000, units = "px")
+    }
   }) 
 }, mc.cores = cores2use)
 
@@ -655,6 +826,22 @@ lapply(names(GO_Analysis$mIDH$Enrichments$Both_side)[1:3], function(Ontology){
 })
 
 ```
+
+## 
+
+```{r}
+mclapply(names(GO_Analysis), function(Comparisons){
+  pcnet <- lapply(names(GO_Analysis[[Comparisons]]), function(Ontology){
+    if(!is.null(GO_Analysis[[Comparisons]][[Ontology]][["Cnetplot"]])){
+      GO_Analysis[[Comparisons]][[Ontology]][["Readable_enrichment"]]@result %>%
+        write.table(paste0("~/GitHub/Thesis_paper/Results/Multi_layer_pheno_like/Final_mutlilayer_results/", Comparisons,
+                           "_Comparison/", Comparisons, "_", Ontology, "_table.tsv"))
+    }
+  }) 
+}, mc.cores = cores2use)
+```
+
+
 
 ## Mergeing enrichments functions
 
@@ -771,43 +958,142 @@ names(Results_IDH1_IDH2) <- Clusters_GO_IDH1_IDH2
 
 ```
 
-## Interrogate Human GEM
+
+
+
+
+# EnrichR
 
 ```{r}
-require(httr)
+websiteLive <- getOption("enrichR.live")
+if (websiteLive) {
+    listEnrichrSites()
+    setEnrichrSite("Enrichr") # Human genes   
+}
+```
 
-headers = c(
-  `accept` = "application/json"
-)
+```{r}
+if (websiteLive) dbs <- listEnrichrDbs()
 
-params = list(
-  `model` = "HumanGem"
-)
+path_2_analyse <- c("GO_Cellular_Component_2023", "GO_Molecular_Function_2023", "Reactome_2022", "KEGG_2021_Human", "WikiPathway_2023_Human")
 
-Interrogate_HUMAN_GEM_reaction <- function(Reaction){
-  URL = paste0("https://metabolicatlas.org/api/v2/reactions/", Reaction)
-  request <- httr::GET(URL, httr::add_headers(.headers=headers), query = params)
-  res <- content(request)$subsystemSVGs[[1]]$customName
-  res
+path_2_analyse_BP <- c("GO_Biological_Process_2023")
+```
+
+```{r}
+EnrichR_multi_analysis <- function(Comparison_flow, missing = T, only_up = F, only_down = F){
+  list_DFG <- lapply(names(Comparison_flow), function(comp){
+    df <- Comparison_flow[[comp]][["Flow_data"]][order(abs(Comparison_flow[[comp]][["Flow_data"]]$distance), decreasing = T),]
+    df <- dplyr::filter(df, name %in% genes$hgnc_symbol)
+  
+    df$missing_values <- (df[2] == 0 | df[3] == 0)
+    Mean_distance_up <- mean(df$distance[df$distance > 0])
+    q1_up <- quantile(df$distance[df$distance > 0])[2]
+    q3_up <- quantile(df$distance[df$distance > 0])[4]
+    high_distance_up <- 1.5*(q3_up-q1_up) + q3_up
+    
+    Mean_distance_down <- mean(df$distance[df$distance < 0])
+    q1_down <- quantile(df$distance[df$distance < 0])[4]
+    q3_down <- quantile(df$distance[df$distance < 0])[2]
+    high_distance_down <- -1.5*(q1_down-q3_down) + q3_down
+
+    if(!missing){
+      df <- dplyr::filter(df, missing_values == T)
+    }
+    up <- dplyr::filter(df, distance > high_distance_up) %>%.$name
+    down <- dplyr::filter(df, distance < high_distance_down) %>% .$name
+    if(only_up){
+      down <- up
+    }else if(only_down){
+      up <- down
+    }
+    idx <- c(up, down) %>% unique
+    print(length(idx))
+    idx
+  })
+  names(list_DFG) <- names(Comparison_flow)
+  
+  Enriched_list <- lapply(names(list_DFG), function(comparison){
+    All_db <- enrichr(list_DFG[[comparison]], databases = path_2_analyse) %>%
+      lapply(function(path){
+        dplyr::filter(path, P.value < 0.05)
+        }) %>% data.table::rbindlist()
+    BP <- enrichr(list_DFG[[comparison]], databases = path_2_analyse_BP) %>%
+      lapply(function(path){
+        dplyr::filter(path, P.value < 0.05)
+        }) %>% data.table::rbindlist()
+    list("All_db" = All_db, "BP" = BP)
+  }) 
+    
+  
+  names(Enriched_list) <- names(list_DFG)
+
+  list("Gene_ID_list" = list_DFG, "Enriched_list" = Enriched_list)
 }
 
+```
 
+## Analysis
 
-test <- httr::GET(url = "https://metabolicatlas.org/api/v2/reactions/MAR05586", httr::add_headers(.headers=headers), query = params)
+```{r}
+EnrichRment_only_up <- EnrichR_multi_analysis(Flow_analysis, only_up = T)
+EnrichRment_only_down <- EnrichR_multi_analysis(Flow_analysis, only_up = F, only_down = T)
+```
 
+```{r}
+names(EnrichRment_only_up[["Enriched_list"]]) %>% lapply(function(comp){
+  plotEnrich(EnrichRment_only_up[["Enriched_list"]][[comp]][["All_db"]], orderBy = "Adjusted.P.value", title = "", showTerms = 40, numChar = 60) %>%
+    ggsave(filename = paste0("~/GitHub/Thesis_paper/Results/Multi_layer_pheno_like/Final_mutlilayer_results/EnrichR_analysis/", comp, "_up.png"), plot = .)
+  EnrichRment_only_up[["Enriched_list"]][[comp]][["All_db"]] %>%
+    write.table(paste0("~/GitHub/Thesis_paper/Results/Multi_layer_pheno_like/Final_mutlilayer_results/EnrichR_analysis/", comp, "_up.tsv"))
+  
+  
+  plotEnrich(EnrichRment_only_up[["Enriched_list"]][[comp]][["BP"]], orderBy = "Adjusted.P.value", title = "", showTerms = 40, numChar = 60) %>%
+    ggsave(filename = paste0("~/GitHub/Thesis_paper/Results/Multi_layer_pheno_like/Final_mutlilayer_results/EnrichR_analysis/", comp, "_up_BP.png"), plot = .)
+  EnrichRment_only_up[["Enriched_list"]][[comp]][["BP"]] %>%
+    write.table(paste0("~/GitHub/Thesis_paper/Results/Multi_layer_pheno_like/Final_mutlilayer_results/EnrichR_analysis/", comp, "_up_BP.tsv"))
+})
 
-
-
-
-content(test)
+names(EnrichRment_only_down[["Enriched_list"]]) %>% lapply(function(comp){
+  plotEnrich(EnrichRment_only_down[["Enriched_list"]][[comp]][["All_db"]], orderBy = "Adjusted.P.value", title = "", showTerms = 40, numChar = 60) %>%
+    ggsave(filename = paste0("~/GitHub/Thesis_paper/Results/Multi_layer_pheno_like/Final_mutlilayer_results/EnrichR_analysis/", comp, "_down.png"), plot = .)
+  EnrichRment_only_down[["Enriched_list"]][[comp]][["All_db"]] %>%
+    write.table(paste0("~/GitHub/Thesis_paper/Results/Multi_layer_pheno_like/Final_mutlilayer_results/EnrichR_analysis/", comp, "_down.tsv"))
+  
+  
+  plotEnrich(EnrichRment_only_down[["Enriched_list"]][[comp]][["BP"]], orderBy = "Adjusted.P.value", title = "", showTerms = 40, numChar = 60) %>%
+    ggsave(filename = paste0("~/GitHub/Thesis_paper/Results/Multi_layer_pheno_like/Final_mutlilayer_results/EnrichR_analysis/", comp, "_down_BP.png"), plot = .)
+  EnrichRment_only_down[["Enriched_list"]][[comp]][["BP"]] %>%
+    write.table(paste0("~/GitHub/Thesis_paper/Results/Multi_layer_pheno_like/Final_mutlilayer_results/EnrichR_analysis/", comp, "_down_BP.tsv"))
+})
 ```
 
 
 ```{r}
-system("curl -X 'GET' 'https://metabolicatlas.org/api/v2/reactions/MAR05586?model=HumanGem' -H 'accept: application/json'") 
+message("Response")
+intersect(EnrichRment_only_down$Gene_ID_list$Response_in_IDH1, EnrichRment_only_down$Gene_ID_list$Response_in_IDH2)
+message("Non Response")
+intersect(EnrichRment_only_up$Gene_ID_list$Response_in_IDH1, EnrichRment_only_up$Gene_ID_list$Response_in_IDH2)
+message("IDH1")
+intersect(EnrichRment_only_down$Gene_ID_list$IDH_in_Responder, EnrichRment_only_down$Gene_ID_list$IDH_in_Non_Responders)
+message("IDH2")
+intersect(EnrichRment_only_up$Gene_ID_list$IDH_in_Responder, EnrichRment_only_up$Gene_ID_list$IDH_in_Non_Responders)
+
 ```
 
 
 
+```{r}
+message("Response")
+intersect(EnrichRment_only_down$Enriched_list$Response_in_IDH2$BP$Term, EnrichRment_only_down$Enriched_list$Response_in_IDH1$BP$Term)
 
+message("Non Response")
+intersect(EnrichRment_only_up$Enriched_list$Response_in_IDH2$BP$Term, EnrichRment_only_up$Enriched_list$Response_in_IDH1$BP$Term)
+
+message("IDH1")
+intersect(EnrichRment_only_down$Enriched_list$IDH_in_Responder$BP$Term, EnrichRment_only_down$Enriched_list$IDH_in_Non_Responders$BP$Term)
+
+message("IDH2")
+intersect(EnrichRment_only_up$Enriched_list$IDH_in_Responder$BP$Term, EnrichRment_only_up$Enriched_list$IDH_in_Non_Responders$BP$Term)
+```
 

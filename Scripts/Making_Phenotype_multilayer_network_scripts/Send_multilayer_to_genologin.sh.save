@@ -14,7 +14,7 @@ do
     cd $pheno
     file=$pheno\_multilayer_infomap.edges
     echo $file
-    sshpass -p "135264/Qgmatp" scp $file ahucteau@genologin.toulouse.inra.fr:work/Multilayer
+    sshpass -p PASSWORD scp $file ahucteau@genologin.toulouse.inra.fr:work/Multilayer
     cd ..
   fi
 done

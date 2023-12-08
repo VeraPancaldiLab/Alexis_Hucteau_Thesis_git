@@ -1,0 +1,2034 @@
+---
+title: "IDHms data analysis"
+author: Alexis Hucteau
+date: "`r Sys.Date()`"
+output:
+    html_document:
+      toc: yes
+      toc_float: yes
+      theme: united
+editor_options:
+  markdown:
+    wrap: sentence
+---
+
+# Libraries
+
+```{r, error=F, warning=F, echo=FALSE, include=F}
+rm(DmIALite, DOLite, DOLiteTerm, HsIALite, MmIALite, RnIALite)
+
+library(GGally)
+library(ggvenn)
+library(FactoMineR)
+library(igraph)
+library(limma)
+library(viper)
+library(stringr)
+library(data.table)
+library(dplyr)
+library(RCy3)
+library(factoextra)
+library(pheatmap)
+library(Hmisc)
+library(matrixStats)
+library(RColorBrewer)
+library(clusterProfiler)
+library(enrichplot)
+library(DOSE)
+library(ggnewscale)
+library(org.Hs.eg.db)
+library(pathview)
+library(EnhancedVolcano)
+library(aracne.networks)
+library(sva)
+library(ComplexHeatmap)
+library(ggpubr)
+
+"%ni%" <- Negate("%in%")
+wd <- "~/GitHub/Thesis_paper/"
+source("~/Core_scripts/msviper_functions.R")
+source("~/Core_scripts/core_functions.R")
+```
+
+# Make Regulon AML
+
+```{r}
+data(regulonlaml)
+viper_regulons2dorothea <- function(r) {
+  res <- r %>%
+    purrr::map_df(
+      .f = function(i) {
+        tf_target <- i$tfmode %>%
+          tibble::enframe(name = "target", value = "mor") %>%
+          mutate(likelihood = i$likelihood)
+      },
+      .id = "tf"
+    )
+  return(res)
+}
+
+regulonaml <- viper_regulons2dorothea(regulonlaml)
+regulonaml_SYMBOL <- data.frame("tf" = GeneAnswers::getSymbols(regulonaml$tf, data = "org.Hs.eg"),
+                                "target" = GeneAnswers::getSymbols(regulonaml$target, data = "org.Hs.eg"),
+                                "mor" = regulonaml$mor,
+                                "likelihood" = regulonaml$likelihood)
+regulonaml_SYMBOL%>%
+  write.table("../Datasets/regulonlaml_symbol.tsv", quote = F, sep = "\t", row.names = F)
+
+rm(regulonlaml)
+data(dorothea_hs, package = "dorothea")
+dorothea_regulon <- dorothea_hs %>%
+  filter(confidence %in% c("A", "B"))
+dorothea_regulon_D <- dorothea_hs %>%
+  filter(confidence %in% c("A", "B", "C", "D"))
+# dorothea_regulon <- dorothea_regulon[,c(1,3)]
+
+dorothea_regulon %>%
+  write.table("../Datasets/Dorothea_D.tsv", quote = F, sep = "\t", row.names = F)
+
+```
+
+# Analyse GRN
+
+## Functions
+
+```{r}
+Analyse_network <- function(net, weight = "confidence"){
+  n_genes <- net %>%
+  dplyr::group_by(tf) %>%  
+  summarise(n = n())
+
+  a <- ggplot(data=n_genes, aes(x=n)) +
+    geom_density() +
+    theme(text = element_text(size=12), title = title) +
+    xlab('Number of target genes') +
+    ylab('densities') +
+    theme_bw() +
+    theme(legend.position = "none") +
+    xlim(c(0,100))
+
+  b <- ggplot(data=n_genes, aes(x=n)) +
+    geom_density() +
+    theme(text = element_text(size=12), title = title) +
+    xlab('Number of target genes') +
+    ylab('densities') +
+    theme_bw() +
+    theme(legend.position = "none")
+
+  if (weight == "likelihood"){
+    c <- hist(-log10(-(net$likelihood-1)), breaks = 100)  
+    list(a, b, c)
+  }else if(weight == "confidence"){
+    n_edges <- net %>%
+      group_by(confidence) %>%
+      summarise(n = n())
+
+    c <- ggplot(data=n_edges, aes(x=confidence, y=n, color=confidence, fill=confidence)) +
+      geom_bar(stat="identity") +
+      theme(text = element_text(size=12)) +
+      xlab('Number of edges') +
+      ylab('densities') +
+      theme_bw() +
+      theme(legend.position = "none")
+    list(a, b, c)
+  }else{
+    list(a, b)
+  }
+}
+```
+
+## Analysis
+
+### Databased network
+
+```{r}
+Analyse_network(dorothea_regulon)
+Analyse_network(dorothea_hs)
+Analyse_network(regulonaml_SYMBOL, "likelihood")
+```
+
+### ARACNe Networks importation
+
+```{r}
+BEATAML_ARACNe_network <- read.table("../Results/DGEA/Networks_Beataml/network.txt", sep = "\t", header = T)
+colnames(BEATAML_ARACNe_network)[1:2] <- c("tf", "target")
+
+TCGA_ARACNe_network <- read.table("../Results/DGEA/Networks/network.txt", sep = "\t", header = T)
+colnames(TCGA_ARACNe_network)[1:2] <- c("tf", "target")
+
+All_sample_ARACNe_network <- read.table("../../Multiplex_DNAmet_PPI_Chrom_Coexp/Output_all_Samples_TPM/network.txt", sep = "\t", header = T)
+colnames(All_sample_ARACNe_network)[1:2] <- c("tf", "target")
+
+TUH_ARACNe_network <- read.table("../Results/DGEA/Networks_TUH/network.txt", sep = "\t", header = T)
+colnames(TUH_ARACNe_network)[1:2] <- c("tf", "target")
+
+Verhaak_ARACNe_network <- read.table("../Results/DGEA/Networks_Verhaak/network.txt", sep = "\t", header = T)
+colnames(Verhaak_ARACNe_network)[1:2] <- c("tf", "target")
+```
+
+### ARACNe network analysis
+
+```{r}
+Analyse_network(BEATAML_ARACNe_network, "autre")
+Analyse_network(TCGA_ARACNe_network, "autre")
+Analyse_network(All_sample_ARACNe_network, "autre")
+Analyse_network(TUH_ARACNe_network, "autre")
+Analyse_network(Verhaak_ARACNe_network, "autre")
+```
+
+# msViper analysis
+
+## BEATAML
+
+```{r}
+RNAseqBEATAML <- read.table("../Datasets/Voom_BEATAML.tsv", sep = "\t", header = T)
+
+Clinical_BEATAML_RNAseq_data <- readxl::read_xlsx("../Datasets/beataml_wv1to4_clinical.xlsx", sheet = 1)
+
+Pheno_IDH_BEATAML <- sapply(colnames(RNAseqBEATAML), function(samples){
+  mutations <- dplyr::filter(Clinical_BEATAML_RNAseq_data, dbgap_rnaseq_sample == samples) %>% .$variantSummary
+  IDH1 <- stringr::str_detect(mutations, pattern = "IDH1")
+  IDH2 <- stringr::str_detect(mutations, pattern = "IDH2")
+  dIDH <- IDH1 & IDH2
+  ifelse(dIDH, "mIDH1&2", ifelse(IDH1, "mIDH1", "IDH2"))
+})
+Pheno_IDH_BEATAML %>% table
+
+DEG_IDH_BEATAML <- Differential_analysis(Pheno_IDH_BEATAML, RNAseqBEATAML)
+DEG_IDH_BEATAML$`IDH2-mIDH1`$logFC <- DEG_IDH_BEATAML$`IDH2-mIDH1`$logFC
+DEG_IDH_BEATAML$`IDH2-mIDH1` %>% write.table("../Results/DGEA/DEGs_tables/DEG_IDH_BEATAML.tsv", sep = "\t")
+```
+```{r}
+BEATAML_ARACNe_network <- read.table("../Results/DGEA/Networks_Beataml/network.txt", sep = "\t", header = T)
+colnames(BEATAML_ARACNe_network)[1:2] <- c("tf", "target")
+
+ref_mIDH1 <- Pheno_IDH_BEATAML == "mIDH1"
+ref_mIDH2 <- Pheno_IDH_BEATAML == "IDH2"
+
+IDH_BEATAML_msvip_ARACNe <- run_msviper(RNAseqBEATAML, BEATAML_ARACNe_network, use_aracne = T, ref_mIDH1, ref_mIDH2, "mIDH1", "mIDH2", minsize = 1, ges.filter = T)
+# IDH_BEATAML_msvip_regulonlaml <- run_msviper(RNAseqBEATAML, regulonaml_SYMBOL, use_aracne = T, ref_mIDH1, ref_mIDH2, "mIDH1", "mIDH2", minsize = 4, ges.filter = T)
+IDH_BEATAML_msvip_dorothea <- run_msviper(RNAseqBEATAML, dorothea_regulon, use_aracne = T, ref_mIDH1, ref_mIDH2, "mIDH1", "mIDH2", minsize = 1, ges.filter = T)
+IDH_BEATAML_msvip_dorothea_D <- run_msviper(RNAseqBEATAML, dorothea_regulon_D, use_aracne = T, ref_mIDH1, ref_mIDH2, "mIDH1", "mIDH2", minsize = 1, ges.filter = T)
+
+IDH_BEATAML_TF_actitity_ARACNe <- viper(RNAseqBEATAML, dorothea2viper_regulons(IDH_BEATAML_msvip_ARACNe$regulons))
+# IDH_BEATAML_TF_activity_regulonlaml <- viper(RNAseqBEATAML, dorothea2viper_regulons(IDH_BEATAML_msvip_regulonlaml$regulons))
+IDH_BEATAML_TF_actitity_dorothea <- viper(RNAseqBEATAML, dorothea2viper_regulons(IDH_BEATAML_msvip_dorothea$regulons))
+IDH_BEATAML_TF_actitity_dorothea_D <- viper(RNAseqBEATAML, dorothea2viper_regulons(IDH_BEATAML_msvip_dorothea_D$regulons))
+
+IDH_BEATAML_msvip_ARACNe$mrs_table %>%
+  write.table("../Results/DGEA/Diff_TF_activity/ARACNe/TF_Diff_activity_BEATAML_IDH_ARACNe.tsv", 
+              sep = "\t", row.names = F, quote = F)
+# IDH_BEATAML_msvip_regulonlaml$mrs_table %>%
+  # dplyr::filter(pval < 0.05) %>%
+  # write.table("../Results/DGEA/Diff_TF_activity/Regulonlaml/TF_Diff_activity_BEATAML_IDH_regulonlaml.tsv", sep = "\t")
+IDH_BEATAML_msvip_dorothea$mrs_table %>%
+  write.table("../Results/DGEA/Diff_TF_activity/Dorothea/TF_Diff_activity_BEATAML_IDH_dorothea.tsv", 
+              sep = "\t", row.names = F, quote = F)
+IDH_BEATAML_msvip_dorothea_D$mrs_table %>%
+  write.table("../Results/DGEA/Diff_TF_activity/Dorothea_D/TF_Diff_activity_BEATAML_IDH_dorothea_D.tsv", 
+              sep = "\t", row.names = F, quote = F)
+```
+
+## TCGA
+
+```{r}
+RNAseq_TCGA <- read.table("/media/alexis/DATA/Thesis_paper_DATA/Voom_TCGA.tsv", sep = "\t", header = T)
+Pheno_TCGA <- sapply(colnames(RNAseq_TCGA), function(samples){
+  IDH1 <- stringr::str_detect(samples, pattern = "mIDH1")
+  IDH2 <- stringr::str_detect(samples, pattern = "mIDH2")
+  ifelse(IDH1, "mIDH1", ifelse(IDH2, "mIDH2", "wtIDH"))
+})
+
+RNAseq_TCGA <- RNAseq_TCGA[Pheno_TCGA != "wtIDH"]
+Pheno_TCGA_IDH <- Pheno_TCGA[Pheno_TCGA != "wtIDH"]
+DEG_IDH_TCGA <- Differential_analysis(Pheno_TCGA_IDH, RNAseq_TCGA)$`mIDH1-mIDH2`
+DEG_IDH_TCGA$logFC <- -DEG_IDH_TCGA$logFC
+DEG_IDH_TCGA %>% write.table("../Results/DGEA/DEGs_tables/DEG_IDH_TCGA.tsv", sep = "\t")
+```
+```{r}
+TCGA_ARACNe_network <- read.table("../Results/DGEA/Networks/network.txt", sep = "\t", header = T)
+colnames(TCGA_ARACNe_network)[1:2] <- c("tf", "target")
+
+ref_mIDH1 <- Pheno_TCGA_IDH == "mIDH1"
+ref_mIDH2 <- Pheno_TCGA_IDH == "mIDH2"
+
+IDH_TCGA_msvip_ARACNe <- run_msviper(RNAseq_TCGA, TCGA_ARACNe_network, use_aracne = T, ref_mIDH1, ref_mIDH2, "mIDH1", "mIDH2", minsize = 1, ges.filter = T)
+IDH_TCGA_msvip_regulonaml <- run_msviper(RNAseq_TCGA, regulonaml_SYMBOL, use_aracne = T, ref_mIDH1, ref_mIDH2, "mIDH1", "mIDH2", minsize = 1, ges.filter = T)
+IDH_TCGA_msvip_dorothea <- run_msviper(RNAseq_TCGA, dorothea_regulon, use_aracne = T, ref_mIDH1, ref_mIDH2, "mIDH1", "mIDH2", minsize = 1, ges.filter = T)
+IDH_TCGA_msvip_dorothea_D <- run_msviper(RNAseq_TCGA, dorothea_regulon_D, use_aracne = T, ref_mIDH1, ref_mIDH2, "mIDH1", "mIDH2", minsize = 1, ges.filter = T)
+
+IDH_TCGA_TF_actitity <- viper(RNAseq_TCGA, dorothea2viper_regulons(IDH_TCGA_msvip_ARACNe$regulons))
+IDH_TCGA_TF_actitity_regulonaml <- viper(RNAseq_TCGA, dorothea2viper_regulons(IDH_TCGA_msvip_regulonaml$regulons))
+IDH_TCGA_TF_actitity_dorothea <- viper(RNAseq_TCGA, dorothea2viper_regulons(IDH_TCGA_msvip_dorothea$regulons))
+IDH_TCGA_TF_actitity_dorothea_D <- viper(RNAseq_TCGA, dorothea2viper_regulons(IDH_TCGA_msvip_dorothea_D$regulons))
+
+IDH_TCGA_msvip_ARACNe$mrs_table %>%
+  write.table("../Results/DGEA/Diff_TF_activity/ARACNe/TF_Diff_activity_TCGA_IDH_ARACNe.tsv", 
+              sep = "\t", row.names = F, quote = F)
+IDH_TCGA_msvip_regulonaml$mrs_table %>%
+  write.table("../Results/DGEA/Diff_TF_activity/Regulonlaml/TF_Diff_activity_TCGA_IDH_regulonlaml.tsv", 
+              sep = "\t", row.names = F, quote = F)
+IDH_TCGA_msvip_dorothea$mrs_table %>%
+  write.table("../Results/DGEA/Diff_TF_activity/Dorothea/TF_Diff_activity_TCGA_IDH_dorothea.tsv", 
+              sep = "\t", row.names = F, quote = F)
+IDH_TCGA_msvip_dorothea_D$mrs_table %>%
+  write.table("../Results/DGEA/Diff_TF_activity/Dorothea_D/TF_Diff_activity_TCGA_IDH_dorothea_D.tsv", 
+              sep = "\t", row.names = F, quote = F)
+```
+
+## KOICHI
+
+```{r}
+RNAseq_Koichi <- read.csv("~/GitHub/Koichi_gene_expression_analyses_git/Koichi_gene_expression_analyses/DATA/RNAseq_parsed.csv", row.names = 1, header = T, check.names = F)
+Clinical_patient_data <- read.table("../Datasets/Clinical_Koichi_data.tsv", sep = "\t", header = T)
+Phenotype_IDH_Koichi <- sapply(colnames(RNAseq_Koichi), function(sample){
+  if(sample %in% Clinical_patient_data$Relapse_RNAseq_data){
+    "Relapse"
+  }else{
+    Clinical_patient_data %>% dplyr::filter(Baseline_RNAseq_data == sample) %>% .$IDH_isoform
+  }
+})
+
+RNAseq_Koichi_Baseline <- RNAseq_Koichi[Phenotype_IDH_Koichi != "Relapse"]
+Phenotype_IDH_Koichi <- Phenotype_IDH_Koichi[Phenotype_IDH_Koichi != "Relapse"]
+DEG_IDH_Koichi <- Differential_analysis(Phenotype_IDH_Koichi, RNAseq_Koichi_Baseline)$`IDH1-IDH2`
+DEG_IDH_Koichi$logFC <- -DEG_IDH_Koichi$logFC
+DEG_IDH_Koichi %>% write.table("../Results/DGEA/DEGs_tables/DEG_IDH_Koichi.tsv", 
+                               sep = "\t", row.names = T, quote = F, col.names = NA)
+
+```
+```{r}
+All_sample_ARACNe_network <- read.table("../../Multiplex_DNAmet_PPI_Chrom_Coexp/Output_all_Samples_TPM/network.txt", sep = "\t", header = T)
+colnames(All_sample_ARACNe_network)[1:2] <- c("tf", "target")
+
+ref_mIDH1 <- Phenotype_IDH_Koichi == "IDH1"
+ref_mIDH2 <- Phenotype_IDH_Koichi == "IDH2"
+
+All_Baseline_ARACNe_network_2 <- read.table("../Datasets/Data_4_ARACNe/Koichi_network/network.txt", sep = "\t", header = T)
+colnames(All_Baseline_ARACNe_network_2)[1:2] <- c("tf", "target")
+
+IDH_Koichi_msvip_ARACNe <- run_msviper(RNAseq_Koichi_Baseline, All_sample_ARACNe_network, use_aracne = T, ref_mIDH1, ref_mIDH2, "mIDH1", "mIDH2", minsize = 1, ges.filter = T)
+IDH_Koichi_msvip_ARACNe_2 <- run_msviper(RNAseq_Koichi_Baseline, All_Baseline_ARACNe_network_2, use_aracne = T, ref_mIDH1, ref_mIDH2, "mIDH1", "mIDH2", minsize = 1, ges.filter = T)
+IDH_Koichi_msvip_regulonlaml <- run_msviper(RNAseq_Koichi_Baseline, regulonaml_SYMBOL, use_aracne = T, ref_mIDH1, ref_mIDH2, "mIDH1", "mIDH2", minsize = 1, ges.filter = T)
+IDH_Koichi_msvip_dorothea <- run_msviper(RNAseq_Koichi_Baseline, dorothea_regulon, use_aracne = T, ref_mIDH1, ref_mIDH2, "mIDH1", "mIDH2", minsize = 1, ges.filter = T)
+IDH_Koichi_msvip_dorothea_D <- run_msviper(RNAseq_Koichi_Baseline, dorothea_regulon_D, use_aracne = T, ref_mIDH1, ref_mIDH2, "mIDH1", "mIDH2", minsize = 1, ges.filter = T)
+
+Koichi_TF_actitity_ARACNe <- viper(RNAseq_Koichi_Baseline, dorothea2viper_regulons(IDH_Koichi_msvip_ARACNe$regulons))
+Koichi_TF_actitity_regulonlaml <- viper(RNAseq_Koichi_Baseline, dorothea2viper_regulons(IDH_Koichi_msvip_regulonlaml$regulons))
+IDH_Koichi_TF_actitity_dorothea <- viper(RNAseq_Koichi_Baseline, dorothea2viper_regulons(IDH_Koichi_msvip_dorothea$regulons))
+IDH_Koichi_TF_actitity_dorothea_D <- viper(RNAseq_Koichi_Baseline, dorothea2viper_regulons(IDH_Koichi_msvip_dorothea_D$regulons))
+
+Koichi_TF_actitity_ARACNe %>%
+  write.table("../Results/DGEA/TF_activities_tables/Koichi_TF_activities_ARACNe.tsv",
+              sep = "\t", row.names = T, quote = F)
+
+IDH_Koichi_TF_actitity_dorothea_D %>%
+  write.table("../Results/DGEA/TF_activities_tables/Koichi_TF_activities_dorothea_D.tsv",
+              sep = "\t", row.names = T, quote = F)
+
+Koichi_TF_actitity_regulonlaml %>%
+  write.table("../Results/DGEA/TF_activities_tables/Koichi_TF_activities_Regulonlaml.tsv",
+              sep = "\t", row.names = T, quote = F)
+
+IDH_Koichi_msvip_ARACNe$mrs_table %>%
+  write.table("../Results/DGEA/Diff_TF_activity/ARACNe/TF_Diff_activity_Koichi_IDH.tsv", 
+              sep = "\t", row.names = F, quote = F)
+IDH_Koichi_msvip_regulonlaml$mrs_table %>%
+  write.table("../Results/DGEA/Diff_TF_activity/Regulonlaml/TF_Diff_activity_Koichi_IDH_regulonlaml.tsv", 
+              sep = "\t", row.names = F, quote = F)
+IDH_Koichi_msvip_dorothea$mrs_table %>%
+  write.table("../Results/DGEA/Diff_TF_activity/Dorothea/TF_Diff_activity_Koichi_IDH_dorothea.tsv", 
+              sep = "\t", row.names = F, quote = F)
+IDH_Koichi_msvip_dorothea_D$mrs_table %>%
+  write.table("../Results/DGEA/Diff_TF_activity/Dorothea_D/TF_Diff_activity_Koichi_IDH_dorothea_D.tsv", 
+              sep = "\t", row.names = F, quote = F)
+```
+
+## TUH
+
+```{r}
+RNAseq_TUH <- read.table("../Datasets/TUH_batch_effect_removed.tsv", sep = "\t", header = T, row.names = 1, check.names = F)
+
+Pheno_TUH <- read.table("../Datasets/Pheno_IDH_mutation_TUH_allsamples.tsv", sep = "\t", header = T, row.names = 1)
+
+RNAseq_TUH_mIDH <- RNAseq_TUH[, Pheno_TUH$Pheno_IDH != "wtIDH" & !is.na(Pheno_TUH$Pheno_IDH)]
+Pheno_TUH_RNAseq <- Pheno_TUH$Pheno_IDH[Pheno_TUH$Pheno_IDH != "wtIDH" & !is.na(Pheno_TUH$Pheno_IDH)]
+DEG_IDH_TUH <- Differential_analysis(Pheno_TUH_RNAseq, RNAseq_TUH_mIDH)$`mIDH1-mIDH2`
+DEG_IDH_TUH$logFC <- -DEG_IDH_TUH$logFC
+DEG_IDH_TUH$logfc <- sapply(DEG_IDH_TUH$logFC, function(value){
+  ifelse(value < 0, -log(-value), log(value))
+})
+DEG_IDH_TUH %>% write.table("../Results/DGEA/DEGs_tables/DEG_IDH_TUH.tsv", 
+                            sep = "\t", row.names = T, quote = F, col.names = NA)
+```
+```{r}
+TUH_ARACNe_network <- read.table("../Results/DGEA/Networks_TUH/network.txt", sep = "\t", header = T)
+colnames(TUH_ARACNe_network)[1:2] <- c("tf", "target")
+
+ref_mIDH1 <- Pheno_TUH_RNAseq == "mIDH1"
+ref_mIDH2 <- Pheno_TUH_RNAseq == "mIDH2"
+
+IDH_TUH_msvip_ARACNe <- run_msviper(RNAseq_TUH_mIDH, TUH_ARACNe_network, use_aracne = T, ref_mIDH1, ref_mIDH2, "mIDH1", "mIDH2", minsize = 1, ges.filter = T)
+IDH_TUH_msvip_regulonlaml <- run_msviper(RNAseq_TUH_mIDH, regulonaml_SYMBOL, use_aracne = T, ref_mIDH1, ref_mIDH2, "mIDH1", "mIDH2", minsize = 1, ges.filter = T)
+IDH_TUH_msvip_dorothea <- run_msviper(RNAseq_TUH_mIDH, dorothea_regulon, use_aracne = T, ref_mIDH1, ref_mIDH2, "mIDH1", "mIDH2", minsize = 1, ges.filter = T)
+IDH_TUH_msvip_dorothea_D <- run_msviper(RNAseq_TUH_mIDH, dorothea_regulon_D, use_aracne = T, ref_mIDH1, ref_mIDH2, "mIDH1", "mIDH2", minsize = 1, ges.filter = T)
+
+TUH_TF_actitity_ARACNe <- viper(RNAseq_TUH_mIDH, dorothea2viper_regulons(IDH_TUH_msvip_ARACNe$regulons))
+TUH_TF_actitity_regulonlaml <- viper(RNAseq_TUH_mIDH, dorothea2viper_regulons(IDH_TUH_msvip_regulonlaml$regulons))
+TUH_TF_actitity_dorothea <- viper(RNAseq_TUH_mIDH, dorothea2viper_regulons(IDH_TUH_msvip_dorothea$regulons))
+TUH_TF_actitity_dorothea_D <- viper(RNAseq_TUH_mIDH, dorothea2viper_regulons(IDH_TUH_msvip_dorothea_D$regulons))
+
+IDH_TUH_msvip_ARACNe$mrs_table %>%
+  write.table("../Results/DGEA/Diff_TF_activity/ARACNe/TF_Diff_activity_TUH_IDH_ARACNe.tsv", 
+              sep = "\t", row.names = F, quote = F)
+IDH_TUH_msvip_regulonlaml$mrs_table %>%
+  write.table("../Results/DGEA/Diff_TF_activity/Regulonlaml/TF_Diff_activity_TUH_IDH_regulonlaml.tsv", 
+              sep = "\t", row.names = F, quote = F)
+IDH_TUH_msvip_dorothea$mrs_table %>%
+  write.table("../Results/DGEA/Diff_TF_activity/Dorothea/TF_Diff_activity_TUH_IDH_dorothea.tsv", 
+              sep = "\t", row.names = F, quote = F)
+IDH_TUH_msvip_dorothea_D$mrs_table %>%
+  write.table("../Results/DGEA/Diff_TF_activity/Dorothea_D/TF_Diff_activity_TUH_IDH_dorothea_D.tsv", 
+              sep = "\t", row.names = F, quote = F)
+```
+
+## Verhaak
+
+```{r}
+Verhaak_final <- read.table("/media/alexis/DATA/Thesis_paper_DATA/Verhaak_formated.tsv", sep = "\t", header = T, row.names = 1)
+Verhaak_final <- na.omit(Verhaak_final)
+
+Verhaak_Clinical <- read.table("../Datasets/Verhaak_Clinical_prepared.tsv", sep = "\t", header = T, row.names = 1)
+Pheno_affy_IDH <- sapply(colnames(Verhaak_final), function(samples){
+  patient <- dplyr::filter(Verhaak_Clinical, ID == samples)
+  IDH1 <- ifelse(patient$IDH1 == 1, "mIDH1", "wtIDH1")
+  IDH2 <- ifelse(patient$IDH2 == 1, "mIDH2", "wtIDH2")
+  paste(IDH1, IDH2, sep = "_")
+})
+Patient_OS_summary <- summary(Verhaak_Clinical$OS)
+Pheno_affy_OS <- sapply(colnames(Verhaak_final), function(samples){
+  patient_OS <- dplyr::filter(Verhaak_Clinical, ID == samples) %>% .$OS
+  ifelse(patient_OS < Patient_OS_summary[2], "Low_OS", ifelse(patient_OS > Patient_OS_summary[5], "High_OS", "Overall_OS"))
+})
+
+DEG_analysis_IDH <- Differential_analysis(Pheno_affy_IDH, Verhaak_final)
+DEG_IDH_Verhaak <- DEG_analysis_IDH$`mIDH1_wtIDH2-wtIDH1_mIDH2`
+DEG_IDH_Verhaak$logFC <- -DEG_IDH_Verhaak$logFC
+DEG_analysis_OS <- Differential_analysis(Pheno_affy_OS, Verhaak_final)
+
+DEG_IDH_Verhaak %>% write.table("../Results/DGEA/DEGs_tables/DEG_IDH_Verhaak.tsv", 
+                            sep = "\t", row.names = T, quote = F, col.names = NA)
+```
+```{r}
+Verhaak_ARACNe_network <- read.table("../Results/DGEA/Networks_Verhaak/network.txt", sep = "\t", header = T)
+colnames(Verhaak_ARACNe_network)[1:2] <- c("tf", "target")
+
+ref_mIDH1 <- Pheno_affy_IDH == "mIDH1_wtIDH2"
+ref_mIDH2 <- Pheno_affy_IDH == "wtIDH1_mIDH2"
+ref_wtIDH <- Pheno_affy_IDH == "wtIDH1_wtIDH2"
+
+IDH_Verhaak_msvip_ARACNe <- run_msviper(Verhaak_final, Verhaak_ARACNe_network, use_aracne = T, ref_mIDH1, ref_mIDH2, "mIDH1", "mIDH2", minsize = 1, ges.filter = T)
+IDH_Verhaak_msvip_regulonlaml <- run_msviper(Verhaak_final, regulonaml_SYMBOL, use_aracne = T, ref_mIDH1, ref_mIDH2, "mIDH1", "mIDH2", minsize = 1, ges.filter = T)
+IDH_Verhaak_msvip_dorothea <- run_msviper(Verhaak_final, dorothea_regulon, use_aracne = T, ref_mIDH1, ref_mIDH2, "mIDH1", "mIDH2", minsize = 1, ges.filter = T)
+IDH_Verhaak_msvip_dorothea_D <- run_msviper(Verhaak_final, dorothea_regulon_D, use_aracne = T, ref_mIDH1, ref_mIDH2, "mIDH1", "mIDH2", minsize = 1, ges.filter = T)
+
+Verhaak_TF_actitity <- viper(Verhaak_final, dorothea2viper_regulons(IDH_Verhaak_msvip_ARACNe$regulons))
+Verhaak_TF_actitity_regulonlaml <- viper(Verhaak_final, dorothea2viper_regulons(IDH_Verhaak_msvip_regulonlaml$regulons))
+Verhaak_TF_actitity_dorothea <- viper(Verhaak_final, dorothea2viper_regulons(IDH_Verhaak_msvip_dorothea$regulons))
+Verhaak_TF_actitity_dorothea_D <- viper(Verhaak_final, dorothea2viper_regulons(IDH_Verhaak_msvip_dorothea_D$regulons))
+
+IDH_Verhaak_msvip_ARACNe$mrs_table %>%
+  write.table("../Results/DGEA/Diff_TF_activity/ARACNe/TF_Diff_mIDHs_activity_Verhaak_IDH_ARACNe.tsv", 
+              sep = "\t", row.names = F, quote = F) 
+IDH_Verhaak_msvip_regulonlaml$mrs_table %>%
+  write.table("../Results/DGEA/Diff_TF_activity/Regulonlaml/TF_Diff_mIDHs_activity_Verhaak_IDH_regulonlaml.tsv", 
+              sep = "\t", row.names = F, quote = F)
+IDH_Verhaak_msvip_dorothea$mrs_table %>%
+  write.table("../Results/DGEA/Diff_TF_activity/Dorothea/TF_Diff_mIDHs_activity_Verhaak_IDH_dorothea.tsv", 
+              sep = "\t", row.names = F, quote = F)
+IDH_Verhaak_msvip_dorothea_D$mrs_table %>%
+  write.table("../Results/DGEA/Diff_TF_activity/Dorothea_D/TF_Diff_mIDHs_activity_Verhaak_IDH_dorothea_D.tsv", 
+              sep = "\t", row.names = F, quote = F)
+```
+
+# plots
+
+```{r}
+png("../Results/DGEA_IDHm_msVIPER/ARACNe/IDH_BEATAML_msvip_ARACNe.png", width = 720, height = 1280)
+plot(IDH_BEATAML_msvip_ARACNe$mrs, mrs = 50, width = 720, height = 1280)
+dev.off()
+
+png("../Results/DGEA_IDHm_msVIPER/ARACNe/IDH_TCGA_msvip.png", width = 720, height = 1280)
+plot(IDH_TCGA_msvip_ARACNe$mrs, mrs = 50, width = 720, height = 1280)
+dev.off()
+
+png("../Results/DGEA_IDHm_msVIPER/ARACNe/IDH_TUH_msvip.png", width = 720, height = 1280)
+plot(IDH_TUH_msvip_ARACNe$mrs, mrs = 50, width = 720, height = 1280)
+dev.off()
+
+png("../Results/DGEA_IDHm_msVIPER/ARACNe/IDH_Koichi_msvip.png", width = 720, height = 1280)
+plot(IDH_Koichi_msvip_ARACNe$mrs, mrs = 50, width = 720, height = 1280)
+dev.off()
+
+png("../Results/DGEA_IDHm_msVIPER/ARACNe/IDH_Verhaak_msvip.png", width = 720, height = 1280)
+plot(IDH_Verhaak_msvip_ARACNe$mrs, mrs = 50, width = 720, height = 1280)
+dev.off()
+```
+
+```{r, fig.width=6, fig.height=12}
+png("../Results/DGEA_IDHm_msVIPER/Dorothea_D/IDH_BEATAML_msvip_dorothea_D.png", width = 720, height = 1280)
+plot(IDH_BEATAML_msvip_dorothea_D$mrs, mrs = 50, width = 720, height = 1280)
+dev.off()
+
+png("../Results/DGEA_IDHm_msVIPER/Dorothea_D/IDH_TCGA_msvip_dorothea_D.png", width = 720, height = 1280)
+plot(IDH_TCGA_msvip_dorothea_D$mrs, mrs = 50, width = 720, height = 1280)
+dev.off()
+
+png("../Results/DGEA_IDHm_msVIPER/Dorothea_D/IDH_TUH_msvip_dorothea_D.png", width = 720, height = 1280)
+plot(IDH_TUH_msvip_dorothea_D$mrs, mrs = 50, width = 720, height = 1280)
+dev.off()
+
+png("../Results/DGEA_IDHm_msVIPER/Dorothea_D/IDH_Koichi_msvip_dorothea_D.png", width = 720, height = 1280)
+plot(IDH_Koichi_msvip_dorothea_D$mrs, mrs = 50, width = 720, height = 1280)
+dev.off()
+
+png("../Results/DGEA_IDHm_msVIPER/Dorothea_D/IDH_Verhaak_msvip_dorothea_D.png", width = 720, height = 1280)
+plot(IDH_Verhaak_msvip_dorothea_D$mrs, mrs = 50, width = 720, height = 1280)
+dev.off()
+```
+
+```{r, fig.width=6, fig.height=12}
+png("../Results/DGEA_IDHm_msVIPER/Dorothea_D/IDH_BEATAML_msvip_dorothea_D.png", width = 720, height = 1280)
+plot(IDH_BEATAML_msvip_dorothea_D$mrs, mrs = 50, width = 720, height = 1280)
+dev.off()
+
+png("../Results/DGEA_IDHm_msVIPER/Dorothea_D/IDH_TCGA_msvip_dorothea_D.png", width = 720, height = 1280)
+plot(IDH_TCGA_msvip_dorothea_D$mrs, mrs = 50, width = 720, height = 1280)
+dev.off()
+
+png("../Results/DGEA_IDHm_msVIPER/Dorothea_D/IDH_TUH_msvip_dorothea_D.png", width = 720, height = 1280)
+plot(IDH_TUH_msvip_dorothea_D$mrs, mrs = 50, width = 720, height = 1280)
+dev.off()
+
+png("../Results/DGEA_IDHm_msVIPER/Dorothea_D/IDH_Koichi_msvip_dorothea_D.png", width = 720, height = 1280)
+plot(IDH_Koichi_msvip_dorothea_D$mrs, mrs = 50, width = 720, height = 1280)
+dev.off()
+
+png("../Results/DGEA_IDHm_msVIPER/Dorothea_D/IDH_Verhaak_msvip_dorothea_D.png", width = 720, height = 1280)
+plot(IDH_Verhaak_msvip_dorothea_D$mrs, mrs = 50, width = 720, height = 1280)
+dev.off()
+```
+
+```{r}
+# png("../Results/DGEA_Clusters_Clean/Regulonlaml/IDH_BEATAML_msvip_regulonlaml.png", width = 1280, height = 720)
+# plot(IDH_BEATAML_msvip_regulonlaml$mrs, mrs = 50)
+# dev.off()
+
+png("../Results/DGEA_IDHm_msVIPER/Regulonlaml/IDH_TCGA_msvip_regulonlaml.png", width = 720, height = 1280)
+plot(IDH_TCGA_msvip_regulonaml$mrs, mrs = 50, width = 720, height = 1280)
+dev.off()
+
+png("../Results/DGEA_IDHm_msVIPER/Regulonlaml/IDH_TUH_msvip_regulonlaml.png", width = 720, height = 1280)
+plot(IDH_TUH_msvip_regulonlaml$mrs, mrs = 50, width = 720, height = 1280)
+dev.off()
+
+png("../Results/DGEA_IDHm_msVIPER/Regulonlaml/IDH_Koichi_msvip_regulonlaml.png", width = 720, height = 1280)
+plot(IDH_Koichi_msvip_regulonlaml$mrs, mrs = 50, width = 720, height = 1280)
+dev.off()
+
+png("../Results/DGEA_IDHm_msVIPER/Regulonlaml/IDH_Verhaak_msvip_regulonlaml.png", width = 720, height = 1280)
+plot(IDH_Verhaak_msvip_regulonlaml$mrs, mrs = 50, width = 720, height = 1280)
+dev.off()
+```
+
+## Volcano plots 
+
+```{r}
+focus <- EnhancedVolcano(IDH_TUH_msvip_regulonlaml$mrs_table, 
+                         lab = IDH_TUH_msvip_regulonlaml$mrs_table$TF, 
+                         x = "nes", y = "pval", 
+                         title = "TF_enrichment", 
+                         pCutoff = 0.05, FCcutoff = 1.5, 
+                         labSize = 4, 
+                         ylim = c(0,5), xlim = c(-3,3))
+focus
+```
+
+# Saving table
+
+```{r}
+IDH_BEATAML_msvip_ARACNe$regulons %>%
+  write.table("../Results/GRN/Network/ARACNe/IDH_BEATAML_msvip_ARACNe_network.tsv",
+              sep = "\t",row.names = F,quote = F)
+IDH_TCGA_msvip_ARACNe$regulons %>%
+  write.table("../Results/GRN/Network/ARACNe/IDH_TCGA_msvip_ARACNe_network.tsv",
+              sep = "\t",row.names = F,quote = F)
+IDH_Koichi_msvip_ARACNe$regulons %>%
+  write.table("../Results/GRN/Network/ARACNe/IDHs_Koichi_msvip_ARACNe_network.tsv",
+              sep = "\t",row.names = F,quote = F)
+IDH_TUH_msvip_ARACNe$regulons %>%
+  write.table("../Results/GRN/Network/ARACNe/IDH_TUH_msvip_ARACNe_network.tsv",
+              sep = "\t",row.names = F,quote = F)
+IDH_Verhaak_msvip_ARACNe$regulons %>%
+  write.table("../Results/GRN/Network/ARACNe/IDH_Verhaak_msvip_ARACNe_network.tsv",
+              sep = "\t",row.names = F,quote = F)
+IDH_BEATAML_msvip_dorothea$regulons %>%
+  write.table("../Results/GRN/Network/Dorothea/IDH_BEATAML_msvip_dorothea_network.tsv",
+              sep = "\t",row.names = F,quote = F)
+IDH_TCGA_msvip_dorothea$regulons %>%
+  write.table("../Results/GRN/Network/Dorothea/IDH_TCGA_msvip_dorothea_network.tsv",
+              sep = "\t",row.names = F,quote = F)
+IDH_Koichi_msvip_dorothea$regulons %>%
+  write.table("../Results/GRN/Network/Dorothea/IDH_Koichi_msvip_dorothea_network.tsv",
+              sep = "\t", row.names = F, quote = F)
+IDH_TUH_msvip_dorothea$regulons %>%
+  write.table("../Results/GRN/Network/Dorothea/IDH_TUH_msvip_dorothea_network.tsv",
+              sep = "\t", row.names = F, quote = F)
+IDH_Verhaak_msvip_dorothea$regulons %>%
+  write.table("../Results/GRN/Network/Dorothea/IDH_Verhaak_msvip_dorothea_network.tsv",
+              sep = "\t", row.names = F, quote = F)
+IDH_BEATAML_msvip_dorothea_D$regulons %>%
+  write.table("../Results/GRN/Network/Dorothea_D/IDH_BEATAML_msvip_dorothea_D_network.tsv",
+              sep = "\t",row.names = F,quote = F)
+IDH_TCGA_msvip_dorothea_D$regulons %>%
+  write.table("../Results/GRN/Network/Dorothea_D/IDH_TCGA_msvip_dorothea_D_network.tsv",
+              sep = "\t",row.names = F,quote = F)
+IDH_Koichi_msvip_dorothea_D$regulons %>%
+  write.table("../Results/GRN/Network/Dorothea_D/IDH_Koichi_msvip_dorothea_D_network.tsv",
+              sep = "\t", row.names = F, quote = F)
+IDH_TUH_msvip_dorothea_D$regulons %>%
+  write.table("../Results/GRN/Network/Dorothea_D/IDH_TUH_msvip_dorothea_D_network.tsv",
+              sep = "\t", row.names = F, quote = F)
+IDH_Verhaak_msvip_dorothea_D$regulons %>%
+  write.table("../Results/GRN/Network/Dorothea_D/IDH_Verhaak_msvip_dorothea_D_network.tsv",
+              sep = "\t", row.names = F, quote = F)
+IDH_TCGA_msvip_regulonaml$regulons %>%
+  write.table("../Results/GRN/Network/Regulonlaml/IDH_TCGA_msvip_regulonlaml_network.tsv",
+              sep = "\t",row.names = F,quote = F)
+IDH_Koichi_msvip_regulonlaml$regulons %>%
+  write.table("../Results/GRN/Network/Regulonlaml/IDH_Koichi_msvip_regulonlaml_network.tsv",
+              sep = "\t",row.names = F,quote = F)
+IDH_TUH_msvip_regulonlaml$regulons %>%
+  write.table("../Results/GRN/Network/Regulonlaml/IDH_TUH_msvip_regulonlaml_network.tsv",
+              sep = "\t",row.names = F,quote = F)
+IDH_Verhaak_msvip_regulonlaml$regulons %>%
+  write.table("../Results/GRN/Network/Regulonlaml/IDH_Verhaak_msvip_regulonlaml_network.tsv",
+              sep = "\t",row.names = F,quote = F)
+```
+
+```{r}
+IDH_BEATAML_msvip_ARACNe$mrs_table %>%
+  write.table("../Results/GRN/Features/ARACNe/IDH_BEATAML_msvip_ARACNe_features.tsv",
+              sep = "\t",row.names = F,quote = F)
+IDH_TCGA_msvip_ARACNe$mrs_table %>%
+  write.table("../Results/GRN/Features/ARACNe/IDH_TCGA_msvip_features.tsv",
+              sep = "\t",row.names = F,quote = F)
+IDH_Koichi_msvip_ARACNe$mrs_table %>%
+  write.table("../Results/GRN/Features/ARACNe/IDH_Koichi_msvip_features.tsv",
+              sep = "\t",row.names = F,quote = F)
+IDH_TUH_msvip_ARACNe$mrs_table %>%
+  write.table("../Results/GRN/Features/ARACNe/IDH_TUH_msvip_features.tsv",
+              sep = "\t",row.names = F,quote = F)
+IDH_Verhaak_msvip_ARACNe$mrs_table %>%
+  write.table("../Results/GRN/Features/ARACNe/IDH_Verhaak_msvip_features.tsv",
+              sep = "\t",row.names = F,quote = F)
+IDH_BEATAML_msvip_dorothea$mrs_table %>%
+  write.table("../Results/GRN/Features/Dorothea/IDH_BEATAML_msvip_dorothea_features.tsv",
+              sep = "\t",row.names = F,quote = F)
+IDH_TCGA_msvip_dorothea$mrs_table %>%
+  write.table("../Results/GRN/Features/Dorothea/IDH_TCGA_msvip_dorothea_features.tsv",
+              sep = "\t",row.names = F,quote = F)
+IDH_Koichi_msvip_dorothea$mrs_table %>%
+  write.table("../Results/GRN/Features/Dorothea/IDH_Koichi_msvip_dorothea_features.tsv",
+              sep = "\t",row.names = F,quote = F)
+IDH_TUH_msvip_dorothea$mrs_table %>%
+  write.table("../Results/GRN/Features/Dorothea/IDH_TUH_msvip_dorothea_features.tsv",
+              sep = "\t",row.names = F,quote = F)
+IDH_Verhaak_msvip_dorothea$mrs_table %>%
+  write.table("../Results/GRN/Features/Dorothea/IDH_Verhaak_msvip_dorothea_features.tsv",
+              sep = "\t",row.names = F,quote = F)
+IDH_BEATAML_msvip_dorothea_D$mrs_table %>%
+  write.table("../Results/GRN/Features/Dorothea_D/IDH_BEATAML_msvip_dorothea_D_features.tsv",
+              sep = "\t",row.names = F,quote = F)
+IDH_TCGA_msvip_dorothea_D$mrs_table %>%
+  write.table("../Results/GRN/Features/Dorothea_D/IDH_TCGA_msvip_dorothea_D_features.tsv",
+              sep = "\t",row.names = F,quote = F)
+IDH_Koichi_msvip_dorothea_D$mrs_table %>%
+  write.table("../Results/GRN/Features/Dorothea_D/IDH_Koichi_msvip_dorothea_D_features.tsv",
+              sep = "\t",row.names = F,quote = F)
+IDH_TUH_msvip_dorothea_D$mrs_table %>%
+  write.table("../Results/GRN/Features/Dorothea_D/IDH_TUH_msvip_dorothea_D_features.tsv",
+              sep = "\t",row.names = F,quote = F)
+IDH_Verhaak_msvip_dorothea_D$mrs_table %>%
+  write.table("../Results/GRN/Features/Dorothea_D/IDH_Verhaak_msvip_dorothea_D_features.tsv",
+              sep = "\t",row.names = F,quote = F)
+IDH_TCGA_msvip_regulonaml$mrs_table %>%
+  write.table("../Results/GRN/Features/Regulonlaml/IDH_TCGA_msvip_regulonaml_features.tsv",
+              sep = "\t",row.names = F,quote = F)
+IDH_Koichi_msvip_regulonlaml$mrs_table %>%
+  write.table("../Results/GRN/Features/Regulonlaml/IDH_Koichi_msvip_regulonlaml_features.tsv",
+              sep = "\t",row.names = F,quote = F)
+IDH_TUH_msvip_regulonlaml$mrs_table %>%
+  write.table("../Results/GRN/Features/Regulonlaml/IDH_TUH_msvip_regulonlaml_features.tsv",
+              sep = "\t",row.names = F,quote = F)
+IDH_Verhaak_msvip_regulonlaml$mrs_table %>%
+  write.table("../Results/GRN/Features/Regulonlaml/IDH_Verhaak_msvip_regulonlaml_features.tsv",
+              sep = "\t",row.names = F,quote = F)
+```
+
+# Merging data
+
+```{r}
+Merged_DATAsets <- merge(RNAseqBEATAML, RNAseq_Koichi_Baseline, by = 0) %>% merge(RNAseq_TCGA, by.x = "Row.names", by.y = 0)
+```
+
+## PCA
+
+```{r}
+res.pca <- prcomp(t(Merged_DATAsets[,-1]))
+Batches <- c(rep("BEATAML", ncol(RNAseqBEATAML)), rep("KOICHI", ncol(RNAseq_Koichi_Baseline)), rep("TCGA", ncol(RNAseq_TCGA)))
+p <- fviz_pca_ind(res.pca, label="all", habillage=Batches,
+                               addEllipses=T, ellipse.level=0.95)
+p <- p + ggtitle("PCA gene expression")
+p
+png("../Results/DGEA/PCA/PCA_Merged_data.png")
+p
+dev.off()
+```
+
+## Batch correction
+
+```{r}
+Merged_data_batch_effect_removed <- ComBat(Merged_DATAsets[-1], Batches)
+```
+
+## PCA Batch corrected
+
+```{r}
+res.pca <- prcomp(t(Merged_data_batch_effect_removed))
+p <- fviz_pca_ind(res.pca, label="all", habillage=Batches,
+                               addEllipses=T, ellipse.level=0.95)
+p <- p + ggtitle("PCA gene expression")
+p
+png("../Results/DGEA/PCA/PCA_Merged_data_batch_corrected.png")
+p
+dev.off()
+```
+
+# msViper loading results
+
+```{r}
+TCGA_msviper <- read.table("../Results/DGEA/Diff_TF_activity/ARACNe/TF_Diff_activity_TCGA_IDH_ARACNe.tsv", sep = "\t", header = T)
+BEATAML_msviper <- read.table("../Results/DGEA/Diff_TF_activity/ARACNe/TF_Diff_activity_BEATAML_IDH_ARACNe.tsv", sep = "\t", header = T)
+KOICHI_msviper <- read.table("../Results/DGEA/Diff_TF_activity/ARACNe/TF_Diff_activity_Koichi_IDH.tsv", sep = "\t", header = T)
+TUH_msviper <- read.table("../Results/DGEA/Diff_TF_activity/ARACNe/TF_Diff_activity_TUH_IDH_ARACNe.tsv", sep = "\t", header = T)
+Verhaak_msviper <- read.table("../Results/DGEA/Diff_TF_activity/ARACNe/TF_Diff_mIDHs_activity_Verhaak_IDH_ARACNe.tsv", sep = "\t", header = T)
+```
+
+# Overlaps_TF_Analysis
+
+## Functions
+
+```{r}
+Do_overlaps_TF_upsets <- function(List_of_samples, title){
+  L <- lapply(List_of_samples, function(TF){
+    dplyr::filter(TF, pval < 0.05) %>% .$TF
+  })
+
+  comb_mat <- ComplexHeatmap::make_comb_mat(L)
+  comb_mat <- comb_mat[colSums(comb_mat) >1]
+  cs <- comb_size(comb_mat)
+
+  ht <- ComplexHeatmap::UpSet(comb_mat, row_title = title, top_annotation = HeatmapAnnotation(
+        "Intersections" = anno_barplot(cs,
+            ylim = c(0, max(cs)*1.1),
+            border = FALSE,
+            gp = gpar(fill = "black"),
+            height = unit(4, "cm")
+        ),
+        annotation_name_side = "left",
+        annotation_name_rot = 90))
+  ht = draw(ht)
+  od = column_order(ht)
+  decorate_annotation("Intersections", {
+      grid.text(cs[od], x = seq_along(cs), y = unit(cs[od], "native") + unit(2, "pt"),
+          default.units = "native", just = c("left", "bottom"),
+          gp = gpar(fontsize = 12, col = "#404040"), rot = 45)
+  })
+}
+```
+
+## Analysis
+
+```{r}
+Do_overlaps_TF_upsets(list(BEATAML= IDH_BEATAML_msvip_dorothea$mrs_table, Koichi = IDH_Koichi_msvip_dorothea$mrs_table, TCGA = IDH_TCGA_msvip_dorothea$mrs_table, TUH = IDH_TUH_msvip_dorothea$mrs_table, Verhaak = IDH_Verhaak_msvip_dorothea$mrs_table), "Dorothea_TF_intersections")
+```
+
+```{r}
+Do_overlaps_TF_upsets(list(Koichi = IDH_Koichi_msvip_regulonlaml$mrs_table, TCGA = IDH_TCGA_msvip_regulonaml$mrs_table, TUH = IDH_TUH_msvip_regulonlaml$mrs_table, Verhaak = IDH_Verhaak_msvip_dorothea$mrs_table), "regulonlaml_TF_intersections")
+```
+
+```{r}
+Do_overlaps_TF_upsets(list(BEATAML= IDH_BEATAML_msvip_ARACNe$mrs_table, Koichi = IDH_Koichi_msvip_ARACNe$mrs_table, TCGA = IDH_TCGA_msvip_ARACNe$mrs_table, TUH = IDH_TUH_msvip_ARACNe$mrs_table, Verhaak = IDH_Verhaak_msvip_ARACNe$mrs_table), "ARACNe_TF_intersections")
+```
+
+```{r}
+p <- Do_overlaps_TF_upsets(list(BEATAML_ARACNe= IDH_BEATAML_msvip_ARACNe$mrs_table, Koichi_ARACNe = IDH_Koichi_msvip_ARACNe$mrs_table, TCGA_ARACNe = IDH_TCGA_msvip_ARACNe$mrs_table, TUH_ARACNe = IDH_TUH_msvip_ARACNe$mrs_table, Verhaak_ARACNe = IDH_Verhaak_msvip_ARACNe$mrs_table, Koichi_regulonlaml = IDH_Koichi_msvip_regulonlaml$mrs_table, TCGA_regulonlaml = IDH_TCGA_msvip_regulonaml$mrs_table, TUH_regulonlaml = IDH_TUH_msvip_regulonlaml$mrs_table, Verhaak_regulonlaml = IDH_Verhaak_msvip_dorothea$mrs_table, BEATAML_Dorothea = IDH_BEATAML_msvip_dorothea$mrs_table, Koichi_Dorothea = IDH_Koichi_msvip_dorothea$mrs_table, TCGA_Dorothea = IDH_TCGA_msvip_dorothea$mrs_table, TUH_Dorothea = IDH_TUH_msvip_dorothea$mrs_table, Verhaak_Dorothea = IDH_Verhaak_msvip_dorothea$mrs_table), "All_GRN_TF_intersections")
+
+png("../Results/DGEA_IDHm_msVIPER/upsetplots.png")
+p
+dev.off()
+p
+```
+
+# Overlaps_DEG_analysis
+
+## Functions
+
+```{r}
+Do_overlaps_DEGs_upsets <- function(List_of_samples, title){
+  L <- lapply(List_of_samples, function(Dataset){
+    dplyr::filter(Dataset, P.Value < 0.05 & abs(logFC) > 1.5) %>% .$ID
+  })
+
+  comb_mat <- ComplexHeatmap::make_comb_mat(L)
+  comb_mat <- comb_mat[colSums(comb_mat) >1]
+  cs <- comb_size(comb_mat)
+
+  ht <- ComplexHeatmap::UpSet(comb_mat, row_title = title, top_annotation = HeatmapAnnotation(
+        "Intersections" = anno_barplot(cs,
+            ylim = c(0, max(cs)*1.1),
+            border = FALSE,
+            gp = gpar(fill = "black"),
+            height = unit(4, "cm")
+        ),
+        annotation_name_side = "left",
+        annotation_name_rot = 90))
+  ht = draw(ht)
+  od = column_order(ht)
+  decorate_annotation("Intersections", {
+      grid.text(cs[od], x = seq_along(cs), y = unit(cs[od], "native") + unit(2, "pt"),
+          default.units = "native", just = c("left", "bottom"),
+          gp = gpar(fontsize = 12, col = "#404040"), rot = 45)
+  })
+}
+```
+
+## Analysis
+
+```{r}
+p <- Do_overlaps_DEGs_upsets(list(BEATAML = DEG_IDH_BEATAML$`IDH2-mIDH1`, KOICHI = DEG_IDH_Koichi, TCGA = DEG_IDH_TCGA, TUH = DEG_IDH_TUH, VERHAAK = DEG_analysis_IDH$`mIDH1_wtIDH2-wtIDH1_mIDH2`), "DEG_intersections")
+p
+png("../Results/DGEA/Upset_plots/DEG_upsets.png")
+p
+dev.off()
+```
+
+# Enrichment analysis
+
+## Functions
+
+```{r}
+hs <- org.Hs.eg.db
+gene_universe <- read.table("../../Multiplex_DNAmet_PPI_Chrom_Coexp/DATA/TF_names_v_1.01.txt", sep = "\t")$V1
+
+Make_volcano_plot <- function(degs, title){
+  EnhancedVolcano(degs, lab = degs$ID, x = "logFC", y = "P.Value", title = title, pCutoff = 0.1, FCcutoff = 1)
+}
+
+Make_gene_DEG_list <- function(DEG, title, affy = F){
+  lFC_threshold <- 1
+  DEGenes <- DEG %>% dplyr::filter(P.Value < 0.1 & abs(logFC) > lFC_threshold) %>% .$logFC
+  names(DEGenes) <- DEG %>% dplyr::filter(P.Value < 0.05 & abs(logFC) > lFC_threshold) %>% rownames
+  DEGenes = sort(DEGenes, decreasing = TRUE)
+  DEGenes_ID <- select(hs, names(DEGenes), columns = c("ENTREZID", "SYMBOL"), keytype = "SYMBOL") %>% na.omit() %>% .[!duplicated(.$SYMBOL),]
+  DEGenes_ID_list <- DEGenes[which(names(DEGenes) %in% DEGenes_ID$SYMBOL)]
+  names(DEGenes_ID_list) <- DEGenes_ID$ENTREZID
+  ggsave(paste0("../Results/DGEA/Volcano_plots/Volcano_plot_", title, ".png"), plot = EnhancedVolcano(DEG, lab = DEG$ID, x = "logFC", y = "P.Value", title = title, pCutoff = 0.05, FCcutoff = lFC_threshold))
+  list(DEG_SYMBOL = DEGenes, DEG_ENSEMBL = DEGenes_ID_list)
+}
+
+Make_gene_TF_list <- function(dTF, title, affy = F){
+  lFC_threshold <- 1
+  DEGenes <- dTF$nes
+  names(DEGenes) <- dTF$TF
+  DEGenes = sort(DEGenes, decreasing = TRUE)
+  DEGenes_ID <- select(hs, names(DEGenes), columns = c("ENTREZID", "SYMBOL"), keytype = "SYMBOL") %>% na.omit() %>% .[!duplicated(.$SYMBOL),]
+  DEGenes_ID_list <- DEGenes[which(names(DEGenes) %in% DEGenes_ID$SYMBOL)]
+  names(DEGenes_ID_list) <- DEGenes_ID$ENTREZID
+  ggsave(paste0("../Results/DGEA_IDHm_msVIPER/Volcano_plots/Volcano_plot_TF_", title, ".png"), plot = EnhancedVolcano(dTF, lab = dTF$TF, x = "nes", y = "pval", title = title, pCutoff = 0.05, FCcutoff = lFC_threshold))
+  list(DEG_SYMBOL = DEGenes, DEG_ENSEMBL = DEGenes_ID_list)
+}
+
+Do_enrichment_analysis <- function(DEGs, title, TF=F, geneuniverse = NA, title_folder){
+  dse <- gseDO(DEGs[["DEG_ENSEMBL"]], pAdjustMethod = "none", pvalueCutoff = 0.1, minGSSize = 2, verbose = T)
+  tryCatch(ggsave(paste0("../Results/DGEA/Enrichments/", title_folder, "/Ridgeplot_DO_", title,".png"), plot = ridgeplot(dse)), error=function(e) NULL)
+  tryCatch(ggsave(paste0("../Results/DGEA/Enrichments/", title_folder, "/Dotplot_DO_", title,".png"), plot = dotplot(dse, title = "DO enrichment")), error=function(e) NULL)
+  kse <- gseKEGG(DEGs[["DEG_ENSEMBL"]], minGSSize = 2, pvalueCutoff = 0.1, pAdjustMethod = "none", verbose = T)
+  tryCatch(ggsave(paste0("../Results/DGEA/Enrichments/", title_folder, "/Dotplot_KEGG_", title,".png"), plot = dotplot(kse, title = "KEGG enrichment")), error=function(e) NULL)
+  gene_up <- DEGs[["DEG_SYMBOL"]] %>% .[. > 0] %>% names
+  if(TF){
+    gse_up <- enrichGO(gene_up, OrgDb = "org.Hs.eg.db", keyType = "SYMBOL", pvalueCutoff = 0.05, pAdjustMethod = "none", minGSSize = 5, ont = "all", universe = geneuniverse)
+  }else{
+    gse_up <- enrichGO(gene_up, OrgDb = "org.Hs.eg.db", keyType = "SYMBOL", pvalueCutoff = 0.05, pAdjustMethod = "none", minGSSize = 5, ont = "all")
+  }
+  tryCatch(ggsave(paste0("../Results/DGEA/Enrichments/", title_folder, "/Dotplot_GO_Genes_up_", title,".png"), plot = dotplot(gse_up,showCategory=15, title = "GO genes up enrichment")), error=function(e) NULL)
+  gene_down <- DEGs[["DEG_SYMBOL"]] %>% .[. < 0] %>% names
+  if(TF){
+    gse_down <- enrichGO(gene_down, OrgDb = "org.Hs.eg.db", keyType = "SYMBOL", pvalueCutoff = 0.05, pAdjustMethod = "none", minGSSize = 5, ont = "all", universe = geneuniverse)
+  }else{
+    gse_down <- enrichGO(gene_down, OrgDb = "org.Hs.eg.db", keyType = "SYMBOL", pvalueCutoff = 0.05, pAdjustMethod = "none", minGSSize = 5, ont = "all")
+  }
+  tryCatch(ggsave(paste0("../Results/DGEA/Enrichments/", title_folder, "/Dotplot_GO_Genes_down_", title,".png"), plot = dotplot(gse_down, showCategory=15, title = "GO genes down enrichment")), error=function(e) NULL)
+  list("GO_UP" = gse_up, "GO_DOWN" = gse_down, "DO" = dse, "KEGG" = kse)
+}
+```
+
+## Preparation gene lists
+
+```{r}
+DEGs_BEATAML <- Make_gene_DEG_list(DEG_IDH_BEATAML$`IDH2-mIDH1`, "BEATAML")
+DEGs_KOICHI <- Make_gene_DEG_list(DEG_IDH_Koichi, "KOICHI")
+DEGs_TCGA <- Make_gene_DEG_list(DEG_IDH_TCGA, "TCGA")
+DEGs_TUH <- Make_gene_DEG_list(DEG_IDH_TUH, "TUH")
+DEGs_Verhaak <- Make_gene_DEG_list(DEG_analysis_IDH$`mIDH1_wtIDH2-wtIDH1_mIDH2`, "Verhaak", affy = T)
+
+TFs_BEATAML_ARACNe <- Make_gene_TF_list(IDH_BEATAML_msvip_ARACNe$mrs_table, "BEATAML_TF_ARACNe")
+TFs_KOICHI_ARACNe <- Make_gene_TF_list(IDH_Koichi_msvip_ARACNe$mrs_table, "KOICHI_TF_ARACNe")
+TFs_TCGA_ARACNe <- Make_gene_TF_list(IDH_TCGA_msvip_ARACNe$mrs_table, "TCGA_TF_ARACNe")
+TFs_TUH_ARACNe <- Make_gene_TF_list(IDH_TUH_msvip_ARACNe$mrs_table, "TUH_TF_ARACNe")
+TFs_Verhaak_ARACNe <- Make_gene_TF_list(IDH_Verhaak_msvip_ARACNe$mrs_table, "Verhaak_TF_ARACNe")
+
+TFs_BEATAML_Dorothea <- Make_gene_TF_list(IDH_BEATAML_msvip_dorothea$mrs_table, "BEATAML_TF_Dorothea")
+TFs_KOICHI_Dorothea <- Make_gene_TF_list(IDH_Koichi_msvip_dorothea$mrs_table, "KOICHI_TF_Dorothea")
+TFs_TCGA_Dorothea <- Make_gene_TF_list(IDH_TCGA_msvip_dorothea$mrs_table, "TCGA_TF_Dorothea")
+TFs_TUH_Dorothea <- Make_gene_TF_list(IDH_TUH_msvip_dorothea$mrs_table, "TUH_TF_Dorothea")
+TFs_Verhaak_Dorothea <- Make_gene_TF_list(IDH_Verhaak_msvip_dorothea$mrs_table, "Verhaak_TF_Dorothea")
+
+TFs_BEATAML_Dorothea_D <- Make_gene_TF_list(IDH_BEATAML_msvip_dorothea_D$mrs_table, "BEATAML_TF_Dorothea_D")
+TFs_KOICHI_Dorothea_D <- Make_gene_TF_list(IDH_Koichi_msvip_dorothea_D$mrs_table, "KOICHI_TF_Dorothea_D")
+TFs_TCGA_Dorothea_D <- Make_gene_TF_list(IDH_TCGA_msvip_dorothea_D$mrs_table, "TCGA_TF_Dorothea_D")
+TFs_TUH_Dorothea_D <- Make_gene_TF_list(IDH_TUH_msvip_dorothea_D$mrs_table, "TUH_TF_Dorothea_D")
+TFs_Verhaak_Dorothea_D <- Make_gene_TF_list(IDH_Verhaak_msvip_dorothea_D$mrs_table, "Verhaak_TF_Dorothea_D")
+
+# TFs_BEATAML_Regulonlaml <- Make_gene_TF_list(IDH_BEATAML_msvip_regulonlaml$mrs_table, "BEATAML_TF_Regulonlaml")
+TFs_KOICHI_Regulonlaml <- Make_gene_TF_list(IDH_Koichi_msvip_regulonlaml$mrs_table, "KOICHI_TF_Regulonlaml")
+TFs_TCGA_Regulonlaml <- Make_gene_TF_list(IDH_TCGA_msvip_regulonaml$mrs_table, "TCGA_TF_Regulonlaml")
+TFs_TUH_Regulonlaml <- Make_gene_TF_list(IDH_TUH_msvip_regulonlaml$mrs_table, "TUH_TF_Regulonlaml")
+TFs_Verhaak_Regulonlaml <- Make_gene_TF_list(IDH_Verhaak_msvip_regulonlaml$mrs_table, "Verhaak_TF_Regulonlaml")
+```
+
+## Gene sets universe
+
+```{r}
+gene_universe_dorothea <- dorothea_regulon$tf %>% unique
+gene_universe_dorothea_D <- dorothea_regulon_D$tf %>% unique
+gene_universe_regulonlaml <- regulonaml_SYMBOL$tf %>% unique
+```
+
+## Analysis
+
+```{r}
+Enrichments_BEATAML <- Do_enrichment_analysis(DEGs_BEATAML, "BEATAML", F, "BEATAML")
+Enrichments_KOICHI <- Do_enrichment_analysis(DEGs_KOICHI, "KOICHI", F, "KOICHI")
+Enrichments_TCGA <- Do_enrichment_analysis(DEGs_TCGA, "TCGA", F, "TCGA")
+Enrichments_TUH <- Do_enrichment_analysis(DEGs_TUH, "TUH", F, "TUH")
+Enrichments_Verhaak <- Do_enrichment_analysis(DEGs_Verhaak, "Verhaak", F, "Verhaak")
+
+Enrichments_BEATAML_TFs_ARACNe <- Do_enrichment_analysis(TFs_BEATAML_ARACNe, "BEATAML_TF_ARACNe", T, geneuniverse = gene_universe, "BEATAML")
+Enrichments_KOICHI_TFs_ARACNe <- Do_enrichment_analysis(TFs_KOICHI_ARACNe, "KOICHI_TF_ARACNe", T, geneuniverse = gene_universe, "KOICHI")
+Enrichments_TCGA_TFs_ARACNe <- Do_enrichment_analysis(TFs_TCGA_ARACNe, "TCGA_TF_ARACNe", T, geneuniverse = gene_universe, "TCGA")
+Enrichments_TUH_TFs_ARACNe <- Do_enrichment_analysis(TFs_TUH_ARACNe, "TUH_TF", T, geneuniverse = gene_universe, "TUH")
+Enrichments_Verhaak_TFs_ARACNe <- Do_enrichment_analysis(TFs_Verhaak_ARACNe, "Verhaak_TF_ARACNe", T, geneuniverse = gene_universe, "Verhaak")
+
+Enrichments_BEATAML_TFs_Dorothea <- Do_enrichment_analysis(TFs_BEATAML_Dorothea, "BEATAML_TF_Dorothea", T, geneuniverse = gene_universe_dorothea, "BEATAML")
+Enrichments_KOICHI_TFs_Dorothea <- Do_enrichment_analysis(TFs_KOICHI_Dorothea, "KOICHI_TF_Dorothea", T, geneuniverse = gene_universe_dorothea, "KOICHI")
+Enrichments_TCGA_TFs_Dorothea <- Do_enrichment_analysis(TFs_TCGA_Dorothea, "TCGA_TF_Dorothea", T, geneuniverse = gene_universe_dorothea, "TCGA")
+Enrichments_TUH_TFs_Dorothea <- Do_enrichment_analysis(TFs_TUH_Dorothea, "TUH_TF_Dorothea", T, geneuniverse = gene_universe_dorothea, "TUH")
+Enrichments_Verhaak_TFs_Dorothea <- Do_enrichment_analysis(TFs_Verhaak_Dorothea, "Verhaak_TF_Dorothea", T, geneuniverse = gene_universe_dorothea, "Verhaak")
+
+Enrichments_BEATAML_TFs_Dorothea_D <- Do_enrichment_analysis(TFs_BEATAML_Dorothea_D, "BEATAML_TF_Dorothea_D", T, geneuniverse = gene_universe_dorothea_D, "BEATAML")
+Enrichments_KOICHI_TFs_Dorothea_D <- Do_enrichment_analysis(TFs_KOICHI_Dorothea_D, "KOICHI_TF_Dorothea_D", T, geneuniverse = gene_universe_dorothea_D, "KOICHI")
+Enrichments_TCGA_TFs_Dorothea_D <- Do_enrichment_analysis(TFs_TCGA_Dorothea_D, "TCGA_TF_Dorothea_D", T, geneuniverse = gene_universe_dorothea_D, "TCGA")
+Enrichments_TUH_TFs_Dorothea_D <- Do_enrichment_analysis(TFs_TUH_Dorothea_D, "TUH_TF_Dorothea_D", T, geneuniverse = gene_universe_dorothea_D, "TUH")
+Enrichments_Verhaak_TFs_Dorothea_D <- Do_enrichment_analysis(TFs_Verhaak_Dorothea_D, "Verhaak_TF_Dorothea_D", T, geneuniverse = gene_universe_dorothea_D, "Verhaak")
+
+# Enrichments_BEATAML_TFs <- Do_enrichment_analysis(TFs_BEATAML_Regulonlaml, "BEATAML_TF_Regulonlaml", T)
+Enrichments_KOICHI_TFs_Regulonlaml <- Do_enrichment_analysis(TFs_KOICHI_Regulonlaml, "KOICHI_TF_Regulonlaml", T, geneuniverse = gene_universe_regulonlaml, "KOICHI")
+Enrichments_TCGA_TFs_Regulonlaml <- Do_enrichment_analysis(TFs_TCGA_Regulonlaml, "TCGA_TF_Regulonlaml", T, geneuniverse = gene_universe_regulonlaml, "TCGA")
+Enrichments_TUH_TFs_Regulonlaml <- Do_enrichment_analysis(TFs_TUH_Regulonlaml, "TUH_TF_Regulonlaml", T, geneuniverse = gene_universe_regulonlaml, "TUH")
+Enrichments_Verhaak_TFs_Regulonlaml <- Do_enrichment_analysis(TFs_Verhaak_Regulonlaml, "Verhaak_TF_Regulonlaml", T, geneuniverse = gene_universe_regulonlaml, "Verhaak")
+```
+
+# Enrichments overlaps
+
+## Functions
+
+```{r}
+Do_overlaps_enrichments_upsets <- function(List_of_samples, Ontology, title){
+  L <- lapply(List_of_samples, function(Datasets){
+    Datasets[[Ontology]]@result$Description
+  })
+  comb_mat <- ComplexHeatmap::make_comb_mat(L)
+  comb_mat <- comb_mat[colSums(comb_mat) >1]
+  cs <- comb_size(comb_mat)
+
+  ht <- ComplexHeatmap::UpSet(comb_mat, row_title = title, top_annotation = HeatmapAnnotation(
+        "Intersections" = anno_barplot(cs,
+            ylim = c(0, max(cs)*1.1),
+            border = FALSE,
+            gp = gpar(fill = "black"),
+            height = unit(4, "cm")
+        ),
+        annotation_name_side = "left",
+        annotation_name_rot = 90))
+  ht = draw(ht)
+  od = column_order(ht)
+  decorate_annotation("Intersections", {
+      grid.text(cs[od], x = seq_along(cs), y = unit(cs[od], "native") + unit(2, "pt"),
+          default.units = "native", just = c("left", "bottom"),
+          gp = gpar(fontsize = 12, col = "#404040"), rot = 45)
+  })
+}
+```
+
+## Analysis
+
+```{r}
+Do_overlaps_enrichments_upsets(list(BEATAML = Enrichments_BEATAML_TFs_Dorothea, KOICHI = Enrichments_KOICHI_TFs_Dorothea, TCGA = Enrichments_TCGA_TFs_Dorothea, TUH = Enrichments_TUH_TFs_Dorothea, Verhaak = Enrichments_Verhaak_TFs_Dorothea), "GO_UP", "GO_UP_Dorothea")
+```
+```{r}
+Do_overlaps_enrichments_upsets(list(BEATAML = Enrichments_BEATAML_TFs_Dorothea, KOICHI = Enrichments_KOICHI_TFs_Dorothea, TCGA = Enrichments_TCGA_TFs_Dorothea, TUH = Enrichments_TUH_TFs_Dorothea, Verhaak = Enrichments_Verhaak_TFs_Dorothea), "GO_DOWN", "GO_DOWN_Dorothea")
+```
+```{r}
+Do_overlaps_enrichments_upsets(list(BEATAML = Enrichments_BEATAML_TFs_ARACNe, KOICHI = Enrichments_KOICHI_TFs_ARACNe, TCGA = Enrichments_TCGA_TFs_ARACNe, TUH = Enrichments_TUH_TFs_ARACNe, Verhaak = Enrichments_Verhaak_TFs_ARACNe), "GO_UP", "GO_UP_ARACNe")
+```
+```{r}
+Do_overlaps_enrichments_upsets(list(BEATAML = Enrichments_BEATAML_TFs_ARACNe, KOICHI = Enrichments_KOICHI_TFs_ARACNe, TCGA = Enrichments_TCGA_TFs_ARACNe, TUH = Enrichments_TUH_TFs_ARACNe, Verhaak = Enrichments_Verhaak_TFs_ARACNe), "GO_DOWN", "GO_DOWN_ARACNe")
+```
+```{r}
+Do_overlaps_enrichments_upsets(list(BEATAML = Enrichments_KOICHI_TFs_Regulonlaml, TCGA = Enrichments_TCGA_TFs_Regulonlaml, TUH = Enrichments_TUH_TFs_Regulonlaml, Verhaak = Enrichments_Verhaak_TFs_Regulonlaml), "GO_UP", "GO_UP_Regulonlaml")
+```
+```{r}
+Do_overlaps_enrichments_upsets(list(KOICHI = Enrichments_KOICHI_TFs_Regulonlaml, TCGA = Enrichments_TCGA_TFs_Regulonlaml, TUH = Enrichments_TUH_TFs_Regulonlaml, Verhaak = Enrichments_Verhaak_TFs_Regulonlaml), "GO_DOWN", "GO_DOWN_Regulonlaml")
+```
+
+## plots
+
+```{r}
+p <- Do_overlaps_enrichments_upsets(list(KOICHI_Regulonlaml = Enrichments_KOICHI_TFs_Regulonlaml,
+                                    TCGA_Regulonlaml = Enrichments_TCGA_TFs_Regulonlaml,
+                                    TUH_Regulonlaml = Enrichments_TUH_TFs_Regulonlaml,
+                                    Verhaak_Regulonlaml = Enrichments_Verhaak_TFs_Regulonlaml,
+                                    BEATAML_ARACNe = Enrichments_BEATAML_TFs_ARACNe,
+                                    KOICHI_ARACNe = Enrichments_KOICHI_TFs_ARACNe,
+                                    TCGA_ARACNe = Enrichments_TCGA_TFs_ARACNe,
+                                    TUH_ARACNe = Enrichments_TUH_TFs_ARACNe,
+                                    Verhaak_ARACNe = Enrichments_Verhaak_TFs_ARACNe,
+                                    BEATAML_Dorothea_D = Enrichments_BEATAML_TFs_Dorothea_D,
+                                    KOICHI_Dorothea_D = Enrichments_KOICHI_TFs_Dorothea_D,
+                                    TCGA_Dorothea_D = Enrichments_TCGA_TFs_Dorothea_D,
+                                    TUH_Dorothea_D = Enrichments_TUH_TFs_Dorothea_D,
+                                    Verhaak_Dorothea_D = Enrichments_Verhaak_TFs_Dorothea_D),
+                               "GO_DOWN", "GO_TF_DOWN_All")
+p
+png("../Results/DGEA/Enrichments/Overlaps_Enrichments/GO_DOWN_TF_all_RNAseq.png")
+p
+dev.off()
+```
+```{r}
+p <- Do_overlaps_enrichments_upsets(list(KOICHI_Regulonlaml = Enrichments_KOICHI_TFs_Regulonlaml,
+                                    TCGA_Regulonlaml = Enrichments_TCGA_TFs_Regulonlaml,
+                                    TUH_Regulonlaml = Enrichments_TUH_TFs_Regulonlaml,
+                                    Verhaak_Regulonlaml = Enrichments_Verhaak_TFs_Regulonlaml,
+                                    BEATAML_ARACNe = Enrichments_BEATAML_TFs_ARACNe,
+                                    KOICHI_ARACNe = Enrichments_KOICHI_TFs_ARACNe,
+                                    TCGA_ARACNe = Enrichments_TCGA_TFs_ARACNe,
+                                    TUH_ARACNe = Enrichments_TUH_TFs_ARACNe,
+                                    Verhaak_ARACNe = Enrichments_Verhaak_TFs_ARACNe,
+                                    BEATAML_Dorothea_D = Enrichments_BEATAML_TFs_Dorothea_D,
+                                    KOICHI_Dorothea_D = Enrichments_KOICHI_TFs_Dorothea_D,
+                                    TCGA_Dorothea_D = Enrichments_TCGA_TFs_Dorothea_D,
+                                    TUH_Dorothea_D = Enrichments_TUH_TFs_Dorothea_D,
+                                    Verhaak_Dorothea_D = Enrichments_Verhaak_TFs_Dorothea_D),
+                               "GO_UP", "GO_TF_UP_All")
+p
+png("../Results/DGEA/Enrichments/Overlaps_Enrichments/GO_UP_TF_all_RNAseq.png")
+p
+dev.off()
+```
+
+```{r}
+p <- Do_overlaps_enrichments_upsets(list(KOICHI = Enrichments_KOICHI,
+                                    TCGA = Enrichments_TCGA,
+                                    TUH = Enrichments_TUH,
+                                    Verhaak = Enrichments_Verhaak,
+                                    BEATAML = Enrichments_BEATAML),
+                               "GO_DOWN", "GO_DEG_DOWN_All")
+p
+png("../Results/DGEA/Enrichments/Overlaps_Enrichments/GO_DOWN_DEG_all_RNAseq.png")
+p
+dev.off()
+```
+```{r}
+p <- Do_overlaps_enrichments_upsets(list(KOICHI = Enrichments_KOICHI,
+                                    TCGA = Enrichments_TCGA,
+                                    TUH = Enrichments_TUH,
+                                    Verhaak = Enrichments_Verhaak,
+                                    BEATAML = Enrichments_BEATAML),
+                               "GO_UP", "GO_DEG_UP_All")
+p
+png("../Results/DGEA/Enrichments/Overlaps_Enrichments/GO_UP_DEG_all_RNAseq.png")
+p
+dev.off()
+```
+
+# Combine DEG TF data
+
+## Load DEG data
+
+```{r}
+DEG_IDH_BEATAML <- read.table("../Results/DGEA/DEGs_tables/DEG_IDH_BEATAML.tsv", sep = "\t", header = T, row.names = 1)
+DEG_IDH_TCGA <- read.table("../Results/DGEA/DEGs_tables/DEG_IDH_TCGA.tsv", sep = "\t", header = T, row.names = 1)
+DEG_IDH_Koichi <- read.table("../Results/DGEA/DEGs_tables/DEG_IDH_Koichi.tsv", sep = "\t", header = T, row.names = 1)
+DEG_IDH_TUH <- read.table("../Results/DGEA/DEGs_tables/DEG_IDH_TUH.tsv", sep = "\t", header = T, row.names = 1)
+DEG_IDH_Verhaak <- read.table("../Results/DGEA/DEGs_tables/DEG_IDH_Verhaak.tsv", sep = "\t", header = T, row.names = 1)
+```
+
+## Load TF data
+
+```{r}
+TF_diff_IDHm_Koichi_ARACNe <- read.table("../Results/DGEA/Diff_TF_activity/ARACNe/TF_Diff_activity_Koichi_IDH.tsv",
+                                         sep = "\t", header = T)
+TF_diff_IDHm_Koichi_Regulonlaml <- read.table("../Results/DGEA/Diff_TF_activity/Regulonlaml/TF_Diff_activity_Koichi_IDH_regulonlaml.tsv",
+                                         sep = "\t", header = T)
+TF_diff_IDHm_Koichi_Dorothea <- read.table("../Results/DGEA/Diff_TF_activity/Dorothea/TF_Diff_activity_Koichi_IDH_dorothea.tsv",
+                                         sep = "\t", header = T)
+TF_diff_IDHm_Koichi_Dorothea_D <- read.table("../Results/DGEA/Diff_TF_activity/Dorothea_D/TF_Diff_activity_Koichi_IDH_dorothea_D.tsv",
+                                         sep = "\t", header = T)
+```
+
+## Merging function
+
+```{r}
+Deal_with_na <- function(df, column, final_value){
+  for (i in column){
+    data.table::set(df, which(is.na(df[[i]])), i, final_value)
+  }
+}
+
+
+Merging_function <- function(DEG, TF){
+  merge(DEG, TF, by.x = "ID", by.y = "TF", all.x = T, all.y = T)
+}
+
+Is_null <- function(vector, index, null_value){
+  vector[sapply(1:length(vector), function(i){
+    vector[i] != null_value & i %in% index 
+  })] %>% unlist
+}
+```
+
+## Merging
+
+### ARACNe
+
+```{r}
+mIDH_Koichi_features_ARACNe <- Merging_function(DEG_IDH_Koichi, TF_diff_IDHm_Koichi_ARACNe)
+
+Deal_with_na(mIDH_Koichi_features_ARACNe, c("size", "nes"), 0)
+Deal_with_na(mIDH_Koichi_features_ARACNe, c("pval", "pval.fdr"), 1)
+
+mIDH_Koichi_features_ARACNe %>%
+  write.table("../Results/GRN/Features/ARACNe/mIDH_Koichi_DEG_TF_ARACNe_features.tsv",
+              sep = "\t", quote = F, row.names = F)
+```
+
+### RegulonlAML
+
+```{r}
+mIDH_Koichi_features_Regulonlaml <- Merging_function(DEG_IDH_Koichi, TF_diff_IDHm_Koichi_Regulonlaml)
+
+Deal_with_na(mIDH_Koichi_features_Regulonlaml, c("size", "nes"), 0)
+Deal_with_na(mIDH_Koichi_features_Regulonlaml, c("pval", "pval.fdr"), 1)
+
+mIDH_Koichi_features_Regulonlaml %>%
+  write.table("../Results/GRN/Features/Regulonlaml/mIDH_Koichi_DEG_TF_Regulonlaml_features.tsv",
+              sep = "\t", quote = F, row.names = F)
+```
+
+### Dorothea
+
+```{r}
+mIDH_Koichi_features_Dorothea <- Merging_function(DEG_IDH_Koichi, TF_diff_IDHm_Koichi_Dorothea)
+
+Deal_with_na(mIDH_Koichi_features_Dorothea, c("size", "nes"), 0)
+Deal_with_na(mIDH_Koichi_features_Dorothea, c("pval", "pval.fdr"), 1)
+
+mIDH_Koichi_features_Dorothea %>%
+  write.table("../Results/GRN/Features/Dorothea/mIDH_Koichi_DEG_TF_Dorothea_features.tsv",
+              sep = "\t", quote = F, row.names = F)
+```
+
+### Dorothea D
+
+```{r}
+mIDH_Koichi_features_Dorothea_D <- Merging_function(DEG_IDH_Koichi, TF_diff_IDHm_Koichi_Dorothea_D)
+
+Deal_with_na(mIDH_Koichi_features_Dorothea_D, c("size", "nes"), 0)
+Deal_with_na(mIDH_Koichi_features_Dorothea_D, c("pval", "pval.fdr"), 1)
+
+mIDH_Koichi_features_Dorothea_D %>%
+  write.table("../Results/GRN/Features/Dorothea_D/mIDH_Koichi_DEG_TF_Dorothea_D_features.tsv",
+              sep = "\t", quote = F, row.names = F)
+```
+
+# Compare TF enrichments
+
+## Functions
+
+```{r}
+Make_TF_nes_enrichment_plot <- function(Tf_feature_1, Tf_feature_2, title = "mIDH_Koichi_TF_enrichment overlap"){
+  A <- deparse(substitute(Tf_feature_1)) %>% stringr::str_remove("mIDH_Koichi_features_")
+  B <- deparse(substitute(Tf_feature_2)) %>% stringr::str_remove("mIDH_Koichi_features_")
+  colnames(Tf_feature_1)[1] <- "ID"
+  colnames(Tf_feature_2)[1] <- "ID"
+
+  TF_1_filtered <- Tf_feature_1 %>%
+    dplyr::filter(nes != 0) %>%
+    dplyr::select(ID, nes)
+  colnames(TF_1_filtered)[2] <- "nes_1"
+  TF_2_filtered <- Tf_feature_2 %>%
+    dplyr::filter(nes != 0) %>%
+    dplyr::select(ID, nes)
+  colnames(TF_2_filtered)[2] <- "nes_2"
+  TF_comb <- merge(TF_1_filtered, TF_2_filtered, by = "ID", all.x = T, all.y = T)
+  p <- ggscatter(TF_comb, x = "nes_1", y = "nes_2", 
+                 add = "reg.line", label = "ID", repel = T, size = 0.5,
+                 font.label = c(6, "plain"))+
+    stat_cor(label.y = 2) +
+    stat_regline_equation(label.y = 1.5) +
+    labs(main = title, x = A,
+         y = B) +
+    geom_hline(yintercept = 1, linetype = "dashed") +
+    geom_hline(yintercept = -1, linetype = "dashed") +
+    geom_vline(xintercept = 1, linetype = "dashed") +
+    geom_vline(xintercept = -1, linetype = "dashed") 
+  png_path <- paste0("../Results/DGEA/Diff_TF_activity/GRN_comp_plot/", title, "_", A, "_", B , "_Network_enrichment_plot.png")
+  print(png_path)
+  ggsave(png_path, p)
+  p
+}
+```
+
+```{r}
+Make_TF_activity_enrichment_plot <- function(Tf_feature_1, Tf_feature_2){
+  means_rows_A <- rowMeans2(Tf_feature_1) 
+  sd_rows_A <- sapply(1:nrow(Tf_feature_1), function(tf){
+    sd(Tf_feature_1[tf,])
+  })
+  means_A <- mean(means_rows_A)
+  zscore_rows_A <- sapply(1:length(means_rows_A), function(value){
+    (means_rows_A[value] - means_A) / sd_rows_A[value]
+  })
+  tf_A <- as.data.frame(Tf_feature_1)
+  tf_A$zscore_A <- zscore_rows_A
+  
+  means_rows_B <- rowMeans2(Tf_feature_2) 
+  sd_rows_B <- sapply(1:nrow(Tf_feature_2), function(tf){
+    sd(Tf_feature_2[tf,])
+  })
+  means_B <- mean(means_rows_B)
+  zscore_rows_B <- sapply(1:length(means_rows_B), function(value){
+    (means_rows_B[value] - means_B) / sd_rows_B[value]
+  })
+  tf_B <- as.data.frame(Tf_feature_2)
+  tf_B$zscore_B <- zscore_rows_B
+  
+  tf_A$ID <- rownames(tf_A)
+  tf_A <- tf_A[,c("ID", "zscore_A")]
+  tf_B$ID <- rownames(tf_B)
+  tf_B <- tf_B[,c("ID", "zscore_B")]
+  
+  TF_comb <- merge(tf_A, tf_B, by = "ID", 
+                   all.x = F, all.y = F)
+  
+  p <- ggscatter(TF_comb, x = "zscore_A", y = "zscore_B", 
+                 add = "reg.line", repel = T, size = 0.5,
+                 font.label = c(6, "plain"))+
+    stat_cor(label.y = 2) +
+    stat_regline_equation(label.y = 1.5) +
+    geom_hline(yintercept = 1, linetype = "dashed") +
+    geom_hline(yintercept = -1, linetype = "dashed") +
+    geom_vline(xintercept = 1, linetype = "dashed") +
+    geom_vline(xintercept = -1, linetype = "dashed") 
+  # png_path <- paste0("../Results/DGEA/Diff_TF_activity/GRN_comp_plot/", title, "_", A, "_", B , "_Network_enrichment_plot.png")
+  # print(png_path)
+  # ggsave(png_path, p)
+  p
+}
+```
+
+```{r}
+Make_TF_activity_enrichment_plot(Koichi_TF_actitity_ARACNe, Koichi_TF_actitity_regulonlaml)
+Make_TF_activity_enrichment_plot(IDH_Koichi_TF_actitity_dorothea_D, Koichi_TF_actitity_regulonlaml)
+Make_TF_activity_enrichment_plot(Koichi_TF_actitity_ARACNe, IDH_Koichi_TF_actitity_dorothea_D)
+```
+
+
+
+## Analysis
+
+```{r}
+Make_TF_nes_enrichment_plot(mIDH_Koichi_features_Regulonlaml, mIDH_Koichi_features_ARACNe)
+Make_TF_nes_enrichment_plot(mIDH_Koichi_features_Dorothea_D, mIDH_Koichi_features_ARACNe)
+Make_TF_nes_enrichment_plot(mIDH_Koichi_features_Regulonlaml, mIDH_Koichi_features_Dorothea_D)
+```
+
+```{r}
+Make_TF_nes_enrichment_plot(IDH_TCGA_msvip_ARACNe$mrs_table, IDH_TCGA_msvip_dorothea_D$mrs_table)
+Make_TF_nes_enrichment_plot(IDH_TCGA_msvip_ARACNe$mrs_table, IDH_TCGA_msvip_regulonaml$mrs_table)
+Make_TF_nes_enrichment_plot(IDH_TCGA_msvip_dorothea_D$mrs_table, IDH_TCGA_msvip_regulonaml$mrs_table)
+```
+
+```{r}
+Make_TF_nes_enrichment_plot(mIDH_Koichi_features_Regulonlaml, mIDH_Koichi_features_ARACNe)
+Make_TF_nes_enrichment_plot(mIDH_Koichi_features_Dorothea_D, mIDH_Koichi_features_ARACNe)
+Make_TF_nes_enrichment_plot(mIDH_Koichi_features_Regulonlaml, mIDH_Koichi_features_Dorothea_D)
+```
+
+```{r}
+Make_TF_nes_enrichment_plot(IDH_Koichi_msvip_ARACNe$mrs_table, IDH_Koichi_msvip_ARACNe_2$mrs_table)
+```
+
+## Mean TFs & Fisher pvalues
+
+```{r}
+TF_1 <- mIDH_Koichi_features_Regulonlaml[,c(1,9:10)] %>%
+  dplyr::filter(nes != 0)
+colnames(TF_1)[2] <- "nes_1"
+colnames(TF_1)[3] <- "pval_1"
+TF_2 <- mIDH_Koichi_features_ARACNe[,c(1,9:10)] %>%
+  dplyr::filter(nes != 0)
+colnames(TF_2)[2] <- "nes_2"
+colnames(TF_2)[3] <- "pval_2"
+TF_3 <- mIDH_Koichi_features_Dorothea_D[,c(1,9:10)] %>%
+  dplyr::filter(nes != 0)
+colnames(TF_3)[2] <- "nes_3"
+colnames(TF_3)[3] <- "pval_3"
+
+
+Mergeing_TF <- merge(TF_1, TF_2, by = "ID", all.x = T, all.y = T) %>% 
+  merge(TF_3, by = "ID", all.x = T, all.y = T)
+
+Deal_with_na(Mergeing_TF, c("nes_1", "nes_2", "nes_3"), 0)
+Deal_with_na(Mergeing_TF, c("pval_1", "pval_2", "pval_3"), 1)
+```
+
+## Calcul average enrichment and fisher pvalues
+
+```{r}
+Mergeing_TF$combine_nes <- sapply(1:nrow(Mergeing_TF), function(TF){
+  
+  indexes <- Is_null(Mergeing_TF[TF,], c(2,4,6), 0)
+  Sum <- sum(indexes)
+  Sum/length(indexes)
+  
+})
+
+Mergeing_TF$fisher_pval <- sapply(1:nrow(Mergeing_TF), function(TF){
+  indexes <- Is_null(Mergeing_TF[TF,], c(3,5,7), 1)
+  poolr::fisher(indexes, adjust = "none")$p
+})
+
+
+Mergeing_TF <- Mergeing_TF[order(Mergeing_TF$fisher_pval, decreasing = F),]
+Mergeing_TF %>% write.table("../Results/DGEA/Diff_TF_activity/Combined_networks/Merged_mIDH1_mIDH2_TF_enrichments.tsv", 
+                            sep = "\t", row.names = F, quote = F)
+```
+
+## Volcano plots
+
+```{r}
+p <- EnhancedVolcano(Mergeing_TF, lab = Mergeing_TF$ID, x = "combine_nes", y = "fisher_pval", title = "TF_enrichment", pCutoff = 0.1, FCcutoff = 1, labSize = 3.0, ylim = c(0,5), xlim = c(-3,3))
+
+focus <- EnhancedVolcano(Mergeing_TF, 
+                         lab = Mergeing_TF$ID, 
+                         x = "combine_nes", y = "fisher_pval", 
+                         title = "TF_enrichment", 
+                         pCutoff = 0.1, FCcutoff = 1, 
+                         labSize = 4, 
+                         ylim = c(0,5), xlim = c(-3,3), 
+                         selectLab = c("CEBPA", "NRIP1"), 
+                         colAlpha = c(ifelse(Mergeing_TF$ID %in% c("CEBPA", "NRIP1"), 1, 0.1)), 
+                         pointSize = c(ifelse(Mergeing_TF$ID %in% c("CEBPA", "NRIP1"), 5, 1)))
+focus
+p
+ggsave("../Results/DGEA/Diff_TF_activity/Combined_networks/Volcano_plots/IDH/Volcano_mIDH1_vs_mIDH2_Merged_TF_enrichments.png", p)
+ggsave("../Results/DGEA/Diff_TF_activity/Combined_networks/Volcano_plots/IDH/Volcano_CEBPA_NRIP1_focus_mIDH1_vs_mIDH2_Merged_TF_enrichments.png", focus)
+```
+
+## GO Enrichments
+
+```{r}
+universe <- Mergeing_TF$ID
+
+TF_up <- Mergeing_TF %>%
+  dplyr::filter(fisher_pval < 0.1 & combine_nes > 1) %>%
+  .$ID
+
+TF_down <- Mergeing_TF %>%
+  dplyr::filter(fisher_pval < 0.1 & combine_nes < -1) %>%
+  .$ID
+
+Enrich_merge_TF_UP <- enrichGO(TF_up, OrgDb = "org.Hs.eg.db", keyType = "SYMBOL", ont = "ALL", pAdjustMethod = "none", universe = universe)
+
+Enrich_merge_TF_DOWN <- enrichGO(TF_down, OrgDb = "org.Hs.eg.db", keyType = "SYMBOL", ont = "ALL", pAdjustMethod = "none", universe = universe)
+```
+
+```{r}
+up <- dotplot(Enrich_merge_TF_UP) + labs(x = "Enrichment_TF_UP_mIDH1_vs_mIDH2_merged_network")
+up
+ggsave("../Results/DGEA/Diff_TF_activity/Combined_networks/Enrichments/IDH/Enrichment_TF_UP_mIDH1_vs_mIDH2_merged_network.png", up)
+Enrich_merge_TF_UP@result %>%
+  write.table("../Results/DGEA/Diff_TF_activity/Combined_networks/Enrichments/IDH/Table/Enrichment_TF_UP_mIDH1_vs_mIDH2_merged_network.tsv", sep = "\t", row.names = F, quote = F)
+  
+down <- dotplot(Enrich_merge_TF_DOWN) + labs(x = "Enrichment_TF_DOWN_mIDH1_vs_mIDH2_merged_network")
+
+Enrich_merge_TF_DOWN@result %>%
+  write.table("../Results/DGEA/Diff_TF_activity/Combined_networks/Enrichments/IDH/Table/Enrichment_TF_DOWN_mIDH1_vs_mIDH2_merged_network.tsv", sep = "\t", row.names = F, quote = F)
+
+ggsave("../Results/DGEA/Diff_TF_activity/Combined_networks/Enrichments/IDH/Enrichment_TF_DOWN_mIDH1_vs_mIDH2_merged_network.png", down)
+```
+
+# Loading all dataset TF enrichments
+
+```{r}
+IDH_Koichi_ARACNe <- read.table("../Results/DGEA/Diff_TF_activity/ARACNe/TF_Diff_activity_Koichi_IDH.tsv",
+                              sep = "\t", header = T)
+IDH_Koichi_regulonaml <- read.table("../Results/DGEA/Diff_TF_activity/Regulonlaml/TF_Diff_activity_Koichi_IDH_regulonlaml.tsv", 
+                                  sep = "\t", header = T)
+IDH_Koichi_dorothea <- read.table("../Results/DGEA/Diff_TF_activity/Dorothea/TF_Diff_activity_Koichi_IDH_dorothea.tsv", 
+                                      sep = "\t", header = T)
+IDH_Koichi_dorothea_D <- read.table("../Results/DGEA/Diff_TF_activity/Dorothea_D/TF_Diff_activity_Koichi_IDH_dorothea_D.tsv", 
+                                      sep = "\t", header = T)
+
+
+IDH_TCGA_ARACNe <- read.table("../Results/DGEA/Diff_TF_activity/ARACNe/TF_Diff_activity_TCGA_IDH_ARACNe.tsv",
+                              sep = "\t", header = T)
+IDH_TCGA_regulonaml <- read.table("../Results/DGEA/Diff_TF_activity/Regulonlaml/TF_Diff_activity_TCGA_IDH_regulonlaml.tsv", 
+                                  sep = "\t", header = T)
+IDH_TCGA_dorothea <- read.table("../Results/DGEA/Diff_TF_activity/Dorothea/TF_Diff_activity_TCGA_IDH_dorothea.tsv", 
+                                      sep = "\t", header = T)
+IDH_TCGA_dorothea_D <- read.table("../Results/DGEA/Diff_TF_activity/Dorothea_D/TF_Diff_activity_TCGA_IDH_dorothea_D.tsv", 
+                                      sep = "\t", header = T)
+
+
+
+
+IDH_BEATAML_ARACNe <- read.table("../Results/DGEA/Diff_TF_activity/ARACNe/TF_Diff_activity_BEATAML_IDH_ARACNe.tsv", 
+                                 sep = "\t", header = T)
+IDH_BEATAML_dorothea <- read.table("../Results/DGEA/Diff_TF_activity/Dorothea/TF_Diff_activity_BEATAML_IDH_dorothea.tsv", 
+                                   sep = "\t", header = T)
+IDH_BEATAML_dorothea_D <- read.table("../Results/DGEA/Diff_TF_activity/Dorothea_D/TF_Diff_activity_BEATAML_IDH_dorothea_D.tsv", 
+                                   sep = "\t", header = T)
+
+
+
+
+IDH_TUH_ARACNe <- read.table("../Results/DGEA/Diff_TF_activity/ARACNe/TF_Diff_activity_TUH_IDH_ARACNe.tsv", 
+                              sep = "\t", header = T)
+IDH_TUH_regulonlaml <- read.table("../Results/DGEA/Diff_TF_activity/Regulonlaml/TF_Diff_activity_TUH_IDH_regulonlaml.tsv", 
+                                   sep = "\t", header = T)
+IDH_TUH_dorothea <- read.table("../Results/DGEA/Diff_TF_activity/Dorothea/TF_Diff_activity_TUH_IDH_dorothea.tsv",                                 sep = "\t", header = T)
+IDH_TUH_dorothea_D <- read.table("../Results/DGEA/Diff_TF_activity/Dorothea_D/TF_Diff_activity_TUH_IDH_dorothea_D.tsv", sep = "\t", header = T)
+
+
+
+IDH_Verhaak_ARACNe <- read.table("../Results/DGEA/Diff_TF_activity/ARACNe/TF_Diff_mIDHs_activity_Verhaak_IDH_ARACNe.tsv", 
+                                  sep = "\t", header = T)
+IDH_Verhaak_regulonlaml <- read.table("../Results/DGEA/Diff_TF_activity/Regulonlaml/TF_Diff_mIDHs_activity_Verhaak_IDH_regulonlaml.tsv", 
+                                       sep = "\t", header = T)
+IDH_Verhaak_dorothea <- read.table("../Results/DGEA/Diff_TF_activity/Dorothea/TF_Diff_mIDHs_activity_Verhaak_IDH_dorothea.tsv", 
+                                    sep = "\t", header = T)
+IDH_Verhaak_dorothea_D <- read.table("../Results/DGEA/Diff_TF_activity/Dorothea_D/TF_Diff_mIDHs_activity_Verhaak_IDH_dorothea_D.tsv", sep = "\t", header = T)
+```
+
+## Mean TFs & Fisher pvalues
+
+### Functions
+
+```{r}
+Merging_list_TF_datasets <- function(a, b){
+  merge(a, b, by = "TF", all.x = T, all.y = T)
+}
+
+Is_null <- function(vector, index, null_value){
+  vector[sapply(1:length(vector), function(i){
+    vector[i] != null_value & i %in% index 
+  })] %>% unlist
+}
+```
+
+### Merging
+
+```{r}
+TF_K_reg <- IDH_Koichi_regulonaml[,c(1,3,4)] %>%
+  dplyr::filter(nes != 0)
+colnames(TF_K_reg)[1] <- "TF"
+colnames(TF_K_reg)[2] <- "nes_K_reg"
+colnames(TF_K_reg)[3] <- "pval_K_reg"
+TF_K_Ara <- IDH_Koichi_ARACNe[,c(1,3,4)] %>%
+  dplyr::filter(nes != 0)
+colnames(TF_K_Ara)[1] <- "TF"
+colnames(TF_K_Ara)[2] <- "nes_K_Ara"
+colnames(TF_K_Ara)[3] <- "pval_K_Ara"
+TF_K_Dor <- IDH_Koichi_dorothea_D[,c(1,3,4)] %>%
+  dplyr::filter(nes != 0)
+colnames(TF_K_Dor)[1] <- "TF"
+colnames(TF_K_Dor)[2] <- "nes_K_Dor"
+colnames(TF_K_Dor)[3] <- "pval_K_Dor"
+TF_TC_Ara <- IDH_TCGA_ARACNe[,c(1,3,4)] %>%
+  dplyr::filter(nes != 0)
+colnames(TF_TC_Ara)[2] <- "nes_TC_Ara"
+colnames(TF_TC_Ara)[3] <- "pval_TC_Ara"
+TF_TC_Reg <- IDH_TCGA_regulonaml[,c(1,3,4)] %>%
+  dplyr::filter(nes != 0)
+colnames(TF_TC_Reg)[2] <- "nes_TC_Reg"
+colnames(TF_TC_Reg)[3] <- "pval_TC_Reg"
+TF_TC_Dor <- IDH_TCGA_dorothea_D[,c(1,3,4)] %>%
+  dplyr::filter(nes != 0)
+colnames(TF_TC_Dor)[2] <- "nes_TC_Dor"
+colnames(TF_TC_Dor)[3] <- "pval_TC_Dor"
+TF_BEAT_Ara <- IDH_BEATAML_ARACNe[,c(1,3,4)] %>%
+  dplyr::filter(nes != 0)
+colnames(TF_BEAT_Ara)[2] <- "nes_BEAT_Ara"
+colnames(TF_BEAT_Ara)[3] <- "pval_BEAT_Ara"
+TF_BEAT_Dor <- IDH_BEATAML_dorothea_D[,c(1,3,4)] %>%
+  dplyr::filter(nes != 0)
+colnames(TF_BEAT_Dor)[2] <- "nes_BEAT_Dor"
+colnames(TF_BEAT_Dor)[3] <- "pval_BEAT_Dor"
+TF_TUH_Ara <- IDH_TUH_ARACNe[,c(1,3,4)] %>%
+  dplyr::filter(nes != 0)
+colnames(TF_TUH_Ara)[2] <- "nes_TUH_Ara"
+colnames(TF_TUH_Ara)[3] <- "pval_TUH_Ara"
+TF_TUH_Reg <- IDH_TUH_regulonlaml[,c(1,3,4)] %>%
+  dplyr::filter(nes != 0)
+colnames(TF_TUH_Reg)[2] <- "nes_TUH_Reg"
+colnames(TF_TUH_Reg)[3] <- "pval_TUH_Reg"
+TF_TUH_Dor <- IDH_TUH_dorothea_D[,c(1,3,4)] %>%
+  dplyr::filter(nes != 0)
+colnames(TF_TUH_Dor)[2] <- "nes_TUH_Dor"
+colnames(TF_TUH_Dor)[3] <- "pval_TUH_Dor"
+TF_Ver_Ara <- IDH_Verhaak_ARACNe[,c(1,3,4)] %>%
+  dplyr::filter(nes != 0)
+colnames(TF_Ver_Ara)[2] <- "nes_Ver_Ara"
+colnames(TF_Ver_Ara)[3] <- "pval_Ver_Ara"
+TF_Ver_Reg <- IDH_Verhaak_regulonlaml[,c(1,3,4)] %>%
+  dplyr::filter(nes != 0)
+colnames(TF_Ver_Reg)[2] <- "nes_Ver_Reg"
+colnames(TF_Ver_Reg)[3] <- "pval_Ver_Reg"
+TF_Ver_Dor <- IDH_Verhaak_dorothea_D[,c(1,3,4)] %>%
+  dplyr::filter(nes != 0)
+colnames(TF_Ver_Dor)[2] <- "nes_Ver_Dor"
+colnames(TF_Ver_Dor)[3] <- "pval_Ver_Dor"
+
+Mergeing_TF_all_set_all_net <- purrr::reduce(list(TF_K_Ara, TF_K_Dor, TF_K_reg, TF_BEAT_Ara, TF_BEAT_Dor, TF_TC_Ara, TF_TC_Dor, TF_TC_Reg, TF_TUH_Ara, TF_TUH_Dor, TF_TUH_Reg, TF_Ver_Ara, TF_Ver_Dor, TF_Ver_Reg), Merging_list_TF_datasets)
+
+Mergeing_TF_all_set_all_net_no_reg <- purrr::reduce(list(TF_K_Ara, TF_K_Dor, TF_BEAT_Ara, TF_BEAT_Dor, TF_TC_Ara, TF_TC_Dor, TF_TUH_Ara, TF_TUH_Dor, TF_Ver_Ara, TF_Ver_Dor), Merging_list_TF_datasets)
+
+Deal_with_na(Mergeing_TF_all_set_all_net, c("nes_K_Ara", "nes_K_Dor", "nes_K_reg", "nes_BEAT_Ara", "nes_BEAT_Dor", "nes_TC_Ara", "nes_TC_Dor", "nes_TC_Reg", "nes_TUH_Ara", "nes_TUH_Dor", "nes_TUH_Reg", "nes_Ver_Ara", "nes_Ver_Dor", "nes_Ver_Reg"), 0)
+Deal_with_na(Mergeing_TF_all_set_all_net, c("pval_K_Ara", "pval_K_Dor", "pval_K_reg", "pval_BEAT_Ara", "pval_BEAT_Dor", "pval_TC_Ara", "pval_TC_Dor", "pval_TC_Reg", "pval_TUH_Ara", "pval_TUH_Dor", "pval_TUH_Reg", "pval_Ver_Ara", "pval_Ver_Dor", "pval_Ver_Reg"), 1)
+
+Deal_with_na(Mergeing_TF_all_set_all_net_no_reg, c("nes_K_Ara", "nes_K_Dor", "nes_BEAT_Ara", "nes_BEAT_Dor", "nes_TC_Ara", "nes_TC_Dor", "nes_TUH_Ara", "nes_TUH_Dor", "nes_Ver_Ara", "nes_Ver_Dor"), 0)
+Deal_with_na(Mergeing_TF_all_set_all_net_no_reg, c("pval_K_Ara", "pval_K_Dor", "pval_BEAT_Ara", "pval_BEAT_Dor", "pval_TC_Ara", "pval_TC_Dor", "pval_TUH_Ara", "pval_TUH_Dor", "pval_Ver_Ara", "pval_Ver_Dor"), 1)
+```
+
+## Calcul average enrichment and fisher pvalues
+
+```{r}
+Mergeing_TF_all_set_all_net$combine_nes <- sapply(1:nrow(Mergeing_TF_all_set_all_net), function(TF){
+  
+  indexes <- Is_null(Mergeing_TF_all_set_all_net[TF,], c(2,4,6,8,10,12,14,16,18,20,22,24,26,28), 0)
+  Sum <- sum(indexes)
+  Sum/length(indexes)
+  
+})
+
+Mergeing_TF_all_set_all_net$fisher_pval <- sapply(1:nrow(Mergeing_TF_all_set_all_net), function(TF){
+  indexes <- Is_null(Mergeing_TF_all_set_all_net[TF,], c(3,5,7,9,11,13,15,17,19,21,23,25,27,29), 1)
+  poolr::fisher(indexes, adjust = "none")$p
+})
+
+Mergeing_TF_all_set_all_net <- Mergeing_TF_all_set_all_net[order(Mergeing_TF_all_set_all_net$fisher_pval, decreasing = F),]
+Mergeing_TF_all_set_all_net %>%
+  write.table("../Results/DGEA/Diff_TF_activity/Combined_networks/Mergeing_TF_all_set_all_net_mIDH1_mIDH2_TF_enrichments.tsv", sep = "\t", row.names = F, quote = F)
+```
+
+## Mergeing per dataset
+
+```{r}
+Mergeing_TF_all_set_all_net_no_reg$combine_nes_koichi <- sapply(1:nrow(Mergeing_TF_all_set_all_net_no_reg), function(TF){
+  indexes <- Is_null(Mergeing_TF_all_set_all_net_no_reg[TF,], c(2, 4), 0)
+  if(length(indexes)==0){
+    return(0)
+  }
+  Sum <- sum(indexes)
+  Sum/length(indexes)
+})
+
+Mergeing_TF_all_set_all_net_no_reg$fisher_pval_Koichi <- sapply(1:nrow(Mergeing_TF_all_set_all_net_no_reg), function(TF){
+  indexes <- Is_null(Mergeing_TF_all_set_all_net_no_reg[TF,], c(3, 5), 1)
+  if(length(indexes)==0){
+    return(1)
+  }
+  poolr::fisher(indexes, adjust = "none")$p
+})
+
+Mergeing_TF_all_set_all_net_no_reg$combine_nes_beataml <- sapply(1:nrow(Mergeing_TF_all_set_all_net_no_reg), function(TF){
+  indexes <- Is_null(Mergeing_TF_all_set_all_net_no_reg[TF,], c(6, 8), 0)
+  if(length(indexes)==0){
+    return(0)
+  }
+  Sum <- sum(indexes)
+  Sum/length(indexes)
+})
+
+Mergeing_TF_all_set_all_net_no_reg$fisher_pval_beataml <- sapply(1:nrow(Mergeing_TF_all_set_all_net_no_reg), function(TF){
+  indexes <- Is_null(Mergeing_TF_all_set_all_net_no_reg[TF,], c(7, 9), 1)
+  if(length(indexes)==0){
+    return(1)
+  }
+  poolr::fisher(indexes, adjust = "none")$p
+})
+
+Mergeing_TF_all_set_all_net_no_reg$combine_nes_TCGA <- sapply(1:nrow(Mergeing_TF_all_set_all_net_no_reg), function(TF){
+  indexes <- Is_null(Mergeing_TF_all_set_all_net_no_reg[TF,], c(10, 12), 0)
+  if(length(indexes)==0){
+    return(0)
+  }
+  Sum <- sum(indexes)
+  Sum/length(indexes)
+})
+
+Mergeing_TF_all_set_all_net_no_reg$fisher_pval_TCGA <- sapply(1:nrow(Mergeing_TF_all_set_all_net_no_reg), function(TF){
+  indexes <- Is_null(Mergeing_TF_all_set_all_net_no_reg[TF,], c(11, 13), 1)
+  if(length(indexes)==0){
+    return(1)
+  }
+  poolr::fisher(indexes, adjust = "none")$p
+})
+
+Mergeing_TF_all_set_all_net_no_reg$combine_nes_Metaml <- sapply(1:nrow(Mergeing_TF_all_set_all_net_no_reg), function(TF){
+  indexes <- Is_null(Mergeing_TF_all_set_all_net_no_reg[TF,], c(14, 16), 0)
+  if(length(indexes)==0){
+    return(0)
+  }
+  Sum <- sum(indexes)
+  Sum/length(indexes)
+})
+
+Mergeing_TF_all_set_all_net_no_reg$fisher_pval_Metaml <- sapply(1:nrow(Mergeing_TF_all_set_all_net_no_reg), function(TF){
+  indexes <- Is_null(Mergeing_TF_all_set_all_net_no_reg[TF,], c(15, 17), 1)
+  if(length(indexes)==0){
+    return(1)
+  }
+  poolr::fisher(indexes, adjust = "none")$p
+})
+
+Mergeing_TF_all_set_all_net_no_reg$combine_nes_Verhaak <- sapply(1:nrow(Mergeing_TF_all_set_all_net_no_reg), function(TF){
+  indexes <- Is_null(Mergeing_TF_all_set_all_net_no_reg[TF,], c(18, 20), 0)
+  if(length(indexes)==0){
+    return(0)
+  }
+  Sum <- sum(indexes)
+  Sum/length(indexes)
+})
+
+Mergeing_TF_all_set_all_net_no_reg$fisher_pval_Verhaak <- sapply(1:nrow(Mergeing_TF_all_set_all_net_no_reg), function(TF){
+  indexes <- Is_null(Mergeing_TF_all_set_all_net_no_reg[TF,], c(19, 21), 1)
+  if(length(indexes)==0){
+    return(1)
+  }
+  poolr::fisher(indexes, adjust = "none")$p
+})
+
+Mergeing_TF_all_set_all_net_no_reg$combine_nes <- sapply(1:nrow(Mergeing_TF_all_set_all_net_no_reg), function(TF){
+  indexes <- Is_null(Mergeing_TF_all_set_all_net_no_reg[TF,], c(2, 4, 6, 8, 10, 12, 14, 16, 18, 20), 0)
+  if(length(indexes)==0){
+    return(0)
+  }
+  Sum <- sum(indexes)
+  Sum/length(indexes)
+})
+
+Mergeing_TF_all_set_all_net_no_reg$fisher_pval <- sapply(1:nrow(Mergeing_TF_all_set_all_net_no_reg), function(TF){
+  indexes <- Is_null(Mergeing_TF_all_set_all_net_no_reg[TF,], c(3, 5, 7, 9, 11, 13, 15, 17, 19, 21), 1)
+  if(length(indexes)==0){
+    return(1)
+  }
+  poolr::fisher(indexes, adjust = "none")$p
+})
+
+Mergeing_TF_all_set_all_net_no_reg <- Mergeing_TF_all_set_all_net_no_reg[order(Mergeing_TF_all_set_all_net_no_reg$fisher_pval, decreasing = F),]
+Mergeing_TF_all_set_all_net_no_reg %>%
+  write.table("../Results/DGEA/Diff_TF_activity/Combined_networks/Mergeing_TF_all_set_all_net_no_reg_per_dataset_mIDH1_mIDH2_TF_enrichments.tsv", sep = "\t", row.names = F, quote = F)
+```
+
+
+```{r}
+Mergeing_TF_all_set_all_net %>%
+  dplyr::filter(fisher_pval < 0.05 & abs(combine_nes) > 0.5) %>%
+  ggparcoord(columns = seq(2,28, by = 2))
+
+Mergeing_TF_all_set_all_net %>%
+  dplyr::filter(fisher_pval < 0.05 & abs(combine_nes) > 0.5) %>%
+  ggparcoord(columns = seq(3,29, by = 2))
+```
+
+```{r}
+test <- Mergeing_TF_all_set_all_net %>%
+  dplyr::filter(TF == "NRIP1") 
+
+plot(x = seq(2,28, by = 2), y = test[, seq(2,28, by = 2)])
+plot(x = seq(3,29, by = 2), y = -log10(test[, seq(3,29, by = 2)]))
+```
+
+
+```{r}
+Mergeing_TF_reg <- purrr::reduce(list(TF_K_reg, TF_TC_Reg, TF_TUH_Reg, TF_Ver_Reg), Merging_list_TF_datasets)
+
+Deal_with_na(Mergeing_TF_reg, c("nes_K_reg", "nes_TC_Reg", "nes_TUH_Reg", "nes_Ver_Reg"), 0)
+Deal_with_na(Mergeing_TF_reg, c("pval_K_reg", "pval_TC_Reg", "pval_TUH_Reg", "pval_Ver_Reg"), 1)
+```
+
+```{r}
+Mergeing_TF_reg$combine_nes <- sapply(1:nrow(Mergeing_TF_reg), function(TF){
+  
+  indexes <- Is_null(Mergeing_TF_reg[TF,], seq(2, ncol(Mergeing_TF_reg), by = 2), 0)
+  Sum <- sum(indexes)
+  Sum/length(indexes)
+  
+})
+
+Mergeing_TF_reg$fisher_pval <- sapply(1:nrow(Mergeing_TF_reg), function(TF){
+  indexes <- Is_null(Mergeing_TF_reg[TF,], seq(3, ncol(Mergeing_TF_reg), by = 2), 1)
+  poolr::fisher(indexes, adjust = "none")$p
+})
+
+Mergeing_TF_reg <- Mergeing_TF_reg[order(Mergeing_TF_reg$fisher_pval, decreasing = F),]
+Mergeing_TF_reg %>%
+  write.table("../Results/DGEA/Diff_TF_activity/Combined_networks/Mergeing_TF_reg_mIDH1_mIDH2_TF_enrichments.tsv", sep = "\t", row.names = F, quote = F)
+```
+
+
+# Volcano plots
+
+## mIDH1 vs mIDH2 all datasets
+
+```{r}
+p <- EnhancedVolcano(Mergeing_TF_all_set_all_net, lab = Mergeing_TF_all_set_all_net$TF, x = "combine_nes", y = "fisher_pval", title = "TF_enrichment", pCutoff = 0.1, FCcutoff = 1, labSize = 3.0, ylim = c(0,5), xlim = c(-3,3))
+focus <- EnhancedVolcano(Mergeing_TF_all_set_all_net, 
+                         lab = Mergeing_TF_all_set_all_net$TF, 
+                         x = "combine_nes", y = "fisher_pval", 
+                         title = "TF_enrichment", 
+                         pCutoff = 0.1, FCcutoff = 1, 
+                         labSize = 4, 
+                         ylim = c(0,5), xlim = c(-3,3), 
+                         selectLab = c("CEBPA", "NRIP1"), 
+                         colAlpha = c(ifelse(Mergeing_TF_all_set_all_net$TF %in% c("CEBPA", "NRIP1"), 1, 0.1)), 
+                         pointSize = c(ifelse(Mergeing_TF_all_set_all_net$TF %in% c("CEBPA", "NRIP1"), 5, 1)))
+ggsave("../Results/DGEA/Diff_TF_activity/Combined_networks/Volcano_plots/IDH/Volcano_Mergeing_TF_all_set_all_net_mIDH1_vs_mIDH2_enrichments.png", p)
+focus
+p
+ggsave("../Results/DGEA/Diff_TF_activity/Combined_networks/Volcano_plots/IDH/Volcano_CEBPA_NRIP1_focus_Mergeing_TF_all_set_all_net_mIDH1_vs_mIDH2_enrichments.png", focus)
+
+```
+
+
+```{r}
+p <- EnhancedVolcano(Mergeing_TF_reg, lab = Mergeing_TF_reg$TF, x = "combine_nes", y = "fisher_pval", title = "TF_enrichment", pCutoff = 0.1, FCcutoff = 1, labSize = 3.0, ylim = c(0,5), xlim = c(-3,3))
+focus <- EnhancedVolcano(Mergeing_TF_reg, 
+                         lab = Mergeing_TF_reg$TF, 
+                         x = "combine_nes", y = "fisher_pval", 
+                         title = "TF_enrichment", 
+                         pCutoff = 0.1, FCcutoff = 1, 
+                         labSize = 4, 
+                         ylim = c(0,5), xlim = c(-3,3), 
+                         selectLab = c("CEBPA", "NRIP1"), 
+                         colAlpha = c(ifelse(Mergeing_TF_reg$TF %in% c("CEBPA", "NRIP1"), 1, 0.1)), 
+                         pointSize = c(ifelse(Mergeing_TF_reg$TF %in% c("CEBPA", "NRIP1"), 5, 1)))
+ggsave("../Results/DGEA/Diff_TF_activity/Combined_networks/Volcano_plots/IDH/Volcano_Mergeing_TF_reg_mIDH1_vs_mIDH2_enrichments.png", p)
+focus
+p
+ggsave("../Results/DGEA/Diff_TF_activity/Combined_networks/Volcano_plots/IDH/Volcano_CEBPA_NRIP1_focus_Mergeing_TF_reg_mIDH1_vs_mIDH2_enrichments.png", focus)
+```
+
+```{r}
+library(biomaRt)
+library(DOSE)
+library(clusterProfiler)
+library(ReactomePA)
+library(pathview)
+library(ggrepel)
+library(forcats)
+
+mart <- useMart('ENSEMBL_MART_ENSEMBL')
+mart <- useDataset('hsapiens_gene_ensembl', mart)
+
+attrmart <- listAttributes(mart)
+
+annotLookup <- getBM(
+  mart = mart,
+  attributes = c(
+    'hgnc_symbol',
+    'entrezgene_id', 
+    'ensembl_gene_id'),
+  uniqueRows = TRUE)
+```
+
+
+```{r}
+Make_genes_ensembl <- function(TF_df){
+  ensembl_genes <- merge(TF_df, annotLookup, by.x = "TF", by.y = "hgnc_symbol", all.x = F, all.y = F) %>% na.omit 
+  ensembl_genes$activity_abs <- abs(ensembl_genes$combine_nes) 
+  ensembl_genes %>% .[order(.$activity_abs, decreasing = T),]
+  ensembl_genes
+}
+
+Make_enrichggplot <- function(gsea, Title){
+  y <- arrange(gsea, abs(NES)) %>% 
+        group_by(sign(NES)) %>% 
+        dplyr::slice(1:5)
+  res <- ggplot(y, aes(NES, fct_reorder(Description, NES), fill=pvalue), showCategory=10) + 
+    geom_col(orientation='y') + 
+    scale_fill_continuous(low='red', high='blue', guide=guide_colorbar(reverse=TRUE)) + 
+    theme_minimal() + ylab(NULL) + ggtitle(Title)
+  res
+}
+
+Enrichments_plots <- function(GeneSetEnrichment, Title, EnrichmentName, Genes_ENTREZ, Max_cneplot_cat){
+  print(paste(Title, EnrichmentName))
+  if(!is.null(GeneSetEnrichment)){
+    GeneSetEnrichment_sign <- GeneSetEnrichment@result %>% dplyr::filter(pvalue < 0.5 & setSize > 1) %>% nrow
+    if(GeneSetEnrichment_sign > 0){
+      y <- Make_enrichggplot(GeneSetEnrichment, paste(Title, EnrichmentName))
+      tmp <- GeneSetEnrichment
+      tmp@result <- tmp@result %>% dplyr::filter(setSize > 1)
+      max_geneset <- tmp@result %>% dplyr::filter(pvalue < 0.1) %>% nrow
+      edox <- setReadable(tmp, 'org.Hs.eg.db', 'ENTREZID')
+      options(ggrepel.max.overlaps = Inf)
+      max_geneset <- ifelse(max_geneset > Max_cneplot_cat, Max_cneplot_cat, max_geneset)
+      v <- cnetplot(edox, foldChange=Genes_ENTREZ, node_label = "all", showCategory = max_geneset) + ggtitle(paste(Title, EnrichmentName))
+      list("Enrichment_barplot" = y,
+           "Cnetplot" = v,
+           "Readable_enrichment" = edox)
+    }else{
+      NULL
+    }
+  }else{
+    NULL
+  }
+}
+
+Do_enrichment_analysis <- function(Genes_ENTREZ, Title, Max_cneplot_cat){
+  genes_ENTREZ <- Genes_ENTREZ[order(Genes_ENTREZ, decreasing = T)]
+  dse <- tryCatch(
+    {
+      gseDO(genes_ENTREZ, pAdjustMethod = "none", pvalueCutoff = 0.1, minGSSize = 1, verbose = F)
+      },
+    error = function(cond) {
+            message("ERROR")
+            message("Here's the original error message:")
+            message(cond)
+            # Choose a return value in case of error
+            return(NULL)
+    }
+  )
+  message("KEGG Starting")
+  kse <- tryCatch(
+    {
+      gseKEGG(genes_ENTREZ, minGSSize = 2, pvalueCutoff = 0.1, pAdjustMethod = "none", verbose = F, organism = 'hsa', keyType = 'ncbi-geneid')
+    }, 
+    error = function(cond) {
+            message("ERROR")
+            message("Here's the original error message:")
+            message(cond)
+            # Choose a return value in case of error
+            return(NULL)
+    }
+  )
+  message("KEGG DONE")
+  message("Wiki in progress")
+  wse <- tryCatch(
+    {
+      gseWP(genes_ENTREZ, minGSSize = 2, pvalueCutoff = 0.1, pAdjustMethod = "none", verbose = F, organism = "Homo sapiens")
+    },
+    error = function(cond) {
+            message("ERROR")
+            message("Here's the original error message:")
+            message(cond)
+            # Choose a return value in case of error
+            return(NULL)
+    }
+  )
+  message("Reactome in progress")
+  rse <- tryCatch(
+    {
+      gsePathway(genes_ENTREZ, pvalueCutoff = 0.2, pAdjustMethod = "BH", verbose = F)
+    },
+    error = function(cond) {
+            message("ERROR")
+            message("Here's the original error message:")
+            message(cond)
+            # Choose a return value in case of error
+            return(NULL)
+    }
+  )
+
+  dose_enrich <- Enrichments_plots(dse, Title, "Dose", genes_ENTREZ, Max_cneplot_cat)
+  kegg_enrich <- Enrichments_plots(kse, Title, "KEGG", genes_ENTREZ, Max_cneplot_cat)
+  wiki_enrich <- Enrichments_plots(wse, Title, "WikiPath", genes_ENTREZ, Max_cneplot_cat)
+  
+  list("DOSE" = dose_enrich,
+       "KEGG" = kegg_enrich,
+       "WIKIpathway" = wiki_enrich,
+       "Reactome_Pathway" = rse)
+}
+
+ Do_gene_ontology_Kegg_analysis <- function(TF_activities, nes_threshold, pvalue_theshold, Title, Max_cneplot_cat){
+  genes_up <- TF_activities %>% dplyr::filter(combine_nes > nes_threshold & fisher_pval < pvalue_theshold)
+  genes_down <- TF_activities %>% dplyr::filter(combine_nes < -nes_threshold & fisher_pval < pvalue_theshold) %>% unique
+  
+  genes_up_ensembl <- Make_genes_ensembl(genes_up)
+  genes_down_ensembl <- Make_genes_ensembl(genes_down)
+  
+  genes_up_ensembl_c <- genes_up_ensembl$activity_abs
+  names(genes_up_ensembl_c) <- genes_up_ensembl$entrezgene_id
+  
+  genes_down_ensembl_c <- genes_down_ensembl$activity_abs
+  names(genes_down_ensembl_c) <- genes_down_ensembl$entrezgene_id
+  
+  genes_ensembl_c <- genes_down_ensembl$combine_nes
+  names(genes_ensembl_c) <- genes_down_ensembl$entrezgene_id
+  
+  genes_ensembl_c <- c(genes_up_ensembl_c, genes_ensembl_c)
+  
+  enrichments_up <- Do_enrichment_analysis(genes_up_ensembl_c, paste(Title, "up"), Max_cneplot_cat)
+  enrichments_down <- Do_enrichment_analysis(genes_down_ensembl_c, paste(Title, "down"), Max_cneplot_cat)
+  enrichments_upndown <- Do_enrichment_analysis(genes_ensembl_c, paste(Title, ""), Max_cneplot_cat)
+
+  list("Enrichments"= list("UP" = enrichments_up,
+                         "DOWN" = enrichments_down,
+                         "BOTH" = enrichments_upndown),
+     "genelists" = list("Ensembl_UP" = genes_up_ensembl_c,
+                        "Ensembl_Down" = genes_down_ensembl_c,
+                        "Ensemble" = genes_ensembl_c,
+                        "UP" = genes_up$nodeLabel,
+                        "Down" = genes_down$nodeLabel))
+}
+```
+
+```{r}
+Ontologies_analysis_mIDH_TFs <- Do_gene_ontology_Kegg_analysis(Mergeing_TF_reg, 1, 0.1, "mIDH_analysis", 40)
+```
+
+```{r}
+lapply(names(Ontologies_analysis_mIDH_TFs[["Enrichments"]]), function(Sign){
+  lapply(names(Ontologies_analysis_mIDH_TFs[["Enrichments"]][[Sign]])[1:3], function(Onto){
+    
+    a <- Ontologies_analysis_mIDH_TFs[["Enrichments"]][[Sign]][[Onto]][["Enrichment_barplot"]]
+    b <- Ontologies_analysis_mIDH_TFs[["Enrichments"]][[Sign]][[Onto]][["Cnetplot"]]
+    message(paste(Sign, Onto))
+    ggsave(paste0("../Results/DGEA/Diff_TF_activity/Combined_networks/Enrichments/IDH/Barplot_Enrichment_TF_", Sign, "_Mergeing_TF_reg_", Onto, ".png"), a, bg = 'white', width = 1920, height = 1080, units = "px", scale = 3)
+    ggsave(paste0("../Results/DGEA/Diff_TF_activity/Combined_networks/Enrichments/IDH/Cnetplot_Enrichment_TF_", Sign, "_Mergeing_TF_reg_", Onto, ".png"), b, bg = 'white', width = 1920, height = 1080, units = "px", scale = 3)
+    a
+    b
+  })
+})
+```
+
+
+
+# Enrichments
+
+## mIDH1 vs mIDH2 all datasets
+
+```{r}
+universe <- Mergeing_TF_all_set_all_net$TF
+
+TF_up <- Mergeing_TF_all_set_all_net %>%
+  dplyr::filter(fisher_pval < 0.1 & combine_nes > 0.5) %>%
+  .$TF
+
+TF_down <- Mergeing_TF_all_set_all_net %>%
+  dplyr::filter(fisher_pval < 0.1 & combine_nes < -0.5) %>%
+  .$TF
+
+Enrich_merge_TF_UP <- enrichGO(TF_up, OrgDb = "org.Hs.eg.db", keyType = "SYMBOL", ont = "ALL", pAdjustMethod = "none", universe = universe)
+
+Enrich_merge_TF_UP@result %>%
+  write.table("../Results/DGEA/Diff_TF_activity/Combined_networks/Enrichments/IDH/Table/Enrichment_TF_UP_mIDH1_vs_mIDH2_all_dataset_merged_network.tsv", sep = "\t", row.names = F, quote = F)
+
+Enrich_merge_TF_DOWN <- enrichGO(TF_down, OrgDb = "org.Hs.eg.db", keyType = "SYMBOL", ont = "ALL", pAdjustMethod = "none", universe = universe)
+
+Enrich_merge_TF_DOWN@result %>%
+  write.table("../Results/DGEA/Diff_TF_activity/Combined_networks/Enrichments/IDH/Table/Enrichment_TF_DOWN_mIDH1_vs_mIDH2_all_dataset_merged_network.tsv", sep = "\t", row.names = F, quote = F)
+
+up <- dotplot(Enrich_merge_TF_UP)  + labs(x = "Enrichment_TF_UP_Mergeing_TF_all_set_all_net_mIDH1_vs_mIDH2_merged_network")
+ggsave("../Results/DGEA/Diff_TF_activity/Combined_networks/Enrichments/IDH/Enrichment_TF_UP_Mergeing_TF_all_set_all_net_mIDH1_vs_mIDH2_merged_network.png", up)
+
+down <- dotplot(Enrich_merge_TF_DOWN) + labs(x = "Enrichment_TF_DOWN_Mergeing_TF_all_set_all_net_mIDH1_vs_mIDH2_merged_network")
+ggsave("../Results/DGEA/Diff_TF_activity/Combined_networks/Enrichments/IDH/Enrichment_TF_DOWN_Mergeing_TF_all_set_all_net_mIDH1_vs_mIDH2_merged_network.png", down)
+up
+down
+```
+
+# Merging all DEGs analysis
+
+## Mean DEG & Fisher pvalues
+
+```{r}
+Merging_DEGs <- merge(DEG_IDH_Koichi[,c(7,1,4)], DEG_IDH_BEATAML[,c(7,1,4)], by = "ID", all = T) %>%
+  merge(DEG_IDH_TCGA[,c(7,1,4)], by = "ID", all = T) %>% 
+  merge(DEG_IDH_TUH[,c(7,1,4)], by = "ID", all = T)
+
+colnames(Merging_DEGs) <- c("ID", "logFC_1", "P.Value_1", "logFC_2", "P.Value_2", "logFC_3", "P.Value_3", "logFC_4", "P.Value_4")
+
+
+## Mean TFs & Fisher pvalues
+Deal_with_na(Merging_DEGs, c("logFC_1", "logFC_2", "logFC_3", "logFC_4"), 0)
+Deal_with_na(Merging_DEGs, c("P.Value_1", "P.Value_2", "P.Value_3", "P.Value_4"), 1)
+```
+
+```{r}
+Merging_DEGs$combine_logFC <- sapply(1:nrow(Merging_DEGs), function(gene){
+  Sum <- sum(Merging_DEGs[gene, c(2,4,6,8)])
+  Sum/4
+})
+
+Merging_DEGs$fisher_pval <- sapply(1:nrow(Merging_DEGs), function(TF){
+  pval_1 <- Merging_DEGs[TF, 3]
+  pval_2 <- Merging_DEGs[TF, 5]
+  pval_3 <- Merging_DEGs[TF, 7]
+  pval_4 <- Merging_DEGs[TF, 9]
+
+  poolr::fisher(c(pval_1, pval_2, pval_3, pval_4), adjust = "none")$p
+})
+
+Merging_DEGs <- Merging_DEGs[order(Merging_DEGs$fisher_pval, decreasing = F),]
+Merging_DEGs %>% write.table("../Results/DGEA/DEGs_tables/Merged_mIDH1_mIDH2_DEG.tsv", 
+                            sep = "\t", row.names = F, quote = F)
+```
+
+```{r}
+Merging_DEGs %>%
+  dplyr::filter(fisher_pval < 0.05) %>%
+  ggparcoord(columns = c(2,4,6,8), boxplot = T, alphaLines = 0.1)
+```
+
+```{r}
+save.image("/media/alexis/DATA/Session/R_session/Thesis_paper_Rsessions/VIPER_analysis_2.2.RData")
+system("bash ~/shutdown_o_clock.sh")
+```
+

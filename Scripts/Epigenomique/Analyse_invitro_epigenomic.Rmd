@@ -38,6 +38,7 @@ library(org.Hs.eg.db)
 library(clusterProfiler)
 library(simplifyEnrichment)
 library(DOSE)
+library(enrichR)
 
 cores2use <- detectCores() - 2
 
@@ -483,7 +484,7 @@ pchic_anno <- pchic[c(1:2)] %>% unique()
 ```
 
 ```{r}
-Features <- lapply(names(Localised_DMPs), function(comp){
+Features <- lapply(names(Localised_DMPs)[1], function(comp){
   feats <- Localised_DMPs[[comp]]$features %>%
     merge(pchic_anno, by.x = "Fragment", by.y = "NodeIn", all.x = T, all.y = T) 
   feats$chrom <- feats$Fragment %>% 
@@ -493,7 +494,7 @@ Features <- lapply(names(Localised_DMPs), function(comp){
                 sep = "\t", row.names = F, quote = F)
   feats
 })
-names(Features) <- names(Localised_DMPs)
+names(Features) <- names(Localised_DMPs)[1]
 ```
 
 ## Finding direct indirect affected genes 
@@ -573,6 +574,8 @@ Make_enrich_plot <- function(enrichment, path){
   n_enrich <- nrow(dplyr::filter(enrichment@result, pvalue < 0.05))
   if(n_enrich == 0){
     return(NULL)
+  }else if(n_enrich > 20){
+    n_enrich <- 20
   }
   if(enrichment@keytype !=  "SYMBOL"){
     enrichment <- enrichment %>%
@@ -580,12 +583,12 @@ Make_enrich_plot <- function(enrichment, path){
   }
   height_plot <- 200 + (n_enrich *120)
   p <- dotplot(enrichment, showCategory = n_enrich)
-  cplot <- cnetplot(enrichment, showCategory = n_enrich)
-  ggsave(paste0(path, "_dotplot.png"), p, bg = "white", width = 3800, height = height_plot, units = "px", limitsize = FALSE)
-  ggsave(paste0(path, "_cnetplot.png"), cplot, bg = "white", width = 3800, height = 3800, units = "px", limitsize = FALSE)
+  # cplot <- cnetplot(enrichment, showCategory = n_enrich)
+  ggsave(paste0(path, "_dotplot.png"), p, bg = "white", width = 1600, height = height_plot, units = "px", limitsize = FALSE)
+  # ggsave(paste0(path, "_cnetplot.png"), cplot, bg = "white", width = 1600, height = 3800, units = "px", limitsize = FALSE)
   p
-  cplot
-  list(p, cplot)
+  # cplot
+  # list(p, cplot)
 }
 ```
 
@@ -666,10 +669,8 @@ Auto_set_readable <- function(Results_cluster_KEGG_WP){
 ## Comparing results 
 
 ```{r}
-List_IDs <- list("IDH1_vs_IDHwt" = Direct_indirect_methylation$`Molm_1-Molm_wt`, 
-                 "IDH2_vs_IDHwt" = Direct_indirect_methylation$`Molm_2-Molm_wt`, 
-                 "IDH1_vs_IDH2" = Direct_indirect_methylation$`Molm_1-Molm_2`,
-                 "IDH2_vs_IDH1" = Direct_indirect_methylation$`Molm_2-Molm_1`
+List_IDs <- list("IDH1" = Direct_indirect_methylation$`Molm_1-Molm_2`,
+                 "IDH2" = Direct_indirect_methylation$`Molm_2-Molm_1`
                  )
 ```
 
@@ -680,9 +681,10 @@ Cluster_comparison <- Compare_Enrichments(List_IDs)
 
 ```{r}
 lapply(names(Cluster_comparison), function(ont){
-  n <- 10
+  n <- 15
+  n_comp <- Cluster_comparison[[ont]]@compareClusterResult$group %>% unique %>% length()
   p <- dotplot(Cluster_comparison[[ont]], showCategory = n) 
-  height_param <- n*6*120 +200
+  height_param <- n*n_comp*120 +200
   ggsave(paste0("~/GitHub/Thesis_paper/Results/Epigenomic/Molm_13_comparisons_", ont, "_dotplot.png"), 
          p, bg = "white", width = 5700, 
          height = height_param, units = "px", limitsize = FALSE)
@@ -691,7 +693,6 @@ lapply(names(Cluster_comparison), function(ont){
   }else{
     pcnet <- cnetplot(Cluster_comparison[[ont]], showCategory = n) 
   }
-  height_param <- n*4*120 +200
   ggsave(paste0("~/GitHub/Thesis_paper/Results/Epigenomic/Molm_13_comparisons_", ont, "_cnetplot.png"), 
          pcnet, bg = "white", width = 5700, 
          height = 5700, units = "px", limitsize = FALSE)
@@ -700,6 +701,116 @@ lapply(names(Cluster_comparison), function(ont){
 })
 
 ```
+
+# EnrichR
+
+## EnrichR analysis
+
+```{r}
+websiteLive <- getOption("enrichR.live")
+if (websiteLive) {
+    listEnrichrSites()
+    setEnrichrSite("Enrichr") # Human genes   
+}
+```
+
+```{r}
+if (websiteLive) dbs <- listEnrichrDbs()
+
+path_2_analyse <- c("GO_Biological_Process_2023" , "GO_Cellular_Component_2023", "GO_Molecular_Function_2023", "KEGG_2021_Human", "WikiPathway_2023_Human", "Reactome_2022")
+
+path_2_analyse_BP <- c("GO_Biological_Process_2023")
+```
+
+```{r}
+Enriched_MOLM13_IDH1_Methylome <- enrichr(List_IDs$IDH1_vs_IDH2$Indirect, databases = path_2_analyse) %>% lapply(function(path){
+   dplyr::filter(path, P.value < 0.05)
+}) %>% data.table::rbindlist()
+
+plotEnrich(Enriched_MOLM13_IDH1_Methylome, orderBy = "Adjusted.P.value", title = "Pathway enriched in mIDH1 MOLM13")
+
+Enriched_MOLM13_IDH2_Methylome <- enrichr(List_IDs$IDH2_vs_IDH1$Indirect, databases = path_2_analyse) %>% lapply(function(path){
+   dplyr::filter(path, P.value < 0.05)
+}) %>% data.table::rbindlist()
+
+plotEnrich(Enriched_MOLM13_IDH2_Methylome, orderBy = "Adjusted.P.value", title = "Pathway enriched in mIDH2 MOLM13")
+
+
+
+
+
+Enriched_MOLM13_IDH1_Methylome_BP <- enrichr(List_IDs$IDH1$Indirect, databases = path_2_analyse_BP) %>% lapply(function(path){
+   dplyr::filter(path, P.value < 0.05)
+}) %>% data.table::rbindlist()
+
+plotEnrich(Enriched_MOLM13_IDH1_Methylome_BP, orderBy = "Adjusted.P.value", title = "Pathway enriched in mIDH1 MOLM13")
+
+Enriched_MOLM13_IDH2_Methylome_BP <- enrichr(List_IDs$IDH2$Indirect, databases = path_2_analyse_BP) %>% lapply(function(path){
+   dplyr::filter(path, P.value < 0.05)
+}) %>% data.table::rbindlist()
+
+plotEnrich(Enriched_MOLM13_IDH2_Methylome_BP, orderBy = "Adjusted.P.value", title = "Pathway enriched in mIDH2 MOLM13")
+```
+
+```{r}
+plotEnrich(Enriched_MOLM13_IDH2_Methylome, orderBy = "Adjusted.P.value", title = "", showTerms = 40, numChar = 60) %>%
+  ggsave(filename = "~/GitHub/Thesis_paper/Results/Epigenomic/Molm13_analysis/EnrichR/IDH2_MOLM13.png", plot = .)
+
+Enriched_MOLM13_IDH2_Methylome %>%
+  write.table("~/GitHub/Thesis_paper/Results/Epigenomic/Molm13_analysis/EnrichR/IDH2_MOLM13.tsv")
+  
+plotEnrich(Enriched_MOLM13_IDH1_Methylome, orderBy = "Adjusted.P.value", title = "", showTerms = 40, numChar = 60) %>%
+  ggsave(filename = "~/GitHub/Thesis_paper/Results/Epigenomic/Molm13_analysis/EnrichR/IDH1_MOLM13.png", plot = .)
+
+Enriched_MOLM13_IDH1_Methylome %>%
+  write.table("~/GitHub/Thesis_paper/Results/Epigenomic/Molm13_analysis/EnrichR/IDH1_MOLM13.tsv")
+
+
+
+
+plotEnrich(Enriched_MOLM13_IDH2_Methylome_BP, orderBy = "Adjusted.P.value", title = "", showTerms = 40, numChar = 60) %>%
+  ggsave(filename = "~/GitHub/Thesis_paper/Results/Epigenomic/Molm13_analysis/EnrichR/IDH2_MOLM13_BP.png", plot = .)
+
+Enriched_MOLM13_IDH2_Methylome_BP %>%
+  write.table("~/GitHub/Thesis_paper/Results/Epigenomic/Molm13_analysis/EnrichR/IDH2_MOLM13_BP.tsv")
+  
+plotEnrich(Enriched_MOLM13_IDH1_Methylome_BP, orderBy = "Adjusted.P.value", title = "", showTerms = 40, numChar = 60) %>%
+  ggsave(filename = "~/GitHub/Thesis_paper/Results/Epigenomic/Molm13_analysis/EnrichR/IDH1_MOLM13_BP.png", plot = .)
+
+Enriched_MOLM13_IDH1_Methylome_BP %>%
+  write.table("~/GitHub/Thesis_paper/Results/Epigenomic/Molm13_analysis/EnrichR/IDH1_MOLM13_BP.tsv")
+```
+
+```{r}
+Enriched_K562_IDH1 <- enrichr(List_DEGs_cell_lines$`IDH1.K562-IDH2.K562`$UP, databases = path_2_analyse) %>% lapply(function(path){
+   dplyr::filter(path, P.value < 0.05)
+}) %>% data.table::rbindlist()
+
+plotEnrich(Enriched_K562_IDH1, orderBy = "Adjusted.P.value", title = "Pathway enriched in mIDH1 K562")
+
+Enriched_K562_IDH2 <- enrichr(List_DEGs_cell_lines$`IDH1.K562-IDH2.K562`$DOWN, databases = path_2_analyse) %>% lapply(function(path){
+   dplyr::filter(path, P.value < 0.05)
+}) %>% data.table::rbindlist()
+
+plotEnrich(Enriched_K562_IDH2, orderBy = "Adjusted.P.value", title = "Pathway enriched in mIDH2 K562")
+```
+
+```{r}
+plotEnrich(Enriched_K562_IDH1, orderBy = "Adjusted.P.value", title = "", showTerms = 40, numChar = 60) %>%
+  ggsave(filename = "~/GitHub/Thesis_paper/Results/Transcriptomique/Molm_K562_data/Figures/EnrichR/EnrichR_analysis/IDH1_K562.png", plot = .)
+
+Enriched_K562_IDH1 %>%
+  write.table("~/GitHub/Thesis_paper/Results/Transcriptomique/Molm_K562_data/Figures/EnrichR/EnrichR_analysis/IDH1_K562.tsv")
+  
+plotEnrich(Enriched_K562_IDH2, orderBy = "Adjusted.P.value", title = "", showTerms = 40, numChar = 60) %>%
+  ggsave(filename = "~/GitHub/Thesis_paper/Results/Transcriptomique/Molm_K562_data/Figures/EnrichR/EnrichR_analysis/IDH2_K562.png", plot = .)
+
+Enriched_K562_IDH2 %>%
+  write.table("~/GitHub/Thesis_paper/Results/Transcriptomique/Molm_K562_data/Figures/EnrichR/EnrichR_analysis/IDH2_K562.tsv")
+```
+
+
+
 
 # Network analysis
 

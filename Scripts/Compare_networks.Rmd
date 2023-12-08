@@ -1,0 +1,93 @@
+---
+title: "Compare networks"
+author: Alexis Hucteau
+date: "`r Sys.Date()`"
+output:
+    html_document:
+      toc: yes
+      toc_float: yes
+      theme: united
+editor_options:
+  markdown:
+    wrap: sentence
+---
+
+```{r}
+rm(list = ls())
+```
+
+```{r}
+library(dplyr)
+library(igraph)
+```
+
+
+```{r}
+BEATAML_ARACNe_network <- read.table("../Results/DGEA/Networks_Beataml/network.txt", sep = "\t", header = T)
+colnames(BEATAML_ARACNe_network)[1:2] <- c("tf", "target")
+
+TCGA_ARACNe_network <- read.table("../Results/DGEA/Networks/network.txt", sep = "\t", header = T)
+colnames(TCGA_ARACNe_network)[1:2] <- c("tf", "target")
+
+All_sample_ARACNe_network <- read.table("../../Multiplex_DNAmet_PPI_Chrom_Coexp/Output_all_Samples_TPM/network.txt", sep = "\t", header = T)
+colnames(All_sample_ARACNe_network)[1:2] <- c("tf", "target")
+
+TUH_ARACNe_network <- read.table("../Results/DGEA/Networks_TUH/network.txt", sep = "\t", header = T)
+colnames(TUH_ARACNe_network)[1:2] <- c("tf", "target")
+
+Verhaak_ARACNe_network <- read.table("../Results/DGEA/Networks_Verhaak/network.txt", sep = "\t", header = T)
+colnames(Verhaak_ARACNe_network)[1:2] <- c("tf", "target")
+
+Dorothea_hs <- read.table("../Datasets/Dorothea.tsv", header = T)
+
+Regulonaml_SYMBOL <- read.table("../Datasets/regulonaml_SYMBOL.tsv", header = T)
+```
+
+```{r}
+Compare_network <- function(network_1, network_2){
+  igraph_net_1 <- igraph::graph.data.frame(network_1)
+  igraph_net_2 <- igraph::graph.data.frame(network_2)
+  sapply(1:nrow(network_1), function(edg){
+    from <- network_1[edg, 1]
+    to <- network_1[edg, 2]
+    if((from %in% network_2[,1] | from %in% network_2[,2]) & (to %in% network_2[,1] | to %in% network_2[,2])){
+      distances(igraph_net_2, v = network_1[edg, 1], to = network_1[edg, 2])
+    }else{
+      0
+    }
+  })
+}
+```
+
+```{r}
+Koichi_BEATAML <- Compare_network(All_sample_ARACNe_network, BEATAML_ARACNe_network)
+Regulonlaml_Dorothea <- Compare_network(Regulonaml_SYMBOL, Dorothea_hs)
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

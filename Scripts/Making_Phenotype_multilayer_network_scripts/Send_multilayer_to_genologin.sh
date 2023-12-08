@@ -13,7 +13,7 @@ do
     cd $pheno
     file=$pheno\_multilayer_infomap.edges
     echo $file
-    sshpass -p "135264/kayht/2024" scp $file ahucteau@genologin.toulouse.inra.fr:work/Final_Multilayers/$pheno/
+    sshpass -p PASSWORD scp $file ahucteau@genologin.toulouse.inra.fr:work/Final_Multilayers/$pheno/
     cd ..
   fi
 done

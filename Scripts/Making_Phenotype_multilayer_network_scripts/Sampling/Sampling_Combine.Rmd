@@ -71,7 +71,7 @@ Intra_layer_links <- function(Layer_1, Layer_2, Layer_3, Layer_4){
 Folder_multilayers <- "~/GitHub/Thesis_paper/Results/Multi_layer_pheno_like/Final_mutlilayer/mIDH2_NR/"
 Folder_Samples <- "~/GitHub/Thesis_paper/Results/Multi_layer_pheno_like/Sampling/"
 
-Layers_All_links_multi_layer_intra_scaled <- lapply(1:3, function(layer){
+Layers_All_links_multi_layer_intra_scaled <- lapply(4:4, function(layer){
   lapply(1:20, function(Sample){
     layer_1 <- read.table(paste0(Folder_multilayers, "Layer_1/Network.tsv"), 
                         sep = "\t", header = T)
@@ -91,6 +91,9 @@ Layers_All_links_multi_layer_intra_scaled <- lapply(1:3, function(layer){
     }else if(layer == 3){
       layer_3 <- read.table(paste0(Folder_Samples, "Layer_3/Network_", Sample, ".tsv"), 
                         sep = "\t", header = T)
+    }else if(layer == 4){
+      layer_4 <- read.table(paste0(Folder_Samples, "Layer_4/", Sample, "_Reactions_weighted.tsv"),
+                        sep = "\t", header = T, quote = "\"")
     }
     layer_1$weight <- layer_1$weight %>% as.numeric
     layer_2$weight_corr <- layer_2$weight_corr %>% as.numeric
@@ -102,6 +105,41 @@ Layers_All_links_multi_layer_intra_scaled <- lapply(1:3, function(layer){
 })
 names(Layers_All_links_multi_layer_intra_scaled) <- c("Layer_1", "Layer_2", "Layer_3")
 ```
+
+```{r}
+Layers_All_links_multi_layer_intra_scaled[["Layer_4"]] <- lapply(1:20, function(Sample){
+  layer <- 4
+  layer_1 <- read.table(paste0(Folder_multilayers, "Layer_1/Network.tsv"), 
+                      sep = "\t", header = T)
+  layer_2 <- read.table(paste0(Folder_multilayers, "Layer_2/mIDH2_NR_GRN_network.tsv"),
+                        sep = "\t", header = T) %>%
+    .[c(1,2,5)]
+  layer_3 <- read.table(paste0(Folder_multilayers, "Layer_3/PPI.tsv"),
+                      sep = "\t", header = T) 
+  layer_4 <- read.table(paste0(Folder_multilayers, "Layer_4/mIDH2_NR_Reactions_weighted.tsv"),
+                      sep = "\t", header = T, quote = "\"") 
+  if(layer == 1){
+    layer_1 <- read.table(paste0(Folder_Samples, "Layer_1/Network_", Sample, ".tsv"), 
+                      sep = "\t", header = T)
+  }else if(layer == 2){
+    layer_2 <- read.table(paste0(Folder_Samples, "Layer_2/Network_", Sample, ".tsv"), 
+                      sep = "\t", header = T)
+  }else if(layer == 3){
+    layer_3 <- read.table(paste0(Folder_Samples, "Layer_3/Network_", Sample, ".tsv"), 
+                      sep = "\t", header = T)
+  }else if(layer == 4){
+    layer_4 <- read.table(paste0(Folder_Samples, "Layer_4/", Sample, "_Reactions_weighted.tsv"),
+                      sep = "\t", header = T, quote = "\"")
+  }
+  layer_1$weight <- layer_1$weight %>% as.numeric
+  layer_2$weight_corr <- layer_2$weight_corr %>% as.numeric
+  layer_3$weight <- layer_3$weight %>% as.numeric
+  layer_4$scaled_weight <- layer_4$scaled_weight %>% as.numeric
+
+  Intra_layer_links(layer_1, layer_2, layer_3, layer_4)
+})
+```
+
 
 ```{r}
 Create_Custom_Inter_layer_links <- function(Intra_layer, Layer_conversion, layer){
@@ -197,11 +235,12 @@ names(Inter_layered) <- c("Layer_1", "Layer_2", "Layer_3")
 ```
 
 ```{r}
-Layer_1_interlayered_odd <- mclapply(seq(1,20, by = 2), function(sampling){
-  res <- Create_Custom_Inter_layer_links(Layers_All_links_multi_layer_intra_scaled[["Layer_1"]][[sampling]], layer_1_dataconversion, 1)
+Inter_layered[["Layer_4"]] <- mclapply(1:20, function(sampling){
+  res <- Create_Custom_Inter_layer_links(Layers_All_links_multi_layer_intra_scaled[["Layer_4"]][[sampling]], layer_1_dataconversion, 1)
   res <- Create_Custom_Inter_layer_links(res, layer_4_dataconversion, 4)
   res
 }, mc.cores = 2)
+
 ```
 
 
@@ -272,11 +311,20 @@ names(Multi_layers_scaled) <- c("Layer_1", "Layer_2", "Layer_3")
 ```
 
 ```{r}
+Multi_layers_scaled[["Layer_4"]] <- mclapply(1:20, function(samples){
+  ID_conversion <- Inter_layered[["Layer_4"]][[samples]][["ID_conversion"]]
+  Intra_links <- Scaling_intralayer_connection(Inter_layered[["Layer_4"]][[samples]])
+  list("ID_conversion" = ID_conversion, "Intra_links" = Intra_links)
+}, mc.cores = 2)
+```
+
+
+```{r}
 Folder_multilayers <- "~/GitHub/Thesis_paper/Results/Multi_layer_pheno_like/Sampling/Multilayers/"
 
 Make_Multilayer_file <- function(Multilayer, Class, Layer){
-  vertices <- Multilayer[[Class]][["ID_conversion"]]
-  multilayer <- Multilayer[[Class]][["Intra_links"]]
+  vertices <- Multilayer[[Layer]][[Class]][["ID_conversion"]]
+  multilayer <- Multilayer[[Layer]][[Class]][["Intra_links"]]
   multilayer <- multilayer[,c(2,1,4,3,5)]
   
   dir.create(paste0(Folder_multilayers, Layer), showWarnings = F)
@@ -326,7 +374,7 @@ Make_Multilayer_file <- function(Multilayer, Class, Layer){
 
 
 ```{r}
-mclapply(names(Multi_layers_scaled), function(Class){
+mclapply(names(Multi_layers_scaled)[4], function(Class){
   mclapply(1:20, function(samples){
     Make_Multilayer_file(Multi_layers_scaled, samples, Class)
     NULL

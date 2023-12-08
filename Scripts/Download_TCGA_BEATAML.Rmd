@@ -1,0 +1,183 @@
+---
+title: "Download TCGA and BEATAML data"
+author: Alexis Hucteau
+date: "`r Sys.Date()`"
+output:
+    html_document:
+      toc: yes
+      toc_float: yes
+      theme: united
+editor_options:
+  markdown:
+    wrap: sentence
+---
+
+#### DOWNLOADING TCGA data
+
+```{r}
+rm(list = ls())
+
+suppressPackageStartupMessages({
+  library(TCGAbiolinks)
+  library(stringr)
+  library(dplyr)
+  library(ChAMP)
+  library(minfi)
+})
+```
+
+```{r}
+Download_data <- function(Sample_of_cases, project) {
+  dir.create(paste0("/media/alexis/DATA/", project))
+  res <- list()
+  if(project != "BEATAML1.0-COHORT"){
+    query <- GDCquery(project = project,
+                      legacy = TRUE,
+                      data.category = "DNA methylation",
+                      platform = "Illumina Human Methylation 450",
+                      barcode = Sample_of_cases$Case.ID)
+    GDCdownload(query)
+    res[["MET"]] <- GDCprepare(query = query,
+                               save = TRUE, 
+                               summarizedExperiment = TRUE, 
+                               save.filename = paste0("/media/alexis/DATA/", project, "/DATA_met", deparse(substitute(Sample_of_cases)), "_data.rda"))
+  }
+  query2 <- GDCquery(project = project, 
+                     legacy = FALSE, 
+                     data.category = "Transcriptome Profiling", 
+                     workflow.type = "STAR - Counts", 
+                     data.type = "Gene Expression Quantification",
+                     barcode = Sample_of_cases$Case.ID)
+  GDCdownload(query2)
+  res[["RNAseq"]] <- GDCprepare(query = query2,
+                                save = TRUE,
+                                summarizedExperiment = TRUE,
+                                save.filename = paste0("/media/alexis/DATA/", project, "/DATA_RNAseq", deparse(substitute(Sample_of_cases)), "_data.rda"))
+  return(res)
+}
+
+```
+
+```{r}
+TCGA_wtIDH <- read.delim("~/GitHub/Thesis_paper/Datasets/TCGA_IDHwt.tsv")
+TCGA_mIDH1 <- read.delim("~/GitHub/Thesis_paper/Datasets/TCGA_IDH1.tsv")
+TCGA_mIDH2 <- read.delim("../Datasets/TCGA_IDH2.tsv")
+```
+
+```{r}
+TCGA_wtIDH_data <- Download_data(TCGA_wtIDH, "TCGA-LAML")
+TCGA_wtIDH_data_MET <- TCGA_wtIDH_data[["MET"]]@assays@data@listData[[1]]
+TCGA_wtIDH_data_RNASeq <- TCGA_wtIDH_data[["RNAseq"]]@assays@data@listData[["tpm_unstrand"]]
+
+
+TCGA_mIDH1_data <- Download_data(TCGA_mIDH1, "TCGA-LAML")
+TCGA_mIDH1_data_MET <- TCGA_mIDH1_data[["MET"]]@assays@data@listData[[1]]
+TCGA_mIDH1_data_RNASeq <- TCGA_mIDH1_data[["RNAseq"]]@assays@data@listData[["tpm_unstrand"]]
+
+
+TCGA_mIDH2_data <- Download_data(TCGA_mIDH2, "TCGA-LAML")
+TCGA_mIDH2_data_MET <- TCGA_mIDH2_data[["MET"]]@assays@data@listData[[1]]
+TCGA_mIDH2_data_RNASeq <- TCGA_mIDH2_data[["RNAseq"]]@assays@data@listData[["tpm_unstrand"]]
+```
+
+```{r}
+RawBeta <- cbind(TCGA_wtIDH_data_MET, TCGA_mIDH1_data_MET)
+RawBeta <- cbind(RawBeta, TCGA_mIDH2_data_MET)
+colnames(RawBeta) <- substr(colnames(RawBeta), 1, 12)
+
+Phenotype <- ifelse(colnames(RawBeta) %in% TCGA_mIDH1$Case.ID, "mIDH1", 
+                                          ifelse(colnames(RawBeta) %in% TCGA_mIDH2$Case.ID, "mIDH2", "wtIDH"))
+Phenotype
+champ.QC(beta = RawBeta, pheno = Phenotype, resultsDir = "./Rawbeta_QC")
+
+BMIQ <- champ.norm(beta = na.omit(RawBeta), method = "BMIQ", plotBMIQ = TRUE, cores = 12)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#### BEATAML data methylation
+
+```{r}
+Beataml_wd <- "/media/alexis/DATA/BEATAML_DNAmethylation/GSE159907_RAW"
+
+DNA_samples_conversion <- read.table("../Datasets/DNA_samples_conversion.tsv", sep = "\t")
+DNA_BEATAML_samples_conversion <- DNA_samples_conversion %>%
+  dplyr::filter(stringr::str_detect(V2, pattern = "Beat"))
+
+# DNA_Useless_samples_conversion <- DNA_samples_conversion %>%
+#   dplyr::filter(!stringr::str_detect(V2, pattern = "Beat"))
+
+# sapply(list.files(Beataml_wd), function(files){
+#   sapply(DNA_Useless_samples_conversion$V1, function(useless_file){
+#     if(stringr::str_detect(files, pattern = useless_file)){
+#       file.remove(paste0(Beataml_wd, files))
+#     }
+#   })
+# })
+
+write.table(DNA_BEATAML_samples_conversion, "/media/alexis/DATA/BEATAML_DNAmethylation/Data_conversion.tsv", col.names = F, sep = "\t")
+Clinical_Beataml <- read.table("../Datasets/Clinical_BEATAML_data.tsv", sep = "\t", header = T)
+```
+
+```{r}
+Pheno <- read.table("/media/alexis/DATA/BEATAML_DNAmethylation/GSE159907_RAW/Phenotypes.csv", sep = ",", header = T)
+
+Pheno <- dplyr::filter(Pheno, Sample_Name %in% DNA_BEATAML_samples_conversion$V1)
+write.table(Pheno, "/media/alexis/DATA/BEATAML_DNAmethylation/GSE159907_RAW/Phenotypes.csv", sep = ",", row.names = F)
+```
+
+```{r}
+RGSet <- read.metharray.exp(Beataml_wd, recursive = T, force = TRUE, verbose = F)
+RGSet <- convertArray(RGSet, outType = paste0("IlluminaHumanMethylation", array_type))
+RawBeta <- champ.load(Beataml_wd, arraytype = "EPIC")
+
+```
+
+
+
+#### BEATAML data transcription
+
+```{r}
+BEATAML_IDHwt <- read.table("../Datasets/BEATAML_IDHwt.tsv", sep = "\t", header = T)
+BEATAML_mIDH1 <- read.table("../Datasets/BEATAML_IDH1.tsv", sep = "\t", header = T)
+BEATAML_mIDH2 <- read.table("../Datasets/BEATAML_IDH2.tsv", sep = "\t", header = T)
+
+```
+
+```{r}
+BEATAML_IDHwt_data <- Download_data(BEATAML_IDHwt, "BEATAML1.0-COHORT")
+BEATAML_IDHwt_data_RNASeq <- BEATAML_IDHwt_data[["RNAseq"]]@assays@data@listData[["tpm_unstrand"]]
+
+BEATAML_mIDH1_data <- Download_data(BEATAML_mIDH1, "BEATAML1.0-COHORT")
+BEATAML_mIDH1_data_RNASeq <- BEATAML_mIDH1_data[["RNAseq"]]@assays@data@listData[["tpm_unstrand"]]
+
+BEATAML_mIDH2_data <- Download_data(BEATAML_mIDH2, "BEATAML1.0-COHORT")
+BEATAML_mIDH2_data_RNASeq <- BEATAML_mIDH2_data[["RNAseq"]]@assays@data@listData[["tpm_unstrand"]]
+```
+
+
+

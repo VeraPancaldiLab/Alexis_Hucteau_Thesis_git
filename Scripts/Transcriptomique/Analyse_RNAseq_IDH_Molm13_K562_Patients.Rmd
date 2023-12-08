@@ -41,6 +41,7 @@ library(DESeq2)
 library(edgeR)
 library(sva)
 library(EnhancedVolcano)
+library(enrichR)
 
 cores2use <- detectCores() -2
 
@@ -176,7 +177,7 @@ ggsave("~/GitHub/Thesis_paper/Results/Transcriptomique/Molm_K562_data/Figures/PC
 
 ```{r}
 mart <- biomaRt::useMart(biomart = "ENSEMBL_MART_ENSEMBL",
-                         dataset = "hsapiens_gene_ensembl")
+                          dataset = "hsapiens_gene_ensembl", host = "https://www.ensembl.org")
 
 genes <- getBM(filters = "ensembl_gene_id",
                attributes = c("ensembl_gene_id","entrezgene_id", "hgnc_symbol"),
@@ -467,6 +468,207 @@ ggsave("~/GitHub/Thesis_paper/Results/Transcriptomique/Molm_K562_data/Figures/GO
        height = 5700, units = "px", limitsize = FALSE)
 ```
 
+## EnrichR analysis
+
+```{r}
+websiteLive <- getOption("enrichR.live")
+if (websiteLive) {
+    listEnrichrSites()
+    setEnrichrSite("Enrichr") # Human genes   
+}
+```
+
+```{r}
+if (websiteLive) dbs <- listEnrichrDbs()
+
+path_2_analyse <- c("GO_Biological_Process_2023" , "GO_Cellular_Component_2023", "GO_Molecular_Function_2023", "KEGG_2021_Human", "WikiPathway_2023_Human", "Reactome_2022")
+```
+
+```{r}
+Enriched_MOLM13_IDH1 <- enrichr(List_DEGs_cell_lines$`IDH1.Molm13-IDH2.Molm13`$UP, databases = path_2_analyse) %>% lapply(function(path){
+   dplyr::filter(path, P.value < 0.05)
+}) %>% data.table::rbindlist()
+
+plotEnrich(Enriched_MOLM13_IDH1, orderBy = "Adjusted.P.value", title = "Pathway enriched in mIDH1 MOLM13")
+
+Enriched_MOLM13_IDH2 <- enrichr(List_DEGs_cell_lines$`IDH1.Molm13-IDH2.Molm13`$DOWN, databases = path_2_analyse) %>% lapply(function(path){
+   dplyr::filter(path, P.value < 0.05)
+}) %>% data.table::rbindlist()
+
+plotEnrich(Enriched_MOLM13_IDH2, orderBy = "Adjusted.P.value", title = "Pathway enriched in mIDH2 MOLM13")
+```
+
+```{r}
+plotEnrich(Enriched_MOLM13_IDH2, orderBy = "Adjusted.P.value", title = "", showTerms = 40, numChar = 60) %>%
+  ggsave(filename = "~/GitHub/Thesis_paper/Results/Transcriptomique/Molm_K562_data/Figures/EnrichR/EnrichR_analysis/IDH2_MOLM13.png", plot = .)
+
+Enriched_MOLM13_IDH2 %>%
+  write.table("~/GitHub/Thesis_paper/Results/Transcriptomique/Molm_K562_data/Figures/EnrichR/EnrichR_analysis/IDH2_MOLM13.tsv")
+  
+plotEnrich(Enriched_MOLM13_IDH1, orderBy = "Adjusted.P.value", title = "", showTerms = 40, numChar = 60) %>%
+  ggsave(filename = "~/GitHub/Thesis_paper/Results/Transcriptomique/Molm_K562_data/Figures/EnrichR/EnrichR_analysis/IDH1_MOLM13.png", plot = .)
+
+Enriched_MOLM13_IDH1 %>%
+  write.table("~/GitHub/Thesis_paper/Results/Transcriptomique/Molm_K562_data/Figures/EnrichR/EnrichR_analysis/IDH1_MOLM13.tsv")
+```
+
+```{r}
+Enriched_K562_IDH1 <- enrichr(List_DEGs_cell_lines$`IDH1.K562-IDH2.K562`$UP, databases = path_2_analyse) %>% lapply(function(path){
+   dplyr::filter(path, P.value < 0.05)
+}) %>% data.table::rbindlist()
+
+plotEnrich(Enriched_K562_IDH1, orderBy = "Adjusted.P.value", title = "Pathway enriched in mIDH1 K562")
+
+Enriched_K562_IDH2 <- enrichr(List_DEGs_cell_lines$`IDH1.K562-IDH2.K562`$DOWN, databases = path_2_analyse) %>% lapply(function(path){
+   dplyr::filter(path, P.value < 0.05)
+}) %>% data.table::rbindlist()
+
+plotEnrich(Enriched_K562_IDH2, orderBy = "Adjusted.P.value", title = "Pathway enriched in mIDH2 K562")
+```
+
+```{r}
+plotEnrich(Enriched_K562_IDH1, orderBy = "Adjusted.P.value", title = "", showTerms = 40, numChar = 60) %>%
+  ggsave(filename = "~/GitHub/Thesis_paper/Results/Transcriptomique/Molm_K562_data/Figures/EnrichR/EnrichR_analysis/IDH1_K562.png", plot = .)
+
+Enriched_K562_IDH1 %>%
+  write.table("~/GitHub/Thesis_paper/Results/Transcriptomique/Molm_K562_data/Figures/EnrichR/EnrichR_analysis/IDH1_K562.tsv")
+  
+plotEnrich(Enriched_K562_IDH2, orderBy = "Adjusted.P.value", title = "", showTerms = 40, numChar = 60) %>%
+  ggsave(filename = "~/GitHub/Thesis_paper/Results/Transcriptomique/Molm_K562_data/Figures/EnrichR/EnrichR_analysis/IDH2_K562.png", plot = .)
+
+Enriched_K562_IDH2 %>%
+  write.table("~/GitHub/Thesis_paper/Results/Transcriptomique/Molm_K562_data/Figures/EnrichR/EnrichR_analysis/IDH2_K562.tsv")
+```
+
+# GSEA Analysis
+
+```{r}
+Do_enrichment_analysis <- function(Genes_ENTREZ, Title){
+  genes_ENTREZ <- Genes_ENTREZ[order(Genes_ENTREZ, decreasing = T)]
+  gse <- tryCatch(
+    {
+      re <- gseGO(genes_ENTREZ, 
+            OrgDb        = org.Hs.eg.db, 
+            keyType = "ENTREZID",
+            ont          = "all",
+            minGSSize    = 1,
+            maxGSSize    = 1000,
+            pvalueCutoff = 0.1,
+            verbose      = T, 
+            pAdjustMethod = "none") %>%
+        setReadable(OrgDb = org.Hs.eg.db, keyType = "ENTREZID")
+      re
+      },
+    error = function(cond) {
+            message("ERROR")
+            message("Here's the original error message:")
+            message(cond)
+            # Choose a return value in case of error
+            return(NULL)
+    }
+  )
+  message("KEGG Starting")
+  kse <- tryCatch(
+    {
+      re <- gseKEGG(genes_ENTREZ, minGSSize = 2, 
+                    pvalueCutoff = 0.1, pAdjustMethod = "none", 
+                    verbose = F, organism = 'hsa', 
+                    keyType = 'ncbi-geneid') %>%
+        setReadable(OrgDb = org.Hs.eg.db, keyType = "ENTREZID")
+      re
+    }, 
+    error = function(cond) {
+            message("ERROR")
+            message("Here's the original error message:")
+            message(cond)
+            # Choose a return value in case of error
+            return(NULL)
+    }
+  )
+  message("KEGG DONE")
+
+  kegg_enrich <- Enrichments_plots(kse, Title, "KEGG", genes_ENTREZ)
+  go_enrich <- Enrichments_plots(gse, Title, "GO", genes_ENTREZ)
+  
+  list("KEGG" = kegg_enrich,
+       "GO" = go_enrich)
+}
+
+Make_enrichggplot <- function(gsea, Title){
+  y <- arrange(gsea, abs(NES)) %>% 
+        group_by(sign(NES)) %>% 
+        dplyr::slice(1:5)
+  res <- ggplot(y, aes(NES, fct_reorder(Description, NES), fill=pvalue), showCategory=20) + 
+    geom_col(orientation='y') + 
+    scale_fill_continuous(low='red', high='blue', guide=guide_colorbar(reverse=TRUE)) + 
+    theme_minimal() + ylab(NULL) + ggtitle(Title)
+  res
+}
+
+Enrichments_plots <- function(GeneSetEnrichment, Title, EnrichmentName, Genes_ENTREZ){
+  print(paste(Title, EnrichmentName))
+  if(!is.null(GeneSetEnrichment)){
+    GeneSetEnrichment_sign <- GeneSetEnrichment@result %>% dplyr::filter(pvalue < 0.1 & setSize > 1) %>% nrow
+    if(GeneSetEnrichment_sign > 0){
+      y <- Make_enrichggplot(GeneSetEnrichment, paste(Title, EnrichmentName))
+      tmp <- GeneSetEnrichment
+      tmp@result <- tmp@result %>% dplyr::filter(setSize > 1)
+      max_geneset <- tmp@result %>% dplyr::filter(pvalue < 0.1) %>% nrow
+      edox <- setReadable(tmp, 'org.Hs.eg.db', 'ENTREZID')
+      options(ggrepel.max.overlaps = Inf)
+      max_geneset <- ifelse(max_geneset > 40, 40, max_geneset)
+      d <- enrichplot::dotplot(edox, showCategory = 30) + facet_grid(.~.sign) + ggtitle(paste(Title, EnrichmentName))
+      v <- cnetplot(edox, foldChange=Genes_ENTREZ, node_label = "all") + ggtitle(paste(Title, EnrichmentName))
+      list("Enrichment_barplot" = y,
+           "Cnetplot" = v,
+           "Enrichment_dotplot" = d,
+           "Readable_enrichment" = edox)
+    }else{
+      NULL
+    }
+  }else{
+    NULL
+  }
+}
+
+Auto_set_readable <- function(Results_cluster_KEGG_WP){
+  setReadable(Results_cluster_KEGG_WP, OrgDb = org.Hs.eg.db, keyType = "ENTREZID")
+}
+```
+
+```{r}
+GSEA_expression_cell_lines_analysis <- lapply(names(DEG_analysis_usefull), function(comparison){
+  df <- DEG_analysis_usefull[[comparison]]
+  geneset <- df$logFC
+  names(geneset) <- df$entrezgene_id
+  
+  Do_enrichment_analysis(geneset, comparison)
+})
+names(GSEA_expression_cell_lines_analysis) <- names(DEG_analysis_usefull)
+```
+
+
+```{r}
+Cnetplot <- mclapply(names(GSEA_expression_cell_lines_analysis), function(Comparisons){
+  pcnet <- lapply(names(GSEA_expression_cell_lines_analysis[[Comparisons]]), function(Ontology){
+    if(!is.null(GSEA_expression_cell_lines_analysis[[Comparisons]][[Ontology]][["Cnetplot"]])){
+      dir.create(paste0("~/GitHub/Thesis_paper/Results/Transcriptomique/Molm_K562_data/Figures/",
+                    Comparisons, "_Comparison"))
+      cnet <- GSEA_expression_cell_lines_analysis[[Comparisons]][[Ontology]][["Cnetplot"]]
+      # barplot <- GSEA_expression_cell_lines_analysis[[Comparisons]][[Ontology]][["Enrichment_barplot"]]
+      dotplot <- GSEA_expression_cell_lines_analysis[[Comparisons]][[Ontology]][["Enrichment_dotplot"]]
+      ggsave(paste0("~/GitHub/Thesis_paper/Results/Transcriptomique/Molm_K562_data/Figures/",
+                    Comparisons, "_Comparison/", Comparisons, "_", Ontology, "_cnetplot.png"),
+             cnet, bg = "white", width = 5700, height = 5700, units = "px",  limitsize = FALSE)
+      ggsave(paste0("~/GitHub/Thesis_paper/Results/Transcriptomique/Molm_K562_data/Figures/",
+                    Comparisons, "_Comparison/", Comparisons, "_", Ontology, "_dotplot.png"), 
+             dotplot, bg = "white", height = 4000, units = "px")
+    }
+  }) 
+}, mc.cores = cores2use)
+```
+
+
 
 
 
@@ -592,8 +794,10 @@ Down_IDH2_IDH1_Proteo_Molm13 <- dplyr::filter(Proteomic_cell_lines, IDH2_vs_IDH1
   .$gene_name %>% unique()
 
 Down_IDH2_IDH1_Proteo_Molm13_entrez <- dplyr::filter(genes, hgnc_symbol %in% Down_IDH2_IDH1_Proteo_Molm13) %>% .$entrezgene_id
+```
 
 
+```{r}
 Enrich_IDH2_GO_Proteo_Molm13 <- enrichGO(Up_IDH2_IDH1_Proteo_Molm13, OrgDb = org.Hs.eg.db, keyType = "SYMBOL", universe = universe_Proteo_Molm13, pAdjustMethod = "none", pvalueCutoff = 0.05)
 Enrich_IDH2_GO_Proteo_Molm13@result$qvalue <- Enrich_IDH2_GO_Proteo_Molm13@result$pvalue
 
@@ -684,8 +888,8 @@ ggsave("~/GitHub/Thesis_paper/Results/In_vitro/IDH1_vs_IDH2_Molm13_KEGG_up_cnetp
 ## GSEA
 
 ```{r}
-IDH2_IDH1_4_GSEA <- Proteomic_cell_lines %>% dplyr::filter(IDH2_vs_IDH1_t.test < 0.05) %>% .$IDH2_vs_IDH1_logFC
-names(IDH2_IDH1_4_GSEA) <- Proteomic_cell_lines %>% dplyr::filter(IDH2_vs_IDH1_t.test < 0.05) %>% .$gene_name
+IDH2_IDH1_4_GSEA <- Proteomic_cell_lines  %>% .$IDH2_vs_IDH1_logFC
+names(IDH2_IDH1_4_GSEA) <- Proteomic_cell_lines  %>% .$gene_name
 IDH2_IDH1_4_GSEA <- IDH2_IDH1_4_GSEA[order(IDH2_IDH1_4_GSEA, decreasing = T)]
 
 IDH2_IDH1_4_GSEA_KEGG <- Proteomic_cell_lines %>% .$IDH2_vs_IDH1_logFC
@@ -693,49 +897,59 @@ names(IDH2_IDH1_4_GSEA_KEGG) <- Proteomic_cell_lines %>% .$gene_name
 IDH2_IDH1_4_GSEA_KEGG <- IDH2_IDH1_4_GSEA_KEGG[order(IDH2_IDH1_4_GSEA_KEGG, decreasing = T)]
 
 
-head(IDH2_IDH1_4_GSEA)
+IDH2_IDH1_4_GSEA_KEGG <- IDH2_IDH1_4_GSEA_KEGG %>%
+  .[!duplicated(names(.))]
 
-names_entrez_gsea_kegg <- sapply(names(IDH2_IDH1_4_GSEA_KEGG), function(genenames){
-  id <- dplyr::filter(genes, hgnc_symbol == genenames) %>% .$entrezgene_id
+
+
+names_entrez_gsea_kegg <- sapply(1:length(names(IDH2_IDH1_4_GSEA_KEGG)), function(genenames){
+  id <- dplyr::filter(genes, hgnc_symbol == names(IDH2_IDH1_4_GSEA_KEGG)[genenames]) %>% .$entrezgene_id
   id <- unique(id)
   if(length(id) >1){
-    id[1]
+    id <- id[1]
   }else{
-    id
+    id <- id
   }
+  value <- IDH2_IDH1_4_GSEA_KEGG[[genenames]]
+  names(value) <- id
+  value
 })
   
 empty <- sapply(names(names_entrez_gsea_kegg), function(gene_name){
+  if(is.null(names_entrez_gsea_kegg[[gene_name]]) | gene_name){
+    0
+  }else{
   length(names_entrez_gsea_kegg[[gene_name]])
+  }
 })
 
 
-IDH2_IDH1_4_GSEA_KEGG <- IDH2_IDH1_4_GSEA_KEGG[empty == 1]
-names(IDH2_IDH1_4_GSEA_KEGG) <- names_entrez_gsea %>% unlist
+IDH2_IDH1_4_GSEA_KEGG_final <- names_entrez_gsea_kegg
 ```
 
 
 ```{r}
-GSEA_IDH2_vs_IDH1_Proteo_Molm <- gseGO(IDH2_IDH1_4_GSEA, OrgDb = org.Hs.eg.db, keyType = "SYMBOL", ont = "all",
+GSEA_IDH2_vs_IDH1_Proteo_Molm <- gseGO(IDH2_IDH1_4_GSEA, OrgDb = org.Hs.eg.db, keyType = "SYMBOL", ont = "BP",
             minGSSize = 1, maxGSSize = 1000, pvalueCutoff = 0.05, verbose = F)
 
-GSEA_KEGG_IDH2_vs_IDH1_Proteo_Molm <- gseKEGG(IDH2_IDH1_4_GSEA_KEGG, keyType = "ncbi-geneid", minGSSize = 1, maxGSSize = 1000, pvalueCutoff = 0.05, verbose = F)
+GSEA_KEGG_IDH2_vs_IDH1_Proteo_Molm <- gseKEGG(IDH2_IDH1_4_GSEA_KEGG_final, keyType = "ncbi-geneid", minGSSize = 1, maxGSSize = 1000, pvalueCutoff = 0.1, verbose = F)
 
 ```
 
 ```{r}
 n <- 20
 
-dot_GSEA <- dotplot(GSEA_IDH2_vs_IDH1_Proteo_Molm, showCategory = n) 
+dot_GSEA <- enrichplot::dotplot(GSEA_IDH2_vs_IDH1_Proteo_Molm, showCategory = n) + facet_grid(.~.sign) 
+
 dot_GSEA
-ridge_GSEA <- ridgeplot(GSEA_IDH2_vs_IDH1_Proteo_Molm, showCategory = n)
+ridge_GSEA <- ridgeplot(GSEA_IDH2_vs_IDH1_Proteo_Molm, showCategory = n) + facet_grid(.~.sign) 
 ridge_GSEA
 Cnet_GSEA <- cnetplot(GSEA_IDH2_vs_IDH1_Proteo_Molm, foldChange = IDH2_IDH1_4_GSEA, showCategory = n)
 Cnet_GSEA
 
 height_param <- n*4*120 +200
-ggsave("~/GitHub/Thesis_paper/Results/In_vitro/IDH2_vs_IDH1_Molm13_dot_GSEA.png", dot_GSEA, bg = "white", width = 5700, 
-       height = 5700, units = "px", limitsize = FALSE)
+ggsave("~/GitHub/Thesis_paper/Results/In_vitro/IDH2_vs_IDH1_Molm13_dot_GSEA.png", dot_GSEA, bg = "white", width = 2100, 
+       height = 2850, units = "px", limitsize = FALSE)
 ggsave("~/GitHub/Thesis_paper/Results/In_vitro/IDH2_vs_IDH1_Molm13_ridge_GSEA.png", ridge_GSEA, bg = "white", width = 5700, 
        height = 5700, units = "px", limitsize = FALSE)
 ggsave("~/GitHub/Thesis_paper/Results/In_vitro/IDH2_vs_IDH1_Molm13_Cnet_GSEA.png", Cnet_GSEA, bg = "white", width = 5700, 
@@ -743,15 +957,15 @@ ggsave("~/GitHub/Thesis_paper/Results/In_vitro/IDH2_vs_IDH1_Molm13_Cnet_GSEA.png
 ```
 
 ```{r}
-dot_GSEA_KEGG <- dotplot(GSEA_KEGG_IDH2_vs_IDH1_Proteo_Molm, showCategory = 20) 
+dot_GSEA_KEGG <- dotplot(GSEA_KEGG_IDH2_vs_IDH1_Proteo_Molm, showCategory = 20) + facet_grid(.~.sign) 
 dot_GSEA_KEGG
 ridge_GSEA_KEGG <- ridgeplot(GSEA_KEGG_IDH2_vs_IDH1_Proteo_Molm)
 ridge_GSEA_KEGG
-Cnet_GSEA_KEGG <- GSEA_KEGG_IDH2_vs_IDH1_Proteo_Molm %>% Auto_set_readable %>% cnetplot(foldChange = IDH2_IDH1_4_GSEA_KEGG)
+Cnet_GSEA_KEGG <- GSEA_KEGG_IDH2_vs_IDH1_Proteo_Molm %>% Auto_set_readable %>% cnetplot(foldChange = IDH2_IDH1_4_GSEA_KEGG_final)
 Cnet_GSEA_KEGG
 
-ggsave("~/GitHub/Thesis_paper/Results/In_vitro/IDH2_vs_IDH1_Molm13_dot_GSEA_KEGG.png", dot_GSEA_KEGG, bg = "white", width = 5700, 
-       height = 5700, units = "px", limitsize = FALSE)
+ggsave("~/GitHub/Thesis_paper/Results/In_vitro/IDH2_vs_IDH1_Molm13_dot_GSEA_KEGG.png", dot_GSEA_KEGG, bg = "white", width = 2100, 
+       height = 2850, units = "px", limitsize = FALSE)
 ggsave("~/GitHub/Thesis_paper/Results/In_vitro/IDH2_vs_IDH1_Molm13_ridge_GSEA_KEGG.png", ridge_GSEA_KEGG, bg = "white", width = 5700, 
        height = 5700, units = "px", limitsize = FALSE)
 ggsave("~/GitHub/Thesis_paper/Results/In_vitro/IDH2_vs_IDH1_Molm13_Cnet_GSEA_KEGG.png", Cnet_GSEA_KEGG, bg = "white", width = 5700, 
@@ -786,5 +1000,36 @@ intersect(Diff_genes_up_IDH2, Diff_prot_up_IDH2)
 
 ```{r}
 intersect(Diff_genes_up_IDH1, Diff_prot_up_IDH1)
+```
+
+# EnrichR proteo
+
+
+```{r}
+Enriched_MOLM13_IDH2_Proteo <- enrichr(Up_IDH2_IDH1_Proteo_Molm13, databases = path_2_analyse) %>% lapply(function(path){
+   dplyr::filter(path, P.value < 0.05)
+}) %>% data.table::rbindlist()
+```
+
+```{r}
+Enriched_MOLM13_IDH1_Proteo <- enrichr(Down_IDH2_IDH1_Proteo_Molm13, databases = path_2_analyse) %>% lapply(function(path){
+   dplyr::filter(path, P.value < 0.05)
+}) %>% data.table::rbindlist()
+```
+
+## Plot and safe
+
+```{r}
+plotEnrich(Enriched_MOLM13_IDH2_Proteo, orderBy = "Adjusted.P.value", title = "", showTerms = 40, numChar = 60) %>%
+  ggsave(filename = "~/GitHub/Thesis_paper/Results/Proteo/Molm_K562_data/EnrichR/IDH2_MOLM13.png", plot = .)
+
+Enriched_MOLM13_IDH2_Proteo %>%
+  write.table("~/GitHub/Thesis_paper/Results/Proteo/Molm_K562_data/EnrichR/IDH2_MOLM13.tsv")
+  
+plotEnrich(Enriched_MOLM13_IDH1_Proteo, orderBy = "Adjusted.P.value", title = "", showTerms = 40, numChar = 60) %>%
+  ggsave(filename = "~/GitHub/Thesis_paper/Results/Proteo/Molm_K562_data/EnrichR/IDH1_MOLM13.png", plot = .)
+
+Enriched_MOLM13_IDH1_Proteo %>%
+  write.table("~/GitHub/Thesis_paper/Results/Proteo/Molm_K562_data/EnrichR/IDH1_MOLM13.tsv")
 ```
 
