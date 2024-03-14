@@ -1,0 +1,5 @@
+layerID layerLabel
+1 3D_chromatin_network
+2 Gene_regulatory_network
+3 Functionnal_Protein_protein_network
+4 Metabolic_network
